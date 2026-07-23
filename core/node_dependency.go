@@ -439,6 +439,9 @@ main();
 func readNodeDependencies(plugin nodeDependencyPlugin) ([]nodeDependencyRow, error) {
 	manifest := nodeDependencyManifest{}
 	dir := plugin.Path
+	if err := ensureNodePackageJSON(dir, plugin.Name); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(dir, "package.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -573,8 +576,17 @@ var nodeBuiltinModules = map[string]bool{
 
 func ensureNodePackageJSON(dir, pluginName string) error {
 	path := filepath.Join(dir, "package.json")
-	if _, err := os.Stat(path); err == nil {
+	if data, err := os.ReadFile(path); err == nil {
+		normalized, changed, err := normalizeNodePackageJSON(data, pluginName)
+		if err != nil {
+			return fmt.Errorf("package.json 解析失败：%v", err)
+		}
+		if changed {
+			return os.WriteFile(path, normalized, 0644)
+		}
 		return nil
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	manifest := nodeDependencyManifest{
 		Name:         safePackageName(pluginName),
@@ -587,6 +599,70 @@ func ensureNodePackageJSON(dir, pluginName string) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+func normalizeNodePackageJSON(data []byte, pluginName string) ([]byte, bool, error) {
+	manifest := map[string]interface{}{}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, false, err
+	}
+	changed := false
+	if strings.TrimSpace(fmt.Sprint(manifest["name"])) == "" || fmt.Sprint(manifest["name"]) == "<nil>" {
+		manifest["name"] = safePackageName(pluginName)
+		changed = true
+	}
+	if strings.TrimSpace(fmt.Sprint(manifest["version"])) == "" || fmt.Sprint(manifest["version"]) == "<nil>" {
+		manifest["version"] = "1.0.0"
+		changed = true
+	}
+	if _, ok := manifest["private"]; !ok {
+		manifest["private"] = true
+		changed = true
+	}
+	for _, field := range []string{"dependencies", "devDependencies"} {
+		value, exists := manifest[field]
+		if !exists {
+			continue
+		}
+		normalized, fieldChanged := normalizeNodePackageDependencyField(value)
+		if fieldChanged {
+			manifest[field] = normalized
+			changed = true
+		}
+	}
+	if !changed {
+		return data, false, nil
+	}
+	normalized, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, false, err
+	}
+	return append(normalized, '\n'), true, nil
+}
+
+func normalizeNodePackageDependencyField(value interface{}) (map[string]string, bool) {
+	if value == nil {
+		return map[string]string{}, true
+	}
+	raw, ok := value.(map[string]interface{})
+	if !ok {
+		return map[string]string{}, true
+	}
+	normalized := map[string]string{}
+	changed := false
+	for name, version := range raw {
+		text, ok := version.(string)
+		if !ok {
+			text = strings.TrimSpace(fmt.Sprint(version))
+			changed = true
+		}
+		if text == "" || text == "<nil>" {
+			text = "*"
+			changed = true
+		}
+		normalized[name] = text
+	}
+	return normalized, changed
 }
 
 func safePackageName(name string) string {

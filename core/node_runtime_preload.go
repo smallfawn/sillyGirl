@@ -165,9 +165,95 @@ const nodeRuntimePreloadScript = `
     userList() { return this.request("GET", "/api/accounts"); }
   }
 
+  class daidai {
+    constructor(options) {
+      this.id = 0;
+      this.uuid = "";
+      this.name = "";
+      this.address = "";
+      this.token = "";
+      this.expiration = 0;
+      this.ready = this.init(options);
+    }
+    async init(options) {
+      const panels = await readPanels("daidai_panels");
+      const index = panelIndex(options);
+      if (index < 1 || index > panels.length) throw new Error("呆呆面板编号 " + (index || "") + " 不存在");
+      this.panel = panels[index - 1];
+      this.id = index;
+      this.uuid = this.panel.id || "";
+      this.name = this.panel.name || "";
+      this.address = String(this.panel.address || "").replace(/\/+$/, "");
+    }
+    async ensureToken() {
+      await this.ready;
+      const now = Math.floor(Date.now() / 1000);
+      if (this.token && this.expiration > now + 60) return;
+      const resp = await fetch(this.address + "/api/open-api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ app_key: this.panel.app_key, app_secret: this.panel.app_secret }),
+      });
+      const result = await resp.json();
+      const data = result.data || {};
+      if (!resp.ok || !data.access_token) throw new Error(result.message || result.error || ("呆呆面板认证失败：HTTP " + resp.status));
+      this.token = data.access_token;
+      this.expiration = now + Number(data.expires_in || 86400);
+    }
+    async request(method, path, body, query) {
+      await this.ensureToken();
+      const resp = await fetch(this.address + apiPath(path, "/api") + queryString(query), {
+        method: String(method || "GET").toUpperCase(),
+        headers: Object.assign({ Authorization: "Bearer " + this.token }, body == null ? {} : { "Content-Type": "application/json" }),
+        body: body == null ? undefined : JSON.stringify(body),
+      });
+      const text = await resp.text();
+      const result = text ? JSON.parse(text) : {};
+      if (!resp.ok) throw new Error(result.message || result.error || ("呆呆面板接口 HTTP " + resp.status));
+      if (result.success === false) throw new Error(result.message || result.error || "呆呆面板接口请求失败");
+      return result;
+    }
+    async getEnvs(options) { const r = await this.request("GET", "/envs", undefined, typeof options === "string" ? { keyword: options } : options || {}); return r.data ?? r; }
+    async getEnvById(id) { const r = await this.request("GET", "/envs/" + id); return r.data ?? r; }
+    async createEnv(env) { const r = await this.request("POST", "/envs", env); return r.data ?? r; }
+    async updateEnv(env) {
+      const id = env && (env.id ?? env.ID);
+      const body = Object.assign({}, env || {});
+      delete body.id;
+      delete body.ID;
+      const r = await this.request("PUT", id ? "/envs/" + id : "/envs", body);
+      return r.data ?? r;
+    }
+    async deleteEnv(id) { return this.request("DELETE", "/envs/" + id); }
+    async deleteEnvs(value) { return this.request("DELETE", "/envs/batch", { ids: ids(value) }); }
+    async enableEnv(id) { const r = await this.request("PUT", "/envs/" + id + "/enable"); return r.data ?? r; }
+    async disableEnv(id) { const r = await this.request("PUT", "/envs/" + id + "/disable"); return r.data ?? r; }
+    async enableEnvs(value) { return this.request("PUT", "/envs/batch/enable", { ids: ids(value) }); }
+    async disableEnvs(value) { return this.request("PUT", "/envs/batch/disable", { ids: ids(value) }); }
+    async getTasks(options) { const r = await this.request("GET", "/tasks", undefined, typeof options === "string" ? { keyword: options } : options || {}); return r.data ?? r; }
+    async getTaskById(id) { const r = await this.request("GET", "/tasks/" + id); return r.data ?? r; }
+    async createTask(task) { const r = await this.request("POST", "/tasks", task); return r.data ?? r; }
+    async updateTask(task) {
+      const id = task && (task.id ?? task.ID);
+      const body = Object.assign({}, task || {});
+      delete body.id;
+      delete body.ID;
+      const r = await this.request("PUT", id ? "/tasks/" + id : "/tasks", body);
+      return r.data ?? r;
+    }
+    async deleteTask(id) { return this.request("DELETE", "/tasks/" + id); }
+    async runTask(id) { return this.request("PUT", "/tasks/" + id + "/run"); }
+    async stopTask(id) { return this.request("PUT", "/tasks/" + id + "/stop"); }
+    async enableTask(id) { return this.request("PUT", "/tasks/" + id + "/enable"); }
+    async disableTask(id) { return this.request("PUT", "/tasks/" + id + "/disable"); }
+    async systemNotify(title, content) { return this.request("POST", "/notifications/send", { title, content }); }
+  }
+
   sg.qinglong = sg.qinglong || qinglong;
   sg.smallcat = sg.smallcat || smallcat;
+  sg.daidai = sg.daidai || daidai;
   globalThis.qinglong = sg.qinglong;
   globalThis.smallcat = sg.smallcat;
+  globalThis.daidai = sg.daidai;
 })();
 `

@@ -7,7 +7,7 @@
 | 文档 | 目标读者 | 内容概要 |
 |------|----------|----------|
 | [快速开始](quickstart.md) | 新用户 | 下载、安装、配置与第一个插件 |
-| [插件开发指南](plugin-dev.md) | 插件开发者 | 插件结构、注释元数据、JS API、青龙和 smallcat 内联函数详解与示例 |
+| [插件开发指南](plugin-dev.md) | 插件开发者 | 插件结构、注释元数据、JS API、青龙、smallcat 和呆呆面板内联函数详解与示例 |
 | [架构设计](architecture.md) | 进阶开发者 / 贡献者 | 核心模块设计、数据流、插件生命周期 |
 | [API 参考](api-reference.md) | 集成开发者 | REST、gRPC 与 JavaScript API 完整索引 |
 | [部署指南](deployment.md) | 运维人员 | 二进制、systemd、Docker、反向代理与集群 |

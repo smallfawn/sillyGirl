@@ -253,6 +253,7 @@ func SetPluginMethod(vm *goja.Runtime, uuid string, on_start bool, running func(
 	installPluginConfigHelpers(vm, uuid)
 	installQinglongRuntime(vm)
 	installSmallcatRuntime(vm)
+	installDaidaiRuntime(vm)
 	vm.Set("url2Base64", Url2Base64)
 	// 字符串转Base64编码
 	vm.Set("stringToBase64", stringToBase64)

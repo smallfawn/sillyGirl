@@ -143,3 +143,16 @@ export type SmallcatPanel = {
   status?: string;
   message?: string;
 };
+
+export type DaidaiPanel = {
+  id?: string;
+  name?: string;
+  address: string;
+  app_key: string;
+  app_secret: string;
+  created_at?: number;
+  updated_at?: number;
+  last_checked_at?: number;
+  status?: string;
+  message?: string;
+};

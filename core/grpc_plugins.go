@@ -471,6 +471,34 @@ declare class smallcat {
 	addUser(options: { code: string; type: number | string; displayName?: string }): Promise<any>;
 	userList(): Promise<any>;
 }
+declare class daidai {
+	id: number;
+	uuid: string;
+	name: string;
+	address: string;
+	constructor(options: { id: number | string });
+	request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
+	getEnvs(options?: Record<string, any> | string): Promise<any>;
+	getEnvById(id: number | string): Promise<any>;
+	createEnv(env: any): Promise<any>;
+	updateEnv(env: any): Promise<any>;
+	deleteEnv(id: number | string): Promise<any>;
+	deleteEnvs(ids: any): Promise<any>;
+	enableEnv(id: number | string): Promise<any>;
+	disableEnv(id: number | string): Promise<any>;
+	enableEnvs(ids: any): Promise<any>;
+	disableEnvs(ids: any): Promise<any>;
+	getTasks(options?: Record<string, any> | string): Promise<any>;
+	getTaskById(id: number | string): Promise<any>;
+	createTask(task: any): Promise<any>;
+	updateTask(task: any): Promise<any>;
+	deleteTask(id: number | string): Promise<any>;
+	runTask(id: number | string): Promise<any>;
+	stopTask(id: number | string): Promise<any>;
+	enableTask(id: number | string): Promise<any>;
+	disableTask(id: number | string): Promise<any>;
+	systemNotify(title: string, content: string): Promise<any>;
+}
 interface StorageModifier {
 	echo?: string;
 	now?: any;
@@ -521,7 +549,7 @@ declare let console: {
 	error(...args: any[]): void;
 	debug(...args: any[]): void;
 };
-export { Adapter, Bucket, qinglong, smallcat, sender, sleep, utils, console };
+export { Adapter, Bucket, qinglong, smallcat, daidai, sender, sleep, utils, console };
 `
 
 func defaultScript(title string) string {
@@ -539,6 +567,7 @@ const {
   Bucket,
   qinglong,
   smallcat,
+  daidai,
   utils: { buildCQTag, image, video },
 } = require("sillygirl");
 `

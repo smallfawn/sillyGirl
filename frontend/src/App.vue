@@ -56,7 +56,7 @@ import {
   Wand2,
 } from 'lucide-vue-next';
 import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
-import type { CarryGroup, CurrentUser, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
+import type { CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
 import { asArray, splitTags, timestamp } from './utils';
 
 type PageKey =
@@ -70,6 +70,7 @@ type PageKey =
   | 'carry'
   | 'qinglong'
   | 'smallcat'
+  | 'daidai'
   | 'masters'
   | 'messages'
   | 'plugin-configs'
@@ -126,6 +127,7 @@ const overviewIntegrations = computed(() => {
   const defaults = [
     { key: 'qinglong', label: '青龙容器' },
     { key: 'smallcat', label: 'smallcat' },
+    { key: 'daidai', label: '呆呆容器' },
   ];
   const rows = user.value?.integrations || {};
   return defaults.map((item) => {
@@ -161,6 +163,7 @@ const menuItems = [
   { key: 'carry', label: '搬运', icon: () => h(Radio, { size: 16 }) },
   { key: 'qinglong', label: '青龙容器', icon: () => h(Server, { size: 16 }) },
   { key: 'smallcat', label: 'smallcat', icon: () => h(Server, { size: 16 }) },
+  { key: 'daidai', label: '呆呆面板', icon: () => h(Server, { size: 16 }) },
   { key: 'masters', label: '管理员', icon: () => h(ShieldCheck, { size: 16 }) },
   { key: 'messages', label: '消息控制', icon: () => h(Boxes, { size: 16 }) },
   { key: 'settings', label: '基础设置', icon: () => h(Settings, { size: 16 }) },
@@ -818,6 +821,60 @@ async function removeSmallcatPanel(row: SmallcatPanel) {
   loadSmallcatPanels();
 }
 
+const daidai = reactive({
+  rows: [] as DaidaiPanel[],
+  total: 0,
+  loading: false,
+  editing: null as DaidaiPanel | null,
+  form: {} as DaidaiPanel,
+  testing: false,
+  saving: false,
+});
+async function loadDaidaiPanels() {
+  daidai.loading = true;
+  try {
+    const res = await get<{ data: DaidaiPanel[]; total: number }>('/api/daidai/panels');
+    daidai.rows = res.data || [];
+    daidai.total = res.total || 0;
+  } finally {
+    daidai.loading = false;
+  }
+}
+function openDaidaiPanel(row?: DaidaiPanel) {
+  const data = row || { name: '', address: '', app_key: '', app_secret: '' };
+  daidai.editing = data;
+  daidai.form = { ...data };
+}
+async function testDaidaiPanel(panel = daidai.form) {
+  daidai.testing = true;
+  try {
+    await post('/api/daidai/panel/test', panel);
+    message.success('呆呆面板连接成功');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '呆呆面板连接失败');
+  } finally {
+    daidai.testing = false;
+  }
+}
+async function saveDaidaiPanel() {
+  daidai.saving = true;
+  try {
+    await post('/api/daidai/panel', daidai.form);
+    daidai.editing = null;
+    message.success('呆呆面板已添加');
+    await loadDaidaiPanels();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '呆呆面板添加失败');
+  } finally {
+    daidai.saving = false;
+  }
+}
+async function removeDaidaiPanel(row: DaidaiPanel) {
+  await del('/api/daidai/panel', row);
+  message.success('已删除');
+  loadDaidaiPanels();
+}
+
 const plugins = reactive({
   rows: [] as PluginInfo[],
   total: 0,
@@ -1270,6 +1327,7 @@ watch([page, user], ([p]) => {
   if (p === 'carry') loadCarry();
   if (p === 'qinglong') loadQinglongPanels();
   if (p === 'smallcat') loadSmallcatPanels();
+  if (p === 'daidai') loadDaidaiPanels();
   if (p === 'dependencies') loadNodeDependencies();
   if (p === 'plugins') {
     loadPluginSources();
@@ -1364,6 +1422,7 @@ function recordOptions(record?: Record<string, string>) {
                 <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="脚本数量" :value="realScripts.length" /></Card></a-col>
                 <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="青龙容器" :value="overviewIntegrations.find((item) => item.key === 'qinglong')?.count || 0" /></Card></a-col>
                 <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="smallcat" :value="overviewIntegrations.find((item) => item.key === 'smallcat')?.count || 0" /></Card></a-col>
+                <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="呆呆容器" :value="overviewIntegrations.find((item) => item.key === 'daidai')?.count || 0" /></Card></a-col>
               </a-row>
               <div style="margin-top: 16px">
                 <div class="toolbar">
@@ -1735,6 +1794,45 @@ function recordOptions(record?: Record<string, string>) {
               </Table>
             </section>
 
+            <section v-if="page === 'daidai'" class="panel">
+              <div class="toolbar">
+                <div class="toolbar-left">
+                  <Button type="primary" @click="openDaidaiPanel()"><template #icon><Plus :size="16" /></template>添加呆呆面板</Button>
+                  <Button @click="loadDaidaiPanels"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                </div>
+                <Typography.Text class="muted">保存前会调用 /api/open-api/token，使用 app_key/app_secret 验证 Open API。</Typography.Text>
+              </div>
+              <Table row-key="id" :loading="daidai.loading" :data-source="daidai.rows" :pagination="{ total: daidai.total, pageSize: 20 }">
+                <Table.Column title="#" :width="72">
+                  <template #default="{ index }">{{ index + 1 }}</template>
+                </Table.Column>
+                <Table.Column title="名称" data-index="name" :width="180">
+                  <template #default="{ record }">
+                    <Typography.Text strong>{{ record.name || record.address }}</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="地址" data-index="address" ellipsis />
+                <Table.Column title="App Key" data-index="app_key" :width="220" ellipsis />
+                <Table.Column title="状态" data-index="status" :width="120">
+                  <template #default="{ record }">
+                    <Tag :color="record.status === 'online' ? 'green' : 'default'">{{ record.status === 'online' ? '在线' : '未检测' }}</Tag>
+                  </template>
+                </Table.Column>
+                <Table.Column title="最后检测" data-index="last_checked_at" :width="180">
+                  <template #default="{ text }">{{ timestamp(text) }}</template>
+                </Table.Column>
+                <Table.Column title="操作" :width="210">
+                  <template #default="{ record }">
+                    <Button type="text" @click="testDaidaiPanel(record)">检测</Button>
+                    <Button type="text" @click="openDaidaiPanel(record)">编辑</Button>
+                    <Popconfirm title="确认删除这个呆呆面板？" @confirm="removeDaidaiPanel(record)">
+                      <Button type="text" danger><Trash2 :size="16" /></Button>
+                    </Popconfirm>
+                  </template>
+                </Table.Column>
+              </Table>
+            </section>
+
             <section v-if="page === 'plugins'" class="panel">
               <Tabs v-model:active-key="plugins.tab" :items="[{ key: 'all', label: `全部 ${plugins.meta.all ?? ''}` }, { key: 'tab1', label: `已安装 ${plugins.meta.tab1 ?? ''}` }, { key: 'tab2', label: `未安装 ${plugins.meta.tab2 ?? ''}` }, { key: 'tab3', label: `可更新 ${plugins.meta.tab3 ?? ''}` }]" />
               <div class="toolbar-left" style="margin-bottom: 12px">
@@ -1982,6 +2080,26 @@ function recordOptions(record?: Record<string, string>) {
             <Input.Password v-model:value="smallcat.form.api_auth" />
           </Form.Item>
           <Button @click="testSmallcatPanel()" :loading="smallcat.testing">
+            <template #icon><RefreshCw :size="16" /></template>检测连接
+          </Button>
+        </Form>
+      </Modal>
+
+      <Modal :open="!!daidai.editing" title="呆呆面板" width="720px" :confirm-loading="daidai.saving" @cancel="daidai.editing = null" @ok="saveDaidaiPanel">
+        <Form layout="vertical">
+          <Form.Item label="名称">
+            <Input v-model:value="daidai.form.name" placeholder="例如：主呆呆" />
+          </Form.Item>
+          <Form.Item label="呆呆面板地址" required>
+            <Input v-model:value="daidai.form.address" placeholder="http://127.0.0.1:5701" />
+          </Form.Item>
+          <Form.Item label="App Key" required>
+            <Input v-model:value="daidai.form.app_key" />
+          </Form.Item>
+          <Form.Item label="App Secret" required>
+            <Input.Password v-model:value="daidai.form.app_secret" />
+          </Form.Item>
+          <Button @click="testDaidaiPanel()" :loading="daidai.testing">
             <template #icon><RefreshCw :size="16" /></template>检测连接
           </Button>
         </Form>

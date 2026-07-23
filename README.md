@@ -197,6 +197,38 @@ s.reply("扫码状态：" + checked.data.state);
 
 smallcat 返回值保持原始 API 响应，不额外改写。
 
+### daidai
+
+先在 Admin 面板「呆呆面板」中添加地址、`app_key`、`app_secret`。脚本里按页面编号创建实例：
+
+```js
+const dd = new daidai({ id: 1 });
+```
+
+常用方法：
+
+| 方法 | 说明 |
+|------|------|
+| `getEnvs(options)` | 获取环境变量，支持 `{ keyword }` |
+| `getEnvById(id)` | 获取单个环境变量 |
+| `createEnv(env)` | 新增环境变量 |
+| `updateEnv(env)` | 更新环境变量，建议包含 `id` |
+| `deleteEnv(id)` / `deleteEnvs(ids)` | 删除单个或批量删除环境变量 |
+| `enableEnv(id)` / `disableEnv(id)` | 启用或禁用单个环境变量 |
+| `getTasks(options)` | 获取任务列表，支持 `{ keyword }` |
+| `runTask(id)` / `stopTask(id)` | 运行或停止任务 |
+| `request(method, path, body, query)` | 调用其他呆呆面板 API |
+
+示例：
+
+```js
+const dd = new daidai({ id: 1 });
+const envs = dd.getEnvs({ keyword: "JD_COOKIE" });
+s.reply("呆呆面板变量数量：" + envs.length);
+```
+
+注意：`new daidai({ id: 1 })` 只接受对象参数，不支持 `new daidai(1)`。
+
 ### Cron
 
 ```js
@@ -235,6 +267,7 @@ Web 插件需要声明 `@web true`。
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
 | 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new qinglong({ id })` 调用 |
 | smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new smallcat({ id })` 调用 |
+| 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new daidai({ id })` 调用 |
 | 适配器 | 内置 QQ、Telegram Bot、Web 适配器，并提供 Pagermaid 桥接脚本 |
 | 定时任务 | 支持 Cron 表达式和脚本触发 |
 | Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub 镜像 |

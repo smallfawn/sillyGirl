@@ -11,6 +11,7 @@ SillyGirl 的插件系统基于 [Goja](https://github.com/dop251/goja) JavaScrip
   - [Bucket(name)](#bucketname)
   - [qinglong 内联客户端](#qinglong-内联客户端)
   - [smallcat 内联客户端](#smallcat-内联客户端)
+  - [daidai 内联客户端](#daidai-内联客户端)
   - [Cron()](#cron)
   - [Express()](#express)
   - [其他全局函数](#其他全局函数)
@@ -391,6 +392,87 @@ console.log(users.status, users.message, users.data && users.data.items);
 - `new smallcat({ id: 1 })` 只接受对象参数，不支持 `new smallcat(1)`。
 - `addUser` 只接受对象参数，推荐写 `sc.addUser({ code: "xxxxx", type: 1, displayName: "备注" })`。
 - 只有网络失败、请求体编码失败、JSON 解析失败这类没有 smallcat 原始响应的情况，运行时才会返回 `{ status: false, message: "..." }`。
+
+### daidai 内联客户端
+
+`daidai` 是呆呆面板的脚本内联客户端。先在 Admin 面板左侧「呆呆面板」中添加地址、`app_key`、`app_secret`，再在脚本里按页面表格编号创建实例。
+
+```js
+const dd = new daidai({ id: 1 });
+```
+
+构造参数必须是对象：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | number/string | 是 | 呆呆面板页面中的顺序编号，从 `1` 开始 |
+
+实例基础属性：
+
+```js
+dd.id       // 当前编号
+dd.uuid     // 面板内部 UUID
+dd.name     // 面板名称
+dd.address  // 呆呆面板地址
+```
+
+环境变量方法：
+
+| 方法 | 对应呆呆面板 API | 参数 | 返回 |
+|------|------------------|------|------|
+| `getEnvs(options)` | `GET /api/envs` | `{ keyword?: string, page?: number, page_size?: number }` 或搜索字符串 | 呆呆返回的 `data` |
+| `getEnvById(id)` | `GET /api/envs/:id` | 环境变量 ID | 呆呆返回的 `data` |
+| `createEnv(env)` | `POST /api/envs` | 单个环境变量对象或数组 | 呆呆返回的 `data` |
+| `updateEnv(env)` | `PUT /api/envs/:id` | 环境变量对象，建议包含 `id` | 呆呆返回的 `data` |
+| `deleteEnv(id)` | `DELETE /api/envs/:id` | 环境变量 ID | 原始 API 响应 |
+| `deleteEnvs(ids)` | `DELETE /api/envs/batch` | ID、ID 数组或逗号分隔字符串 | 原始 API 响应 |
+| `enableEnv(id)` / `disableEnv(id)` | `PUT /api/envs/:id/enable` / `disable` | 环境变量 ID | 呆呆返回的 `data` |
+| `enableEnvs(ids)` / `disableEnvs(ids)` | `PUT /api/envs/batch/enable` / `disable` | ID 集合 | 原始 API 响应 |
+
+任务方法：
+
+| 方法 | 对应呆呆面板 API | 参数 | 返回 |
+|------|------------------|------|------|
+| `getTasks(options)` | `GET /api/tasks` | `{ keyword?: string, page?: number, page_size?: number }` 或搜索字符串 | 呆呆返回的 `data` |
+| `getTaskById(id)` | `GET /api/tasks/:id` | 任务 ID | 呆呆返回的 `data` |
+| `createTask(task)` | `POST /api/tasks` | 任务对象 | 呆呆返回的 `data` |
+| `updateTask(task)` | `PUT /api/tasks/:id` | 任务对象，建议包含 `id` | 呆呆返回的 `data` |
+| `deleteTask(id)` | `DELETE /api/tasks/:id` | 任务 ID | 原始 API 响应 |
+| `runTask(id)` / `stopTask(id)` | `PUT /api/tasks/:id/run` / `stop` | 任务 ID | 原始 API 响应 |
+| `enableTask(id)` / `disableTask(id)` | `PUT /api/tasks/:id/enable` / `disable` | 任务 ID | 原始 API 响应 |
+
+通用调用：
+
+```js
+dd.request(method, path, body, query);
+```
+
+`request` 会自动通过 `/api/open-api/token` 获取 `Bearer` token，并返回呆呆面板原始响应对象，适合调用上表之外的 API。
+
+示例：
+
+```js
+const dd = new daidai({ id: 1 });
+
+const envs = dd.getEnvs({ keyword: "JD_COOKIE" });
+console.log("匹配数量", envs.length);
+
+const created = dd.createEnv({
+  name: "TEST_TOKEN",
+  value: "123456",
+  remarks: "脚本创建测试",
+});
+
+dd.disableEnv(created.id);
+dd.enableEnv(created.id);
+dd.deleteEnv(created.id);
+```
+
+注意：
+
+- `new daidai({ id: 1 })` 只接受对象参数，不支持 `new daidai(1)`。
+- 编号按「呆呆面板」页面当前列表顺序，从 `1` 开始。
+- 除 `request` 外，封装方法默认返回呆呆响应里的 `data`；HTTP 非 2xx 或 `success: false` 会抛出脚本异常。
 
 ### Cron()
 
