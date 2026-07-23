@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG BUILDPLATFORM
-ARG TARGETPLATFORM
-
-FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS frontend
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS frontend
 WORKDIR /src
 
 COPY frontend/package*.json ./frontend/
