@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v1.2.3. Defaults to the current ref name."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build release assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: vars
+        shell: bash
+        run: |
+          input_version="$(jq -r '.inputs.version // ""' "${GITHUB_EVENT_PATH}")"
+          if [[ -n "${input_version}" ]]; then
+            version="${input_version}"
+            publish_release="true"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME}"
+            publish_release="true"
+          else
+            version="dev-${GITHUB_SHA::7}"
+            publish_release="false"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "publish_release=${publish_release}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run build
+
+      - name: Build binaries
+        shell: bash
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist build
+          ldflags="-s -w -X github.com/smallfawn/sillyGirl/core.compiled_at=${VERSION}"
+
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r goos goarch <<< "${target}"
+            name="sillyGirl_${VERSION}_${goos}_${goarch}"
+            binary="${name}"
+            if [[ "${goos}" == "windows" ]]; then
+              binary="${name}.exe"
+            fi
+
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags="${ldflags}" \
+              -o "build/${binary}" .
+
+            if [[ "${goos}" == "windows" ]]; then
+              (cd build && zip "../dist/${name}.zip" "${binary}")
+            else
+              tar -czf "dist/${name}.tar.gz" -C build "${binary}"
+            fi
+          done
+
+          sha256sum dist/* > dist/checksums.txt
+
+      - name: Publish GitHub Release
+        if: steps.vars.outputs.publish_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.version }}
+          name: SillyGirl ${{ steps.vars.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: dist/*
+
+      - name: Upload build artifacts
+        if: steps.vars.outputs.publish_release != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sillyGirl-${{ steps.vars.outputs.version }}
+          path: dist/*
+
+  docker:
+    name: Build and push Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image metadata
+        id: vars
+        shell: bash
+        run: |
+          input_version="$(jq -r '.inputs.version // ""' "${GITHUB_EVENT_PATH}")"
+          if [[ -n "${input_version}" ]]; then
+            version="${input_version}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME}"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "ghcr_image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "${GITHUB_OUTPUT}"
+          echo "dockerhub_image=docker.io/smallfawn/sillygirl" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ steps.vars.outputs.version }}
+          tags: |
+            ${{ steps.vars.outputs.ghcr_image }}:${{ steps.vars.outputs.version }}
+            ${{ steps.vars.outputs.ghcr_image }}:latest
+            ${{ steps.vars.outputs.dockerhub_image }}:${{ steps.vars.outputs.version }}
+            ${{ steps.vars.outputs.dockerhub_image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.vars.outputs.version }}

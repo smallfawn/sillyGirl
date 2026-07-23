@@ -1,0 +1,10 @@
+.git
+.github
+.runlogs
+frontend/node_modules
+frontend/dist
+core/admin/assets
+tmp
+*.log
+*.exe
+*.db
