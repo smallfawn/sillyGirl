@@ -30,12 +30,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags="-s -w -X github.com/smallfawn/sillyGirl/core.compiled_at=${VERSION}" \
     -o /out/sillyGirl .
 
-FROM --platform=$TARGETPLATFORM debian:bookworm-slim
+FROM --platform=$TARGETPLATFORM node:24-bookworm-slim
 WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && corepack prepare pnpm@11.16.0 --activate \
     && mkdir -p /data/plugins /data/conf /data/language \
     && ln -s /data/plugins /app/plugins \
     && ln -s /data/conf /app/conf \

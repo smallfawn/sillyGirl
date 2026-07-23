@@ -3,6 +3,8 @@
 [![Go Version](https://img.shields.io/badge/Go-1.18+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+DOCKER镜像加速地址查看
+https://status.1panel.top/
 ## Docker 快速部署
 
 ```bash
