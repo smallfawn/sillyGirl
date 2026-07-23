@@ -80,6 +80,111 @@ const nodeRuntimePreloadScript = `
     return [value];
   }
 
+  function normalizeSchema(value) {
+    if (value && value.__schemaNode && value.schema) return value.schema;
+    if (value && typeof value.toJSON === "function") return value.toJSON();
+    if (Array.isArray(value)) return value.map((item) => normalizeSchema(item));
+    if (value && typeof value === "object") {
+      const result = {};
+      for (const key of Object.keys(value)) {
+        if (key.startsWith("_") || key === "__schemaNode") continue;
+        result[key] = normalizeSchema(value[key]);
+      }
+      return result;
+    }
+    return value;
+  }
+
+  function collectSchemaDefaults(schema) {
+    schema = normalizeSchema(schema) || {};
+    if (Object.prototype.hasOwnProperty.call(schema, "default")) return schema.default;
+    if (schema.type === "object" || schema.properties) {
+      const values = {};
+      for (const key of Object.keys(schema.properties || {})) {
+        const value = collectSchemaDefaults(schema.properties[key]);
+        if (value !== undefined) values[key] = value;
+      }
+      return values;
+    }
+    if (schema.type === "array") return [];
+    return undefined;
+  }
+
+  function SchemaNode(type, extra) {
+    this.__schemaNode = true;
+    this.schema = Object.assign({ type: type }, extra || {});
+  }
+  SchemaNode.prototype.setTitle = function (value) { this.schema.title = value; return this; };
+  SchemaNode.prototype.setDescription = function (value) { this.schema.description = value; return this; };
+  SchemaNode.prototype.setDefault = function (value) { this.schema.default = value; return this; };
+  SchemaNode.prototype.setEnum = function (value) { this.schema.enum = value; return this; };
+  SchemaNode.prototype.setEnumNames = function (value) { this.schema.enumNames = value; return this; };
+  SchemaNode.prototype.setRequired = function (value) { this.schema.required = value; return this; };
+  SchemaNode.prototype.setFormat = function (value) { this.schema.format = value; return this; };
+  SchemaNode.prototype.setMin = function (value) { this.schema.minimum = value; return this; };
+  SchemaNode.prototype.setMax = function (value) { this.schema.maximum = value; return this; };
+  SchemaNode.prototype.setMinLength = function (value) { this.schema.minLength = value; return this; };
+  SchemaNode.prototype.setMaxLength = function (value) { this.schema.maxLength = value; return this; };
+  SchemaNode.prototype.setPattern = function (value) { this.schema.pattern = value; return this; };
+  SchemaNode.prototype.setWidget = function (value) { this.schema["ui:widget"] = value; return this; };
+  SchemaNode.prototype.toJSON = function () { return this.schema; };
+
+  const SillyGirlCreateSchema = {
+    string: function () { return new SchemaNode("string"); },
+    number: function () { return new SchemaNode("number"); },
+    integer: function () { return new SchemaNode("integer"); },
+    boolean: function () { return new SchemaNode("boolean"); },
+    array: function (item) { return new SchemaNode("array", { items: normalizeSchema(item) || {} }); },
+    object: function (props) {
+      const properties = {};
+      for (const key of Object.keys(props || {})) properties[key] = normalizeSchema(props[key]);
+      return new SchemaNode("object", { properties });
+    },
+  };
+
+  class SillyGirlPluginConfig {
+    constructor(schema) {
+      this.uuid = process.env.PLUGIN_ID || "";
+      this.jsonSchema = normalizeSchema(schema) || {};
+      if (!this.jsonSchema.type) this.jsonSchema.type = "object";
+      this.userConfig = {};
+      if (process.env.PLUGIN_CONFIG_JSON) {
+        try {
+          const value = JSON.parse(process.env.PLUGIN_CONFIG_JSON);
+          if (value && typeof value === "object" && !Array.isArray(value)) this.userConfig = value;
+        } catch (_) {}
+      }
+      this.ready = this.init();
+    }
+    async init() {
+      if (!this.uuid) return this.userConfig;
+      await new Bucket("plugin_config_schemas").set(this.uuid, this.jsonSchema);
+      this.userConfig = await new Bucket("plugin_config_values").get(this.uuid, {});
+      return this.userConfig;
+    }
+    async get() {
+      await this.ready;
+      this.userConfig = await new Bucket("plugin_config_values").get(this.uuid, {});
+      return this.userConfig;
+    }
+    async Get() {
+      return this.get();
+    }
+    async set(values) {
+      await this.ready;
+      if (values && typeof values === "object") this.userConfig = values;
+      await new Bucket("plugin_config_values").set(this.uuid, this.userConfig || {});
+      return { error: "" };
+    }
+    async Set(values) {
+      return this.set(values);
+    }
+  }
+
+  function Form(schema) {
+    return new SillyGirlPluginConfig(schema);
+  }
+
   class qinglong {
     constructor(options) {
       this.id = 0;
@@ -256,8 +361,16 @@ const nodeRuntimePreloadScript = `
   sg.qinglong = sg.qinglong || qinglong;
   sg.smallcat = sg.smallcat || smallcat;
   sg.daidai = sg.daidai || daidai;
+  sg.SillyGirlCreateSchema = sg.SillyGirlCreateSchema || SillyGirlCreateSchema;
+  sg.SillyGirlPluginConfig = sg.SillyGirlPluginConfig || SillyGirlPluginConfig;
+  sg.Form = sg.Form || Form;
+  sg.pluginConfigDefaults = sg.pluginConfigDefaults || collectSchemaDefaults;
   globalThis.qinglong = sg.qinglong;
   globalThis.smallcat = sg.smallcat;
   globalThis.daidai = sg.daidai;
+  globalThis.SillyGirlCreateSchema = sg.SillyGirlCreateSchema;
+  globalThis.SillyGirlPluginConfig = sg.SillyGirlPluginConfig;
+  globalThis.Form = sg.Form;
+  globalThis.pluginConfigDefaults = sg.pluginConfigDefaults;
 })();
 `

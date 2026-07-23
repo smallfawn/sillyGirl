@@ -301,6 +301,7 @@ onMounted(() => {
 });
 
 const scriptState = reactive({ content: '', loading: false });
+const scriptCreateState = reactive({ open: false, fileName: '新脚本.js', saving: false });
 const scriptEditorHost = ref<HTMLElement | null>(null);
 const scriptEditorEditable = new Compartment();
 let scriptEditorView: EditorView | null = null;
@@ -456,10 +457,41 @@ async function removeScript() {
   navigate('scripts');
 }
 
+function openCreateScriptModal() {
+  scriptCreateState.fileName = '新脚本.js';
+  scriptCreateState.open = true;
+}
+
+function normalizeCreateScriptFileName() {
+  const fileName = scriptCreateState.fileName.trim();
+  if (!fileName) return '';
+  if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) return fileName;
+  return /\.js$/i.test(fileName) ? fileName : `${fileName}.js`;
+}
+
 async function createScript() {
-  const res = await post<{ data: { id: string } }>('/api/node/script', { name: '新脚本' });
-  await loadUser();
-  if (res.data.id) navigate('scripts', `/admin/script/${res.data.id}`);
+  const fileName = normalizeCreateScriptFileName();
+  if (!fileName) {
+    message.error('请输入脚本文件名');
+    return;
+  }
+  if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) {
+    message.error('脚本文件名不合法');
+    return;
+  }
+  if (!/\.js$/i.test(fileName)) {
+    message.error('脚本文件名必须是 .js 文件');
+    return;
+  }
+  scriptCreateState.saving = true;
+  try {
+    const res = await post<{ data: { id: string } }>('/api/node/script', { name: fileName });
+    scriptCreateState.open = false;
+    await loadUser();
+    if (res.data.id) navigate('scripts', `/admin/script/${res.data.id}`);
+  } finally {
+    scriptCreateState.saving = false;
+  }
 }
 
 function selectScriptFile(item: { path?: string; name?: string }) {
@@ -1489,7 +1521,7 @@ function recordOptions(record?: Record<string, string>) {
                     <template #prefix><Search :size="15" /></template>
                   </Input>
                   <div class="script-file-actions">
-                    <Button type="primary" block @click="createScript"><template #icon><Plus :size="16" /></template>新增脚本</Button>
+                    <Button type="primary" block @click="openCreateScriptModal"><template #icon><Plus :size="16" /></template>新增脚本</Button>
                     <Button block @click="loadUser"><template #icon><RefreshCw :size="16" /></template>刷新列表</Button>
                   </div>
                   <div class="script-file-list">
@@ -1991,6 +2023,21 @@ function recordOptions(record?: Record<string, string>) {
           <Menu mode="inline" :selected-keys="[page]" :items="menuItems" style="border-inline-end: 0; padding-top: 8px" @click="(e:any) => navigate(e.key)" />
         </a-drawer>
       </Layout>
+
+      <Modal
+        v-model:open="scriptCreateState.open"
+        title="新增脚本插件"
+        :confirm-loading="scriptCreateState.saving"
+        ok-text="确认创建"
+        cancel-text="取消"
+        @ok="createScript"
+      >
+        <Form layout="vertical">
+          <Form.Item label="脚本文件名" required extra="只支持当前插件目录下的 .js 文件；不填写后缀会自动补全 .js。">
+            <Input v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign.js" @press-enter="createScript" />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal :open="!!replies.editing" title="回复规则" @cancel="replies.editing = null" @ok="saveReply">
         <Form layout="vertical"><Form.Item label="关键词/正则"><Input v-model:value="replies.form.keyword" /></Form.Item><Form.Item label="回复内容"><Input.TextArea v-model:value="replies.form.value" :rows="6" /></Form.Item><Form.Item label="限定用户/群号"><Input v-model:value="replies.form.number" /></Form.Item><Form.Item label="平台"><Select v-model:value="replies.form.platforms" mode="tags" /></Form.Item><Form.Item label="优先级"><InputNumber v-model:value="replies.form.priority" style="width: 100%" /></Form.Item></Form>

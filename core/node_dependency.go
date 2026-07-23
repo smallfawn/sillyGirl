@@ -188,17 +188,18 @@ func init() {
 	GinApi(POST, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		_ = ctx.BindJSON(&req)
-		name := strings.TrimSpace(req.Name)
-		if name == "" {
-			name = "script-" + time.Now().Format("20060102150405")
-		}
-		pluginName := safePluginDirName(name)
-		dir, err := createNodePlugin(pluginName, name)
+		fileName, err := normalizeNodeScriptFileName(req.Name)
 		if err != nil {
 			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
 			return
 		}
-		index := filepath.Join(dir, "main.js")
+		title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+		pluginName := safePluginDirName(title)
+		_, index, err := createNodePlugin(pluginName, title, fileName)
+		if err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
 		if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), pluginName, NODE); err != nil {
 			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
 			return
@@ -209,6 +210,7 @@ func init() {
 				"id":     nameUuid(pluginName),
 				"plugin": pluginName,
 				"path":   index,
+				"file":   filepath.Base(index),
 			},
 		})
 	})
@@ -413,20 +415,41 @@ func safePluginDirName(name string) string {
 	}
 }
 
-func createNodePlugin(pluginName, title string) (string, error) {
+func normalizeNodeScriptFileName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "script-" + time.Now().Format("20060102150405")
+	}
+	if strings.ContainsAny(name, `/\:<>"|?*`) || strings.Contains(name, "..") {
+		return "", errors.New("脚本文件名不合法")
+	}
+	ext := filepath.Ext(name)
+	if ext == "" {
+		name += ".js"
+	} else if !strings.EqualFold(ext, ".js") {
+		return "", errors.New("脚本文件名必须是 .js 文件")
+	}
+	title := strings.TrimSuffix(name, filepath.Ext(name))
+	if strings.TrimSpace(title) == "" || title == "." {
+		return "", errors.New("脚本文件名不能为空")
+	}
+	return name, nil
+}
+
+func createNodePlugin(pluginName, title, fileName string) (string, string, error) {
 	root := nodePluginsRoot()
 	dir := filepath.Join(root, pluginName)
 	if _, err := checkedNodePluginDir(dir); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules"), 0755); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := ensureNodeSillygirlModule(dir); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := ensureNodePackageJSON(dir, pluginName); err != nil {
-		return "", err
+		return "", "", err
 	}
 	content := strings.TrimRight(defaultScript(title), "\n") + `
 
@@ -436,10 +459,11 @@ async function main() {
 
 main();
 `
-	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte(content), 0644); err != nil {
-		return "", err
+	index := filepath.Join(dir, fileName)
+	if err := os.WriteFile(index, []byte(content), 0644); err != nil {
+		return "", "", err
 	}
-	return dir, nil
+	return dir, index, nil
 }
 
 func readNodeDependencies(plugin nodeDependencyPlugin) ([]nodeDependencyRow, error) {

@@ -126,6 +126,44 @@ declare class daidai {
     disableTask(id: number | string): Promise<any>;
     systemNotify(title: string, content: string): Promise<any>;
 }
+interface SillyGirlSchemaNode {
+    schema: Record<string, any>;
+    setTitle(value: string): SillyGirlSchemaNode;
+    setDescription(value: string): SillyGirlSchemaNode;
+    setDefault(value: any): SillyGirlSchemaNode;
+    setEnum(value: any[]): SillyGirlSchemaNode;
+    setEnumNames(value: string[]): SillyGirlSchemaNode;
+    setRequired(value: string[] | boolean): SillyGirlSchemaNode;
+    setFormat(value: string): SillyGirlSchemaNode;
+    setMin(value: number): SillyGirlSchemaNode;
+    setMax(value: number): SillyGirlSchemaNode;
+    setMinLength(value: number): SillyGirlSchemaNode;
+    setMaxLength(value: number): SillyGirlSchemaNode;
+    setPattern(value: string): SillyGirlSchemaNode;
+    setWidget(value: string): SillyGirlSchemaNode;
+    toJSON(): Record<string, any>;
+}
+declare const SillyGirlCreateSchema: {
+    string(): SillyGirlSchemaNode;
+    number(): SillyGirlSchemaNode;
+    integer(): SillyGirlSchemaNode;
+    boolean(): SillyGirlSchemaNode;
+    array(item?: any): SillyGirlSchemaNode;
+    object(props?: Record<string, any>): SillyGirlSchemaNode;
+};
+declare class SillyGirlPluginConfig {
+    uuid: string;
+    jsonSchema: Record<string, any>;
+    userConfig: Record<string, any>;
+    ready: Promise<Record<string, any>>;
+    constructor(schema: any);
+    get(): Promise<Record<string, any>>;
+    Get(): Promise<Record<string, any>>;
+    set(values?: Record<string, any>): Promise<{ error: string }>;
+    Set(values?: Record<string, any>): Promise<{ error: string }>;
+}
+declare function Form(schema: any): SillyGirlPluginConfig;
+declare function pluginConfigDefaults(schema: any): any;
 interface StorageModifier {
     echo?: string;
     now?: any;
@@ -176,4 +214,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, qinglong, smallcat, daidai, sender, sleep, utils, console };
+export { Adapter, Bucket, qinglong, smallcat, daidai, SillyGirlCreateSchema, SillyGirlPluginConfig, Form, pluginConfigDefaults, sender, sleep, utils, console };

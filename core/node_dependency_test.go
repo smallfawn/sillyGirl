@@ -52,3 +52,29 @@ func TestEnsureNodeSillygirlModuleWritesRuntimeFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeNodeScriptFileName(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+		ok   bool
+	}{
+		{name: "daily-sign", want: "daily-sign.js", ok: true},
+		{name: "daily-sign.js", want: "daily-sign.js", ok: true},
+		{name: "bad.ts", ok: false},
+		{name: "../bad.js", ok: false},
+		{name: "bad/name.js", ok: false},
+	}
+	for _, tt := range tests {
+		got, err := normalizeNodeScriptFileName(tt.name)
+		if tt.ok && err != nil {
+			t.Fatalf("normalizeNodeScriptFileName(%q) returned error: %v", tt.name, err)
+		}
+		if !tt.ok && err == nil {
+			t.Fatalf("normalizeNodeScriptFileName(%q) expected error, got %q", tt.name, got)
+		}
+		if tt.ok && got != tt.want {
+			t.Fatalf("normalizeNodeScriptFileName(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
