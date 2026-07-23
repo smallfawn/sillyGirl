@@ -55,7 +55,7 @@ import {
   User,
   Wand2,
 } from 'lucide-vue-next';
-import { ApiError, del, get, post, put, readStorage, saveStorage } from './api';
+import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
 import type { CarryGroup, CurrentUser, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
 import { asArray, splitTags, timestamp } from './utils';
 
@@ -92,6 +92,13 @@ const selectedScriptId = ref(scriptIdFromPath());
 const loginModel = reactive({ username: '傻妞', password: '' });
 const setupRequired = ref(false);
 const setupModel = reactive({ username: '傻妞', password: '', confirm: '' });
+
+type AuthResponse = {
+  success?: boolean;
+  status: string;
+  token?: string;
+  expiresIn?: number;
+};
 
 const scripts = computed(() => user.value?.plugins || []);
 const realScripts = computed(() => scripts.value.filter((item) => item.path?.startsWith('/script/') && !item.name?.startsWith('+')));
@@ -199,6 +206,7 @@ async function loadUser(setBooting = true) {
     if (error instanceof ApiError && error.status !== 401) message.error(error.message);
     user.value = null;
     if (error instanceof ApiError && error.status === 401) {
+      clearAuthToken();
       await loadSetupStatus().catch(() => undefined);
     }
   } finally {
@@ -207,18 +215,23 @@ async function loadUser(setBooting = true) {
 }
 
 async function login() {
-  const res = await post<{ status: string }>('/api/login/account', loginModel);
-  if (res.status === 'setup_required') {
-    setupRequired.value = true;
-    message.error('请先设置管理员账号和密码');
-    return;
+  try {
+    const res = await post<AuthResponse>('/api/login/account', loginModel);
+    if (res.status === 'setup_required') {
+      setupRequired.value = true;
+      message.error('请先设置管理员账号和密码');
+      return;
+    }
+    if (res.status !== 'ok' || !res.token) {
+      message.error('账号或密码不正确');
+      return;
+    }
+    setAuthToken(res.token);
+    message.success('已登录');
+    await loadUser();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '登录失败');
   }
-  if (res.status !== 'ok') {
-    message.error('账号或密码不正确');
-    return;
-  }
-  message.success('已登录');
-  await loadUser();
 }
 
 async function setupAdmin() {
@@ -235,7 +248,12 @@ async function setupAdmin() {
     return;
   }
   try {
-    await post('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
+    const res = await post<AuthResponse>('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
+    if (res.status !== 'ok' || !res.token) {
+      message.error('账号创建失败');
+      return;
+    }
+    setAuthToken(res.token);
     message.success('账号已创建');
     setupRequired.value = false;
     loginModel.username = setupModel.username.trim();
@@ -243,9 +261,6 @@ async function setupAdmin() {
     setupModel.password = '';
     setupModel.confirm = '';
     await loadUser();
-    if (user.value) {
-      window.location.href = '/admin';
-    }
   } catch (error) {
     message.error(error instanceof Error ? error.message : '创建账号失败');
   }
@@ -253,6 +268,7 @@ async function setupAdmin() {
 
 async function logout() {
   await post('/api/login/outLogin').catch(() => undefined);
+  clearAuthToken();
   user.value = null;
 }
 
@@ -1258,7 +1274,7 @@ function recordOptions(record?: Record<string, string>) {
               <Form.Item label="密码" required>
                 <Input.Password v-model:value="loginModel.password" />
               </Form.Item>
-              <Button type="primary" html-type="submit" block>登录</Button>
+              <Button type="primary" html-type="button" block @click="login">登录</Button>
             </Form>
           </template>
         </div>

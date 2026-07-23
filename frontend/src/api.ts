@@ -11,11 +11,31 @@ export class ApiError extends Error {
 
 type RequestOptions = RequestInit & { raw?: boolean };
 
+const authTokenKey = 'sillygirl_admin_jwt';
+
+export function getAuthToken() {
+  return localStorage.getItem(authTokenKey) || '';
+}
+
+export function setAuthToken(token: string) {
+  if (token) {
+    localStorage.setItem(authTokenKey, token);
+  }
+}
+
+export function clearAuthToken() {
+  localStorage.removeItem(authTokenKey);
+}
+
 export async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const body = options.body;
   if (body && !(body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+  const token = getAuthToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
   const res = await fetch(url, {
     credentials: 'include',

@@ -1,6 +1,9 @@
 package core
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +21,15 @@ var authBucket = MakeBucket("auths")
 var auths = []*Auth{}
 var password = ""
 var setupLock sync.Mutex
+
+const adminJWTExpireSeconds = 86400
+
+type adminJWTClaims struct {
+	Sub string `json:"sub"`
+	JTI string `json:"jti"`
+	Iat int64  `json:"iat"`
+	Exp int64  `json:"exp"`
+}
 
 func init() {
 	storage.Watch(sillyGirl, "name", func(old, new, key string) *storage.Final {
@@ -72,7 +84,7 @@ func init() {
 		defer setupLock.Unlock()
 		if strings.TrimSpace(password) != "" {
 			ctx.JSON(200, map[string]interface{}{
-				"success": false,
+				"success":      false,
 				"errorMessage": "后台账号已初始化",
 			})
 			return
@@ -97,21 +109,18 @@ func init() {
 		sillyGirl.Set("name", payload.Username)
 		sillyGirl.Set("password", payload.Password)
 		name = payload.Username
-		token := utils.GenUUID()
-		auth := &Auth{
-			IP:        ctx.ClientIP(),
-			UserAgent: ctx.Request.UserAgent(),
-			Token:     token,
-			CreatedAt: int(time.Now().Unix()),
+		token, err := createAdminJWTSession(ctx, name)
+		if err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
 		}
-		authBucket.Create(auth)
-		auths = append(auths, auth)
-		ctx.SetCookie("token", token, 86400, "/", "", false, true)
 		ctx.JSON(200, map[string]interface{}{
 			"success":          true,
 			"status":           "ok",
 			"type":             "account",
 			"currentAuthority": "admin",
+			"token":            token,
+			"expiresIn":        adminJWTExpireSeconds,
 		})
 	})
 	GinApi(POST, "/api/login/account", func(ctx *gin.Context) {
@@ -132,24 +141,23 @@ func init() {
 		}
 		epassword, _ := EncryptByAes([]byte(auth.Password))
 		if (auth.Password == password || epassword == password) && auth.Username == name {
-			token := utils.GenUUID()
-			auth := &Auth{
-				IP:        ctx.ClientIP(),
-				UserAgent: ctx.Request.UserAgent(),
-				Token:     token,
-				CreatedAt: int(time.Now().Unix()),
+			token, err := createAdminJWTSession(ctx, name)
+			if err != nil {
+				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+				return
 			}
-			authBucket.Create(auth)
-			auths = append(auths, auth)
 			console.Log("登录成功，当前有效令牌数%d，总数%d", len(ValidAuths()), len(auths))
-			ctx.SetCookie("token", token, 86400, "/", "", false, true)
 			ctx.JSON(200, map[string]interface{}{
+				"success":          true,
 				"status":           "ok",
 				"type":             "account",
 				"currentAuthority": "admin",
+				"token":            token,
+				"expiresIn":        adminJWTExpireSeconds,
 			})
 		} else {
 			ctx.JSON(200, map[string]interface{}{
+				"success":          true,
 				"status":           "error",
 				"type":             "account",
 				"currentAuthority": "guest",
@@ -304,12 +312,13 @@ func countOnlineSmallcatPanels(panels []SmallcatPanel) int {
 }
 
 func DestroyAuth(c *gin.Context) {
-	token, _ := c.Cookie("token")
+	token := authTokenFromRequest(c)
 	auth, _ := CheckAuth(token)
 	if auth != nil {
 		auth.ExpiredAt = int(time.Now().Unix())
 		authBucket.Create(auth)
 	}
+	c.SetCookie("token", "", -1, "/", "", false, true)
 }
 
 var tempAuth sync.Map
@@ -345,7 +354,7 @@ func RequireAuth(c *gin.Context) {
 		})
 		panic(errors.New("后台未初始化，请先设置账号密码"))
 	}
-	token, _ := c.Cookie("token")
+	token := authTokenFromRequest(c)
 	_, err := CheckAuth(token)
 	if err != nil && !checkTempAuth(token) {
 		c.JSON(401, map[string]interface{}{
@@ -364,22 +373,138 @@ func RequireAuth(c *gin.Context) {
 func CheckAuth(token string) (*Auth, error) {
 	var errorMessage = "请先登录！"
 	if token != "" {
-		auths := auths
-		for i := range auths {
-			if auths[i].Token == token && auths[i].ExpiredAt == 0 {
-				if math.Abs(float64(int(time.Now().Unix())-auths[i].CreatedAt)) > 86400 {
-					auths[i].ExpiredAt = int(time.Now().Unix())
-					authBucket.Create(auths[i])
-					errorMessage = "授权已过期！"
-				} else {
-					return auths[i], nil
-				}
-			} else {
-				errorMessage = "非法访问！"
+		sessionToken := token
+		if strings.Count(token, ".") == 2 {
+			claims, err := parseAdminJWT(token)
+			if err != nil {
+				return nil, err
 			}
+			sessionToken = claims.JTI
+		}
+		if auth, err := checkSessionToken(sessionToken); err == nil {
+			return auth, nil
+		} else {
+			errorMessage = err.Error()
 		}
 	}
 	return nil, errors.New(errorMessage)
+}
+
+func authTokenFromRequest(c *gin.Context) string {
+	header := strings.TrimSpace(c.GetHeader("Authorization"))
+	if len(header) > 7 && strings.EqualFold(header[:7], "Bearer ") {
+		return strings.TrimSpace(header[7:])
+	}
+	token, _ := c.Cookie("token")
+	return strings.TrimSpace(token)
+}
+
+func createAdminJWTSession(ctx *gin.Context, username string) (string, error) {
+	now := time.Now().Unix()
+	sessionToken := utils.GenUUID()
+	auth := &Auth{
+		IP:        ctx.ClientIP(),
+		UserAgent: ctx.Request.UserAgent(),
+		Token:     sessionToken,
+		CreatedAt: int(now),
+	}
+	authBucket.Create(auth)
+	auths = append(auths, auth)
+	token, err := signAdminJWT(adminJWTClaims{
+		Sub: username,
+		JTI: sessionToken,
+		Iat: now,
+		Exp: now + adminJWTExpireSeconds,
+	})
+	if err != nil {
+		return "", err
+	}
+	ctx.SetCookie("token", token, adminJWTExpireSeconds, "/", "", false, true)
+	return token, nil
+}
+
+func checkSessionToken(token string) (*Auth, error) {
+	errorMessage := "请先登录！"
+	for i := range auths {
+		if auths[i].Token != token {
+			errorMessage = "非法访问！"
+			continue
+		}
+		if auths[i].ExpiredAt != 0 {
+			return nil, errors.New("授权已失效！")
+		}
+		if math.Abs(float64(int(time.Now().Unix())-auths[i].CreatedAt)) > adminJWTExpireSeconds {
+			auths[i].ExpiredAt = int(time.Now().Unix())
+			authBucket.Create(auths[i])
+			return nil, errors.New("授权已过期！")
+		}
+		return auths[i], nil
+	}
+	return nil, errors.New(errorMessage)
+}
+
+func signAdminJWT(claims adminJWTClaims) (string, error) {
+	header, err := json.Marshal(map[string]string{
+		"alg": "HS256",
+		"typ": "JWT",
+	})
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
+	return unsigned + "." + signAdminJWTPart(unsigned), nil
+}
+
+func parseAdminJWT(token string) (*adminJWTClaims, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, errors.New("JWT 格式错误")
+	}
+	unsigned := parts[0] + "." + parts[1]
+	if !hmac.Equal([]byte(parts[2]), []byte(signAdminJWTPart(unsigned))) {
+		return nil, errors.New("JWT 签名无效")
+	}
+	headerRaw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, errors.New("JWT 头解析失败")
+	}
+	header := map[string]string{}
+	if err := json.Unmarshal(headerRaw, &header); err != nil || header["alg"] != "HS256" {
+		return nil, errors.New("JWT 算法不支持")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, errors.New("JWT 内容解析失败")
+	}
+	claims := &adminJWTClaims{}
+	if err := json.Unmarshal(payload, claims); err != nil {
+		return nil, errors.New("JWT 内容无效")
+	}
+	if claims.JTI == "" || claims.Sub == "" {
+		return nil, errors.New("JWT 缺少会话信息")
+	}
+	if claims.Exp <= time.Now().Unix() {
+		return nil, errors.New("JWT 已过期")
+	}
+	if currentName := strings.TrimSpace(sillyGirl.GetString("name")); currentName != "" && claims.Sub != currentName {
+		return nil, errors.New("JWT 用户不匹配")
+	}
+	return claims, nil
+}
+
+func signAdminJWTPart(unsigned string) string {
+	mac := hmac.New(sha256.New, adminJWTSecret())
+	mac.Write([]byte(unsigned))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func adminJWTSecret() []byte {
+	sum := sha256.Sum256([]byte(GetMachineID() + "|" + password + "|sillyGirl-admin-jwt"))
+	return sum[:]
 }
 
 func ValidAuths() []*Auth {
