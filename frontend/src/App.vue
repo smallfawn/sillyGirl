@@ -18,6 +18,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Spin,
   Statistic,
   Switch,
   Table,
@@ -233,14 +234,21 @@ async function setupAdmin() {
     message.error('两次输入的密码不一致');
     return;
   }
-  await post('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
-  message.success('账号已创建');
-  setupRequired.value = false;
-  loginModel.username = setupModel.username.trim();
-  loginModel.password = '';
-  setupModel.password = '';
-  setupModel.confirm = '';
-  await loadUser();
+  try {
+    await post('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
+    message.success('账号已创建');
+    setupRequired.value = false;
+    loginModel.username = setupModel.username.trim();
+    loginModel.password = '';
+    setupModel.password = '';
+    setupModel.confirm = '';
+    await loadUser();
+    if (user.value) {
+      window.location.href = '/admin';
+    }
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '创建账号失败');
+  }
 }
 
 async function logout() {
@@ -760,13 +768,16 @@ const plugins = reactive({
   sources: [] as string[],
   sourceAddress: '',
   sourceSaving: false,
+  githubProxy: '',
+  githubProxyOptions: [] as string[],
+  githubProxySaving: false,
   sourceModal: false,
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
 });
 async function openPluginSourceManager() {
   plugins.sourceModal = true;
-  await loadPluginSources();
+  await Promise.all([loadPluginSources(), loadGithubProxy()]);
 }
 async function loadPluginSources() {
   try {
@@ -774,6 +785,28 @@ async function loadPluginSources() {
     plugins.sources = res.data || [];
   } catch {
     plugins.sources = [];
+  }
+}
+async function loadGithubProxy() {
+  try {
+    const res = await get<{ data: { proxy: string; options: string[] } }>('/api/plugins/github-proxy');
+    plugins.githubProxy = res.data?.proxy || '';
+    plugins.githubProxyOptions = res.data?.options || [];
+  } catch {
+    plugins.githubProxy = '';
+    plugins.githubProxyOptions = [];
+  }
+}
+async function saveGithubProxy() {
+  plugins.githubProxySaving = true;
+  try {
+    const res = await put<{ data?: { proxy?: string } }>('/api/plugins/github-proxy', { proxy: plugins.githubProxy.trim() });
+    plugins.githubProxy = res.data?.proxy || '';
+    message.success(plugins.githubProxy ? '加速链接已生成' : 'GitHub 加速已关闭');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : 'GitHub 代理保存失败');
+  } finally {
+    plugins.githubProxySaving = false;
   }
 }
 async function loadPlugins(current = 1, pageSize = 12) {
@@ -828,14 +861,15 @@ async function removePluginSource(address: string) {
 async function installPlugin(row: PluginInfo) {
   plugins.installing[row.id] = true;
   try {
-    const res = await put<{ success: boolean; errors?: Record<string, string> }>('/api/storage', {
+    const res = await put<{ success: boolean; errors?: Record<string, string>; messages?: Record<string, string> }>('/api/storage', {
       [`plugins.${row.id}`]: 'install',
     });
     const firstError = Object.values(res.errors || {}).find(Boolean);
     if (firstError) {
       throw new ApiError(200, firstError);
     }
-    message.success(row.status === 1 ? '已更新' : '已安装');
+    const firstMessage = Object.values(res.messages || {}).find(Boolean);
+    message.success(firstMessage || (row.status === 1 ? '已更新' : '已安装'));
     await Promise.all([loadPlugins(), loadUser()]);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '插件安装失败');
@@ -975,6 +1009,12 @@ const schemaFields = computed(() => {
   const props = pluginConfigs.selected?.schema?.properties || {};
   return Object.entries(props).map(([key, prop]) => ({ key, prop: prop as any }));
 });
+const pluginConfigOptions = computed(() =>
+  pluginConfigs.rows.map((row) => ({
+    value: row.uuid,
+    label: `${row.plugin || row.title || row.uuid}${row.file ? ` / ${row.file}` : ''}`,
+  })),
+);
 async function loadPluginConfigs() {
   pluginConfigs.loading = true;
   try {
@@ -985,10 +1025,19 @@ async function loadPluginConfigs() {
       if (next) openPluginConfig(next);
       else pluginConfigs.selected = null;
     }
-    if (!pluginConfigs.selected && pluginConfigs.rows.length) openPluginConfig(pluginConfigs.rows[0]);
   } finally {
     pluginConfigs.loading = false;
   }
+}
+function selectPluginConfig(uuid?: string) {
+  const row = pluginConfigs.rows.find((item) => item.uuid === uuid);
+  if (row) {
+    openPluginConfig(row);
+    return;
+  }
+  pluginConfigs.selected = null;
+  pluginConfigs.form = {};
+  pluginConfigs.text = {};
 }
 function openPluginConfig(row: any) {
   pluginConfigs.selected = row;
@@ -1194,7 +1243,7 @@ function recordOptions(record?: Record<string, string>) {
               <Form.Item label="确认密码" required>
                 <Input.Password v-model:value="setupModel.confirm" />
               </Form.Item>
-              <Button type="primary" html-type="submit" block>创建账号</Button>
+              <Button type="primary" html-type="button" block @click="setupAdmin">创建账号</Button>
             </Form>
           </template>
           <template v-else>
@@ -1628,24 +1677,23 @@ function recordOptions(record?: Record<string, string>) {
             <section v-if="page === 'plugin-configs'" class="panel">
               <div class="toolbar">
                 <div class="toolbar-left">
+                  <Select
+                    :value="pluginConfigs.selected?.uuid"
+                    show-search
+                    allow-clear
+                    style="width: 360px"
+                    placeholder="选择插件"
+                    :options="pluginConfigOptions"
+                    :filter-option="(input:any, option:any) => String(option?.label || '').toLowerCase().includes(String(input).toLowerCase())"
+                    @change="selectPluginConfig"
+                  />
                   <Button @click="loadPluginConfigs"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
                 </div>
                 <div class="toolbar-right">
                   <Button type="primary" :disabled="!pluginConfigs.selected" @click="savePluginConfig"><template #icon><Save :size="16" /></template>保存配置</Button>
                 </div>
               </div>
-              <div class="config-grid">
-                <Table
-                  row-key="uuid"
-                  size="small"
-                  :loading="pluginConfigs.loading"
-                  :data-source="pluginConfigs.rows"
-                  :pagination="{ pageSize: 10 }"
-                  :custom-row="(record:any) => ({ onClick: () => openPluginConfig(record) })"
-                >
-                  <Table.Column title="插件名"><template #default="{ record }">{{ record.plugin || record.title }}</template></Table.Column>
-                  <Table.Column title="文件名" data-index="file" />
-                </Table>
+              <Spin :spinning="pluginConfigs.loading">
                 <div v-if="pluginConfigs.selected" class="config-form">
                   <Typography.Title :level="4" style="margin-top: 0">{{ pluginConfigs.selected.plugin || pluginConfigs.selected.title }}</Typography.Title>
                   <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
@@ -1688,8 +1736,8 @@ function recordOptions(record?: Record<string, string>) {
                     </template>
                   </Form>
                 </div>
-                <a-empty v-else description="暂无插件配置。插件需运行一次并调用 new SillyGirlPluginConfig(schema) 或 Form(schema) 注册。" />
-              </div>
+                <a-empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件需运行一次并调用 new SillyGirlPluginConfig(schema) 或 Form(schema) 注册。'" />
+              </Spin>
             </section>
 
             <section v-if="page === 'settings'" class="panel">
@@ -1747,11 +1795,26 @@ function recordOptions(record?: Record<string, string>) {
       <Modal :open="plugins.sourceModal" title="管理插件源" width="820px" :footer="null" @cancel="plugins.sourceModal = false">
         <Space direction="vertical" style="width: 100%" size="middle">
           <Form layout="vertical">
+            <Form.Item label="GitHub 加速" extra="用于读取 GitHub 插件源和下载 GitHub 插件；选择关闭表示直连。" style="margin-bottom: 12px">
+              <Space.Compact style="width: 100%">
+                <Select
+                  v-model:value="plugins.githubProxy"
+                  style="width: 100%"
+                  :options="[
+                    { value: '', label: '关闭加速' },
+                    ...plugins.githubProxyOptions.map((value) => ({ value, label: value })),
+                  ]"
+                />
+                <Button :loading="plugins.githubProxySaving" @click="saveGithubProxy">
+                  保存
+                </Button>
+              </Space.Compact>
+            </Form.Item>
             <Form.Item label="新增插件源" required style="margin-bottom: 0">
               <Space.Compact style="width: 100%">
                 <Input
                   v-model:value="plugins.sourceAddress"
-                  placeholder="https://github.com/smallfawn/Bncr_Plugins 或 link://..."
+                  placeholder="https://github.com/smallfawn/sillyGirl_Plugins 或 link://..."
                   @press-enter="addPluginSource"
                 />
                 <Button type="primary" :loading="plugins.sourceSaving" @click="addPluginSource">

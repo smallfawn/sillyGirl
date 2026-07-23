@@ -289,7 +289,7 @@ func samePath(a, b string) bool {
 }
 
 func nodePluginsRoot() string {
-	return filepath.Clean(filepath.Join(utils.ExecPath, "plugins"))
+	return filepath.Clean(filepath.Join(utils.GetDataHome(), "plugins"))
 }
 
 func nodePluginNameFromPath(path string) string {

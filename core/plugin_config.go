@@ -9,7 +9,6 @@ import (
 	"github.com/dop251/goja"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
-	"github.com/smallfawn/sillyGirl/core/common"
 	"github.com/smallfawn/sillyGirl/core/storage"
 )
 
@@ -81,8 +80,9 @@ func init() {
 
 func getPluginConfigRecords() []*PluginConfigRecord {
 	records := []*PluginConfigRecord{}
+	nodePluginNames := nodePluginNameIndexByUUID()
 	pluginConfigSchemas.Foreach(func(k, _ []byte) error {
-		if record := getPluginConfigRecord(string(k)); record != nil {
+		if record := getPluginConfigRecordWithIndex(string(k), nodePluginNames); record != nil {
 			records = append(records, record)
 		}
 		return nil
@@ -91,7 +91,14 @@ func getPluginConfigRecords() []*PluginConfigRecord {
 }
 
 func getPluginConfigRecord(uuid string) *PluginConfigRecord {
+	return getPluginConfigRecordWithIndex(uuid, nil)
+}
+
+func getPluginConfigRecordWithIndex(uuid string, nodePluginNames map[string]string) *PluginConfigRecord {
 	if uuid == "" {
+		return nil
+	}
+	if !isLocalPluginConfigUUID(uuid, nodePluginNames) {
 		return nil
 	}
 	schema := map[string]interface{}{}
@@ -108,8 +115,8 @@ func getPluginConfigRecord(uuid string) *PluginConfigRecord {
 	return &PluginConfigRecord{
 		UUID:       uuid,
 		Title:      getPluginTitle(uuid),
-		Plugin:     getPluginConfigPluginName(uuid),
-		File:       getPluginConfigFileName(uuid),
+		Plugin:     getPluginConfigPluginName(uuid, nodePluginNames),
+		File:       getPluginConfigFileName(uuid, nodePluginNames),
 		Schema:     schema,
 		UserConfig: getPluginUserConfig(uuid),
 	}
@@ -126,16 +133,13 @@ func getPluginTitle(uuid string) string {
 			}
 		}
 	}
-	if f := getPluginConfigSourceFunction(uuid); f != nil && f.Title != "" {
-		return f.Title
-	}
 	if name := getPluginConfigPluginName(uuid); name != "" {
 		return name
 	}
 	return uuid
 }
 
-func getPluginConfigPluginName(uuid string) string {
+func getPluginConfigPluginName(uuid string, nodePluginNames ...map[string]string) string {
 	for _, f := range Functions {
 		if f.UUID == uuid {
 			if plugin := nodePluginNameFromPath(f.Path); plugin != "" {
@@ -146,18 +150,10 @@ func getPluginConfigPluginName(uuid string) string {
 			}
 		}
 	}
-	if f := getPluginConfigSourceFunction(uuid); f != nil {
-		if pluginPath, ok := githubNodePluginPathFromAddress(f.Address); ok {
-			return filepath.Base(pluginPath)
-		}
-		if f.Title != "" {
-			return f.Title
-		}
-	}
-	return findNodePluginNameByUUID(uuid)
+	return findNodePluginNameByUUID(uuid, nodePluginNames...)
 }
 
-func getPluginConfigFileName(uuid string) string {
+func getPluginConfigFileName(uuid string, nodePluginNames ...map[string]string) string {
 	for _, f := range Functions {
 		if f.UUID == uuid && f.Path != "" {
 			return filepath.Base(filepath.Clean(f.Path))
@@ -166,57 +162,42 @@ func getPluginConfigFileName(uuid string) string {
 			return f.Title + f.Suffix
 		}
 	}
-	if f := getPluginConfigSourceFunction(uuid); f != nil {
-		if pluginPath, ok := githubNodePluginPathFromAddress(f.Address); ok {
-			return filepath.Base(filepath.Clean(pluginPath + "/main.js"))
-		}
-		if f.Title != "" {
-			return f.Title + f.Suffix
-		}
-	}
-	if plugin := findNodePluginNameByUUID(uuid); plugin != "" {
+	if plugin := findNodePluginNameByUUID(uuid, nodePluginNames...); plugin != "" {
 		return "main.js"
 	}
 	return ""
 }
 
-func findNodePluginNameByUUID(uuid string) string {
+func isLocalPluginConfigUUID(uuid string, nodePluginNames map[string]string) bool {
+	for _, f := range Functions {
+		if f.UUID == uuid {
+			return true
+		}
+	}
+	return findNodePluginNameByUUID(uuid, nodePluginNames) != ""
+}
+
+func findNodePluginNameByUUID(uuid string, indexes ...map[string]string) string {
+	if len(indexes) != 0 && indexes[0] != nil {
+		return indexes[0][uuid]
+	}
+	return nodePluginNameIndexByUUID()[uuid]
+}
+
+func nodePluginNameIndexByUUID() map[string]string {
+	index := map[string]string{}
 	root := nodePluginsRoot()
 	files, err := os.ReadDir(root)
 	if err != nil {
-		return ""
+		return index
 	}
 	for _, file := range files {
 		if !file.IsDir() || strings.HasPrefix(file.Name(), ".") {
 			continue
 		}
-		if nameUuid(file.Name()) == uuid {
-			return file.Name()
-		}
+		index[nameUuid(file.Name())] = file.Name()
 	}
-	return ""
-}
-
-func getPluginConfigSourceFunction(uuid string) *common.Function {
-	for _, f := range plugin_list {
-		if f.UUID == uuid {
-			return f
-		}
-	}
-	for _, f := range listPluginSources() {
-		if f.UUID == uuid {
-			return f
-		}
-	}
-	return nil
-}
-
-func githubNodePluginPathFromAddress(address string) (string, bool) {
-	_, pluginPath, err := parseGithubNodePluginAddress(address)
-	if err != nil || pluginPath == "" {
-		return "", false
-	}
-	return pluginPath, true
+	return index
 }
 
 func getPluginUserConfig(uuid string) map[string]interface{} {

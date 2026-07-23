@@ -29,7 +29,7 @@ var processes sync.Map
 
 func initNodePlugins() {
 	initLanguage()
-	root := strings.ReplaceAll(utils.ExecPath+"/plugins", "\\", "/")
+	root := strings.ReplaceAll(nodePluginsRoot(), "\\", "/")
 	plugins := []string{root}
 	os.Mkdir(root, 0755)
 	// fmt.Println("root", root)

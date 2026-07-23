@@ -22,16 +22,17 @@ import (
 )
 
 const pluginSourceReposKey = "plugin_source_repos"
+const pluginSourceGithubProxyKey = "plugin_source_github_proxy"
 const githubNodePluginScheme = "github-node"
-const githubProxyEnv = "SILLYGIRL_GITHUB_PROXY"
 
-var builtinGithubProxyPrefixes = []string{
-	"https://ghfast.top/",
-	"https://gh.llkk.cc/",
-	"https://gh-proxy.com/",
-	"https://gh.idayer.com/",
-	"https://gh.xmly.dev/",
-	"https://gh.jasonzeng.dev/",
+var builtinGithubAccelerators = []string{
+	"https://gh-proxy.org",
+	"https://ghproxy.net",
+	"https://cdn.gh-proxy.org",
+	"http://jp-proxy.gitwarp.top:3000",
+	"http://kr1-proxy.gitwarp.top:8081",
+	"http://kr2-proxy.gitwarp.top:9980",
+	"http://jp1-proxy.gitwarp.top:8123",
 }
 
 type RequestPluginResult struct {
@@ -82,6 +83,29 @@ func initWebPluginList() {
 			"success": true,
 			"data":    pluginSourceAddresses(),
 		})
+	})
+	GinApi(GET, "/api/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+		ctx.JSON(200, map[string]interface{}{
+			"success": true,
+			"data": map[string]interface{}{
+				"proxy":   githubAcceleratorPrefix(),
+				"options": builtinGithubAccelerators,
+			},
+		})
+	})
+	GinApi(PUT, "/api/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+		payload := map[string]string{}
+		if err := ctx.BindJSON(&payload); err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		proxy, err := normalizeGithubAcceleratorPrefix(payload["proxy"])
+		if err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		sillyGirl.Set(pluginSourceGithubProxyKey, proxy)
+		ctx.JSON(200, map[string]interface{}{"success": true, "data": map[string]interface{}{"proxy": proxy}})
 	})
 	GinApi(POST, "/api/plugins/source", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
@@ -488,9 +512,6 @@ func parseGithubPluginSource(address string) (*githubPluginSource, error) {
 		source.Branch = parts[3]
 	}
 	if source.Branch == "" {
-		source.Branch = githubDefaultBranch(source.Owner, source.Repo)
-	}
-	if source.Branch == "" {
 		source.Branch = "main"
 	}
 	return source, nil
@@ -573,9 +594,10 @@ func githubPluginSourceItems(address string) ([]*common.Function, error) {
 			continue
 		}
 		pluginName := strings.TrimSuffix(path.Base(item.Path), path.Ext(item.Path))
-		pluginAddress := makeGithubNodePluginAddress(source, item.Path)
+		rawURL := githubRawURL(source.Owner, source.Repo, source.Branch, item.Path)
+		pluginAddress := makeGithubNodePluginAddress(source, item.Path, rawURL)
 		dependencies := []string{}
-		if data, err := httpGetBytes(githubRawURL(source.Owner, source.Repo, source.Branch, item.Path), 20*time.Second); err == nil {
+		if data, err := httpGetBytes(rawURL, 20*time.Second); err == nil {
 			dependencies = parseNodeRequires(string(data))
 		}
 		items = append(items, &common.Function{
@@ -610,8 +632,8 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 	if err != nil {
 		return nil, err
 	}
-	records := map[string]githubPublicFileIndexEntry{}
-	if err := json.Unmarshal(data, &records); err != nil {
+	records, err := parseGithubPublicFileIndex(data)
+	if err != nil {
 		return nil, err
 	}
 	items := make([]*common.Function, 0, len(records))
@@ -644,10 +666,14 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 		if len(classes) == 0 {
 			classes = append(classes, source.Owner)
 		}
-		pluginAddress := makeGithubNodePluginAddress(source, pluginPath)
+		rawURL := strings.TrimSpace(record.Raw)
+		if rawURL == "" {
+			rawURL = githubRawURL(source.Owner, source.Repo, source.Branch, pluginPath)
+		}
+		pluginAddress := makeGithubNodePluginAddress(source, pluginPath, rawURL)
 		dependencies := normalizeDependencyNames(record.Dependencies)
-		if len(dependencies) == 0 && strings.TrimSpace(record.Raw) != "" {
-			if data, err := httpGetBytes(record.Raw, 20*time.Second); err == nil {
+		if len(dependencies) == 0 && rawURL != "" {
+			if data, err := httpGetBytes(rawURL, 20*time.Second); err == nil {
 				dependencies = parseNodeRequires(string(data))
 			}
 		}
@@ -676,6 +702,43 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 	return items, nil
 }
 
+func parseGithubPublicFileIndex(data []byte) ([]githubPublicFileIndexEntry, error) {
+	records := map[string]githubPublicFileIndexEntry{}
+	if err := json.Unmarshal(data, &records); err == nil {
+		items := make([]githubPublicFileIndexEntry, 0, len(records))
+		for key, record := range records {
+			record = completeGithubPublicFileIndexEntry(record, key)
+			items = append(items, record)
+		}
+		return items, nil
+	}
+	items := []githubPublicFileIndexEntry{}
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i] = completeGithubPublicFileIndexEntry(items[i], "")
+	}
+	return items, nil
+}
+
+func completeGithubPublicFileIndexEntry(record githubPublicFileIndexEntry, key string) githubPublicFileIndexEntry {
+	key = strings.TrimSpace(key)
+	if record.ID == "" {
+		record.ID = key
+	}
+	if record.Path == "" && strings.HasPrefix(key, "plugins/") {
+		record.Path = key
+	}
+	if record.Name == "" && record.Path != "" {
+		record.Name = strings.TrimSuffix(path.Base(record.Path), path.Ext(record.Path))
+	}
+	if record.Title == "" {
+		record.Title = record.Name
+	}
+	return record
+}
+
 func isGithubFlatNodePlugin(itemPath string) bool {
 	itemPath = strings.TrimSpace(itemPath)
 	if path.Dir(itemPath) != "plugins" || !strings.HasSuffix(strings.ToLower(itemPath), ".js") {
@@ -686,27 +749,30 @@ func isGithubFlatNodePlugin(itemPath string) bool {
 }
 
 func githubRawURL(owner, repo, branch, itemPath string) string {
-	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, url.PathEscape(branch), itemPath)
+	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/refs/heads/%s/%s", owner, repo, url.PathEscape(branch), itemPath)
 }
 
-func makeGithubNodePluginAddress(source *githubPluginSource, pluginPath string) string {
+func makeGithubNodePluginAddress(source *githubPluginSource, pluginPath string, rawURL ...string) string {
 	values := url.Values{}
 	values.Set("branch", source.Branch)
 	values.Set("path", pluginPath)
+	if len(rawURL) != 0 && strings.TrimSpace(rawURL[0]) != "" {
+		values.Set("raw", strings.TrimSpace(rawURL[0]))
+	}
 	return fmt.Sprintf("%s://%s/%s?%s", githubNodePluginScheme, source.Owner, source.Repo, values.Encode())
 }
 
-func parseGithubNodePluginAddress(address string) (*githubPluginSource, string, error) {
+func parseGithubNodePluginAddress(address string) (*githubPluginSource, string, string, error) {
 	parsed, err := url.Parse(address)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if parsed.Scheme != githubNodePluginScheme {
-		return nil, "", errors.New("不是 GitHub Node 插件地址")
+		return nil, "", "", errors.New("不是 GitHub Node 插件地址")
 	}
 	pluginPath := strings.Trim(parsed.Query().Get("path"), "/")
 	if !isGithubFlatNodePlugin(pluginPath) || strings.Contains(pluginPath, "..") {
-		return nil, "", errors.New("GitHub Node 插件路径不合法")
+		return nil, "", "", errors.New("GitHub Node 插件路径不合法")
 	}
 	source := &githubPluginSource{
 		Owner:  parsed.Host,
@@ -714,19 +780,23 @@ func parseGithubNodePluginAddress(address string) (*githubPluginSource, string, 
 		Branch: parsed.Query().Get("branch"),
 	}
 	if source.Owner == "" || source.Repo == "" || source.Branch == "" {
-		return nil, "", errors.New("GitHub Node 插件地址不完整")
+		return nil, "", "", errors.New("GitHub Node 插件地址不完整")
 	}
-	return source, pluginPath, nil
+	rawURL := strings.TrimSpace(parsed.Query().Get("raw"))
+	if rawURL != "" && !isSafeGithubRawURL(rawURL) {
+		return nil, "", "", errors.New("GitHub Node 插件 raw 地址不合法")
+	}
+	return source, pluginPath, rawURL, nil
 }
 
 func installGithubNodePlugin(address string) error {
-	source, pluginPath, err := parseGithubNodePluginAddress(address)
+	source, pluginPath, rawURL, err := parseGithubNodePluginAddress(address)
 	if err != nil {
 		return err
 	}
 
 	pluginName := strings.TrimSuffix(path.Base(pluginPath), path.Ext(pluginPath))
-	target := filepath.Join(utils.ExecPath, "plugins", pluginName)
+	target := filepath.Join(nodePluginsRoot(), pluginName)
 	target, err = checkedNodePluginDir(target)
 	if err != nil {
 		return err
@@ -737,7 +807,11 @@ func installGithubNodePlugin(address string) error {
 	if err := os.MkdirAll(target, 0755); err != nil {
 		return err
 	}
-	data, err := httpGetBytes(githubRawURL(source.Owner, source.Repo, source.Branch, pluginPath), 30*time.Second)
+	downloadURL := rawURL
+	if downloadURL == "" {
+		downloadURL = githubRawURL(source.Owner, source.Repo, source.Branch, pluginPath)
+	}
+	data, err := httpGetBytes(downloadURL, 30*time.Second)
 	if err != nil {
 		return err
 	}
@@ -757,7 +831,11 @@ func installGithubNodePlugin(address string) error {
 	if err := ensureNodePackageJSON(target, pluginName); err != nil {
 		return err
 	}
-	return AddNodePlugin(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, NODE)
+	if err := AddNodePlugin(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, NODE); err != nil {
+		return err
+	}
+	console.Log("已安装 NodeJS 插件 %s", pluginName)
+	return nil
 }
 
 func ensureChildPath(root, child string) error {
@@ -785,99 +863,78 @@ func httpGetJSON(address string, timeout time.Duration, target interface{}) erro
 }
 
 func httpGetBytes(address string, timeout time.Duration) ([]byte, error) {
-	var lastErr error
-	candidates := githubAcceleratedURLs(address)
-	for index, candidate := range candidates {
-		req, err := http.NewRequest(http.MethodGet, candidate, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		req.Header.Set("User-Agent", "sillyGirl")
-		requestTimeout := timeout
-		if index > 0 {
-			requestTimeout = githubProxyTimeout(timeout)
-		}
-		resp, err := (&http.Client{Timeout: requestTimeout}).Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		data, readErr := func() ([]byte, error) {
-			defer resp.Body.Close()
-			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-				return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-			}
-			return io.ReadAll(resp.Body)
-		}()
-		if readErr != nil {
-			lastErr = readErr
-			continue
-		}
-		return data, nil
+	reqURL := githubAcceleratedURLFor(address)
+	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	return nil, lastErr
+	req.Header.Set("User-Agent", "sillyGirl")
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
 }
 
-func githubProxyTimeout(timeout time.Duration) time.Duration {
-	if timeout <= 0 || timeout > 3*time.Second {
-		return 3 * time.Second
+func githubAcceleratedURLFor(address string) string {
+	parsedAddress, err := url.Parse(address)
+	if err != nil || !isGithubURLHost(parsedAddress.Host) {
+		return address
 	}
-	return timeout
+	prefix := githubAcceleratorPrefix()
+	if prefix == "" {
+		return address
+	}
+	return strings.TrimRight(prefix, "/") + "/" + address
 }
 
-func githubAcceleratedURLs(address string) []string {
-	address = strings.TrimSpace(address)
-	urls := []string{address}
-	parsed, err := url.Parse(address)
-	if err != nil || !isGithubURLHost(parsed.Host) {
-		return urls
-	}
-	for _, prefix := range githubProxyPrefixes() {
-		candidate := strings.TrimRight(prefix, "/") + "/" + address
-		if !Contains(urls, candidate) {
-			urls = append(urls, candidate)
-		}
-	}
-	return urls
+func githubAcceleratorPrefix() string {
+	return strings.TrimSpace(sillyGirl.GetString(pluginSourceGithubProxyKey))
 }
 
-func githubProxyPrefixes() []string {
-	prefixes := []string{}
-	for _, raw := range strings.FieldsFunc(os.Getenv(githubProxyEnv), func(r rune) bool {
-		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t'
-	}) {
-		if prefix := normalizeGithubProxyPrefix(raw); prefix != "" && !Contains(prefixes, prefix) {
-			prefixes = append(prefixes, prefix)
-		}
-	}
-	for _, raw := range builtinGithubProxyPrefixes {
-		if prefix := normalizeGithubProxyPrefix(raw); prefix != "" && !Contains(prefixes, prefix) {
-			prefixes = append(prefixes, prefix)
-		}
-	}
-	return prefixes
-}
-
-func normalizeGithubProxyPrefix(prefix string) string {
+func normalizeGithubAcceleratorPrefix(prefix string) (string, error) {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
-		return ""
+		return "", nil
 	}
-	if !strings.Contains(prefix, "://") {
-		prefix = "https://" + prefix
+	prefix = strings.TrimRight(prefix, "/")
+	for _, candidate := range builtinGithubAccelerators {
+		if prefix == strings.TrimRight(candidate, "/") {
+			return prefix, nil
+		}
 	}
-	return strings.TrimRight(prefix, "/") + "/"
+	return "", errors.New("请选择内置 GitHub 加速地址")
 }
 
 func isGithubURLHost(host string) bool {
-	host = strings.ToLower(strings.Split(host, ":")[0])
-	switch host {
-	case "github.com", "api.github.com", "raw.githubusercontent.com", "codeload.github.com":
-		return true
-	default:
+	host = strings.ToLower(strings.TrimSpace(host))
+	parsed, err := url.Parse("//" + host)
+	if err == nil && parsed.Hostname() != "" {
+		host = parsed.Hostname()
+	}
+	return host == "github.com" ||
+		host == "api.github.com" ||
+		host == "raw.githubusercontent.com" ||
+		host == "codeload.github.com" ||
+		strings.HasSuffix(host, ".githubusercontent.com")
+}
+
+func isSafeGithubRawURL(address string) bool {
+	parsed, err := url.Parse(address)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return false
 	}
+	return isGithubURLHost(parsed.Host) && strings.HasSuffix(strings.ToLower(parsed.Path), ".js")
+}
+
+func parseBoolText(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return value == "true" || value == "1" || value == "yes" || value == "on"
 }
 
 func firstNonEmpty(values ...string) string {

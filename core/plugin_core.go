@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -117,21 +118,29 @@ func initPlugins() {
 
 	storage.Watch(plugins, nil, func(old, new, key string) (fin *storage.Final) {
 		if isNameUuid(key) && new == "install" {
+			var marketPlugin *common.Function
 			for _, p := range plugin_list {
 				if p.UUID != key {
 					continue
 				}
-				if strings.HasPrefix(p.Address, githubNodePluginScheme+"://") {
-					if err := installGithubNodePlugin(p.Address); err != nil {
-						return &storage.Final{
-							Error: errors.New("安装异常！" + err.Error()),
-						}
-					}
+				marketPlugin = p
+				break
+			}
+			if marketPlugin == nil {
+				return &storage.Final{
+					Error: errors.New("插件市场未找到该插件，请刷新插件列表后重试"),
+				}
+			}
+			if strings.HasPrefix(marketPlugin.Address, githubNodePluginScheme+"://") {
+				if err := installGithubNodePlugin(marketPlugin.Address); err != nil {
 					return &storage.Final{
-						Now: "",
+						Error: errors.New("安装异常！" + err.Error()),
 					}
 				}
-				break
+				return &storage.Final{
+					Now:     storage.EMPTY,
+					Message: fmt.Sprintf("已安装 %s", marketPlugin.Title),
+				}
 			}
 		}
 		pluginLock.Lock()
@@ -188,7 +197,8 @@ func initPlugins() {
 						}
 					}
 					return &storage.Final{
-						Now: "",
+						Now:     storage.EMPTY,
+						Message: fmt.Sprintf("已安装 %s", p.Title),
 					}
 				}
 			}

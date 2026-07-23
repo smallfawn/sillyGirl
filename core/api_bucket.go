@@ -217,7 +217,11 @@ func init() {
 		for bk, v := range updates {
 			ar := strings.SplitN(bk, ".", 2)
 			if len(ar) == 2 {
-				msg, changed, err := SetBucketKeyValue(MakeBucket(ar[0]), ar[1], v)
+				bucket := MakeBucket(ar[0])
+				if ar[0] == "plugins" && fmt.Sprint(v) == "install" {
+					_, _, _ = SetBucketKeyValue2(bucket, ar[1], "")
+				}
+				msg, changed, err := SetBucketKeyValue(bucket, ar[1], v)
 				if msg != "" {
 					messages[bk] = msg
 				}
