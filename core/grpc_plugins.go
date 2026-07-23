@@ -464,7 +464,6 @@ declare class smallcat {
 	request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
 	createQr(type: any): Promise<any>;
 	checkQr(uuid: string): Promise<any>;
-	chechQr(uuid: string): Promise<any>;
 	addUser(options: { code: string; type: number | string; displayName?: string }): Promise<any>;
 	userList(): Promise<any>;
 }

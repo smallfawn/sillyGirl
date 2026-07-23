@@ -342,8 +342,7 @@ sc.address  // smallcat 地址
 |------|-------------------|------|------|
 | `createQr(type)` | `POST /api/qr/start` | 登录来源类型，如 `1` | 原始 API 响应 |
 | `createQr(options)` | `POST /api/qr/start` | `{ type, openid?, proxyNodeId? }` 等对象 | 原始 API 响应 |
-| `chechQr(uuid)` | `GET /api/qr/status?uuid=...` | 二维码 UUID | 原始 API 响应 |
-| `checkQr(uuid)` | `GET /api/qr/status?uuid=...` | `chechQr` 的别名 | 原始 API 响应 |
+| `checkQr(uuid)` | `GET /api/qr/status?uuid=...` | 二维码 UUID | 原始 API 响应 |
 | `addUser(options)` | `POST /api/accounts/add` | `{ code, type, displayName? }` | 原始 API 响应 |
 | `userList()` | `GET /api/accounts` | 无 | 原始 API 响应 |
 | `request(method, path, body, query)` | 任意 smallcat API | 自定义方法、路径、请求体、查询参数 | 原始 API 响应 |
@@ -371,7 +370,7 @@ if (!qr.status) {
 
 s.reply("扫码地址：" + qr.data.qrcodeUrl);
 
-const checked = sc.chechQr(qr.data.uuid);
+const checked = sc.checkQr(qr.data.uuid);
 if (checked.data.state === "confirmed" && checked.data.wxCode) {
   const saved = sc.addUser({
     code: checked.data.wxCode,
@@ -391,7 +390,6 @@ console.log(users.status, users.message, users.data && users.data.items);
 
 - `new smallcat({ id: 1 })` 只接受对象参数，不支持 `new smallcat(1)`。
 - `addUser` 只接受对象参数，推荐写 `sc.addUser({ code: "xxxxx", type: 1, displayName: "备注" })`。
-- `chechQr` 是兼容当前脚本接口命名的拼写；同时提供 `checkQr` 别名。
 - 只有网络失败、请求体编码失败、JSON 解析失败这类没有 smallcat 原始响应的情况，运行时才会返回 `{ status: false, message: "..." }`。
 
 ### Cron()

@@ -161,7 +161,6 @@ const nodeRuntimePreloadScript = `
     }
     createQr(type) { return this.request("POST", "/api/qr/start", type && typeof type === "object" ? type : { type }); }
     checkQr(uuid) { return this.request("GET", "/api/qr/status", undefined, { uuid }); }
-    chechQr(uuid) { return this.checkQr(uuid); }
     addUser(options) { return this.request("POST", "/api/accounts/add", options || {}); }
     userList() { return this.request("GET", "/api/accounts"); }
   }

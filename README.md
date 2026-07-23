@@ -1,10 +1,7 @@
 # SillyGirl
 
-> 一个可扩展、跨平台的开源机器人框架，内置强大的 JavaScript 插件系统与丰富的交互能力。
-
 [![Go Version](https://img.shields.io/badge/Go-1.18+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-stable-green.svg)]()
 
 ## Docker 快速部署
 
@@ -44,257 +41,215 @@ docker compose up -d
 docker compose logs -f
 ```
 
-## 目录
+## 插件编写
 
-- [简介](#简介)
-- [Docker 快速部署](#docker-快速部署)
-- [Docker Compose](#docker-compose)
-- [核心特性](#核心特性)
-- [架构概览](#架构概览)
-- [快速开始](#快速开始)
-  - [二进制安装](#二进制安装)
-  - [源码编译](#源码编译)
-  - [Docker 部署](#docker-部署)
-  - [第一个插件](#开发第一个插件)
-- [项目结构](#项目结构)
-- [技术栈](#技术栈)
-- [文档](#文档)
-- [版本历史](#版本历史)
-- [致谢](#致谢)
-- [许可](#许可)
+插件是普通 JavaScript 文件，通过头部注释声明名称、规则、版本等元数据。脚本插件可以在 Admin 面板「脚本插件」里编辑，也可以放到 `plugins/插件名/main.js` 使用 NodeJS 运行。
 
-## 简介
+```js
+/**
+ * @title HelloWorld
+ * @rule raw ^你好$
+ * @version v1.0.0
+ * @author custom
+ */
 
-SillyGirl 是一个基于 **Go 语言** 开发的高性能开源机器人框架，其设计核心围绕强大的 **JavaScript 插件系统** 展开。框架内置了完整的 ECMAScript 5.1 运行时（基于 [Goja](https://github.com/dop251/goja) 引擎），允许开发者使用熟悉的 JavaScript 语法编写插件，并通过热重载机制实现功能的动态扩展，无需重启服务。
-
-框架提供了丰富的内置能力：持久化键值存储、Cron 定时任务调度、HTTP/WebSocket 服务、gRPC 跨语言 RPC、Web Admin 管理面板、多平台机器人适配器等。开发者可以通过简单的 JavaScript 脚本快速构建具有复杂交互逻辑的机器人应用，并同时接入多个平台（QQ、Telegram、Web、Pagermaid 等）的多个机器人实例，实现统一的业务逻辑与跨平台消息互通。
-
-## 核心特性
-
-### JavaScript 插件系统
-- **完整 ES5.1 支持**：基于 Goja 引擎，支持闭包、原型链、正则表达式等标准语法
-- **热重载机制**：插件文件变更后自动重新加载，开发调试零停机
-- **丰富的元数据注解**：通过注释声明规则匹配、定时任务、HTTP 路由、权限控制等
-- **Node.js 兼容层**：内置 `request`、`crypto`、`os` 等常用 Node API 的模拟实现
-- **插件市场**：支持订阅远程插件源，一键安装、更新、卸载
-
-### 多平台适配器架构
-- **统一抽象接口**：所有平台通过标准化的 `Sender` 和 `Factory` 接口接入核心引擎
-- **多实例管理**：同一平台可同时接入多个机器人账号，支持负载均衡与故障转移
-- **内置适配器**：QQ（CQHTTP/OQ）、Telegram Bot、Web（内置聊天页）、Pagermaid（Python 桥接）
-- **自定义适配器**：通过 gRPC 或 Go 接口自行开发新平台适配器
-
-### 交互与存储能力
-- **Bucket 持久化存储**：键值对存储抽象，支持 BoltDB（默认）、Redis、MongoDB 后端
-- **存储变更监听**：支持 `watch` 机制，配置变更实时通知插件，实现热配置更新
-- **Cron 定时任务**：基于 `robfig/cron`，支持秒级和分钟级表达式，多平台独立调度
-- **消息监听与等待**：`s.listen()` 支持按规则捕获后续消息，实现对话式交互
-- **群聊管理**：内置禁言、踢人、群组监听/屏蔽等群管能力
-
-### 网络服务
-- **HTTP 服务**：基于 Gin 框架，插件可通过注释声明 HTTP 路由，或运行时动态注册
-- **WebSocket**：内置实时通信通道，Admin 面板与 Web 聊天均基于此
-- **gRPC 服务**：提供跨语言调用的 RPC 接口（Bucket、Plugin、Adapter、Sender 等）
-- **Admin 管理面板**：基于 Vue / Vite 的可视化界面，支持插件管理、存储浏览、日志查看、配置修改
-
-### 运维与扩展
-- **自动升级**：内置版本检测与二进制热更新机制
-- **日志系统**：完整的分级日志框架，支持文件、控制台、ES、Slack、SMTP 等多种后端
-- **容器化部署**：提供 Dockerfile，支持 Docker 一键部署
-- **代理支持**：内置 HTTP/SOCKS5 代理传输层，支持翻墙与内网穿透场景
-
-## 架构概览
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Adapters                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ QQ/TG    │  │   Web    │  │Pagermaid │  │  Custom    │  │
-│  │ Bot API  │  │ (ChatUI) │  │ (Python) │  │  (gRPC)    │  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬──────┘  │
-└───────┼─────────────┼─────────────┼──────────────┼─────────┘
-        │             │             │              │
-        └─────────────┴─────────────┴──────────────┘
-                              │
-                    ┌─────────▼──────────┐
-                    │   Message Router   │
-                    │  (Listen/Reply/    │
-                    │   Group Filter)    │
-                    └─────────┬──────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────┐
-│                      Core Engine                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │   Plugin    │  │   Bucket    │  │   Adapter Manager   │ │
-│  │   Engine    │  │   Storage   │  │   (Factory/Pool)    │ │
-│  │  (Goja VM)  │  │(BoltDB/Redis│  │                     │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │    Cron     │  │   Web/Gin   │  │   gRPC Services     │ │
-│  │  Scheduler  │  │   Server    │  │  (srpc.proto)       │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+s.reply("Hello World!");
 ```
 
-**数据流**：
-1. 适配器接收平台原始消息，构造 `Sender` 对象
-2. 消息进入路由层，进行群组过滤、用户屏蔽、管理员指令处理
-3. 插件引擎按优先级遍历所有插件，正则匹配 `rule` 规则
-4. 匹配的插件在隔离的 Goja 运行时中执行，通过 `Sender` 接口回复
-5. 适配器将回复发回原始平台
+常用元数据：
 
-## 快速开始
+| 字段 | 说明 |
+|------|------|
+| `title` | 插件标题，显示在管理面板和插件市场 |
+| `rule` | 消息匹配规则，可写多条 |
+| `priority` | 匹配优先级，数字越大越优先 |
+| `version` | 插件版本，例如 `v1.0.0` |
+| `author` | 作者 |
+| `description` | 插件说明 |
+| `public` | 是否公开到插件市场 |
+| `disable` | 是否禁用 |
+| `admin` | 是否仅管理员可触发 |
+| `platform` | 限制平台，例如 `qq`、`telegram`、`web` |
 
-### 二进制安装
+规则支持占位捕获：
 
-从 [Releases](../../releases) 下载对应系统的可执行文件：
+```js
+/**
+ * @title 天气示例
+ * @rule 天气 [城市]
+ */
 
-```bash
-# Linux / macOS
-chmod +x sillyGirl
-./sillyGirl -t
-
-# Windows
-sillyGirl.exe -t
+const city = s.param("城市");
+s.reply(city + " 天气晴");
 ```
 
-`-t` 参数开启终端机器人模式，启动后可直接在命令行与程序交互：
+常用 `sender` 方法：
 
+```js
+s.getUserId();       // 用户 ID
+s.getUserName();     // 用户昵称
+s.getChatId();       // 群聊 ID
+s.getPlatform();     // 平台
+s.getContent();      // 消息内容
+s.param("城市");     // 获取规则捕获参数
+s.reply("文本");     // 回复消息
+s.continue();        // 继续匹配后续插件
 ```
-2023/06/01 08:26:40 [I] 默认使用 boltdb 进行数据存储。
-2023/06/01 08:26:40 [I] Http 服务已运行(8080)。
+
+插件配置表单：
+
+```js
+const schema = SillyGirlCreateSchema.object({
+  host: SillyGirlCreateSchema.string()
+    .setTitle("服务地址")
+    .setDefault("http://127.0.0.1:9090"),
+  enabled: SillyGirlCreateSchema.boolean()
+    .setTitle("启用")
+    .setDefault(false),
+});
+
+const ConfigDB = new SillyGirlPluginConfig(schema);
+ConfigDB.get();
+s.reply("当前地址：" + ConfigDB.userConfig.host);
 ```
 
-访问 `http://localhost:8080/admin` 打开 Admin 管理面板。
+持久化存储：
 
-### Telegram Bot
+```js
+const db = Bucket("my-plugin");
+db.set("count", 1);
+db.get("count", 0);
+db.delete("count");
+db.keys();
+```
 
-Telegram 适配器使用 Bot API 长轮询。创建 Bot 后，在存储中设置：
+## 内联函数说明
+
+### qinglong
+
+先在 Admin 面板「青龙容器」中添加青龙地址、`client_id`、`client_secret`。脚本里按页面编号创建实例：
+
+```js
+const ql = new qinglong({ id: 1 });
+```
+
+常用方法：
+
+| 方法 | 说明 |
+|------|------|
+| `getEnvs(options)` | 获取环境变量，支持 `{ searchValue }` |
+| `getEnvById(id)` | 获取单个环境变量 |
+| `createEnv(env)` | 新增环境变量，支持对象或数组 |
+| `updateEnv(env)` | 更新环境变量 |
+| `deleteEnvs(ids)` | 删除环境变量 |
+| `disableEnvs(ids)` | 禁用环境变量 |
+| `enableEnvs(ids)` | 启用环境变量 |
+| `systemNotify(title, content)` | 调用青龙系统通知 |
+| `request(method, path, body, query)` | 调用其他青龙 Open API |
+
+示例：
+
+```js
+const ql = new qinglong({ id: 1 });
+const envs = ql.getEnvs({ searchValue: "JD_COOKIE" });
+s.reply("匹配到 " + envs.length + " 个变量");
+```
+
+注意：`new qinglong({ id: 1 })` 只接受对象参数，不支持 `new qinglong(1)`。
+
+### smallcat
+
+先在 Admin 面板「smallcat」中添加地址和 `api_auth`。脚本里按页面编号创建实例：
+
+```js
+const sc = new smallcat({ id: 1 });
+```
+
+常用方法：
+
+| 方法 | 说明 |
+|------|------|
+| `createQr(type)` | 创建二维码 |
+| `createQr(options)` | 创建二维码，支持对象参数 |
+| `checkQr(uuid)` | 检查二维码状态 |
+| `addUser(options)` | 添加用户，参数 `{ code, type, displayName? }` |
+| `userList()` | 获取用户列表 |
+| `request(method, path, body, query)` | 调用其他 smallcat API |
+
+示例：
+
+```js
+const sc = new smallcat({ id: 1 });
+const qr = sc.createQr(1);
+if (!qr.status) {
+  s.reply("生成二维码失败：" + qr.message);
+  return;
+}
+
+const checked = sc.checkQr(qr.data.uuid);
+s.reply("扫码状态：" + checked.data.state);
+```
+
+smallcat 返回值保持原始 API 响应，不额外改写。
+
+### Cron
+
+```js
+const task = Cron();
+const ret = task.add("*/5 * * * * *", () => {
+  console.log("每 5 秒执行一次");
+});
+
+task.remove(ret.id);
+```
+
+定时执行推荐在 Admin 面板「定时任务」里配置。
+
+### Express
+
+```js
+const app = Express();
+
+app.get("/hello", (req, res) => {
+  res.send("Hello World!");
+});
+```
+
+Web 插件需要声明 `@web true`。
+
+## 功能说明
+
+| 功能 | 说明 |
+|------|------|
+| 管理面板 | Vue 管理后台，支持脚本、插件市场、配置、存储、任务等管理 |
+| 脚本插件 | 支持 JS 代码高亮、格式化、文件管理和在线编辑 |
+| 插件市场 | 支持管理插件源，从 GitHub 仓库 `plugins/` 目录导入插件 |
+| 插件配置 | 支持 `SillyGirlCreateSchema` / `SillyGirlPluginConfig` 声明式配置表单 |
+| 依赖管理 | 使用 pnpm 管理 NodeJS 插件依赖，支持安装和卸载 |
+| NodeJS 运行 | `plugins/插件名/main.js` 走 NodeJS 运行时 |
+| 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
+| 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new qinglong({ id })` 调用 |
+| smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new smallcat({ id })` 调用 |
+| 适配器 | 内置 QQ、Telegram Bot、Web、Pagermaid 等适配器 |
+| 定时任务 | 支持 Cron 表达式和脚本触发 |
+| Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub / GHCR 镜像 |
+
+后台首次访问规则：
+
+- 未设置 `sillyGirl.password` 时，本机访问可直接进入。
+- 非本机访问需要先设置后台密码。
+- 设置位置：Admin 面板「基础设置」里的后台账号名和修改密码。
+
+Telegram Bot 配置：
 
 | 存储桶 | 键 | 说明 |
 |------|----|------|
 | `telegram` | `token` | BotFather 提供的 Bot Token |
 | `telegram` | `enable` | 可选，设为 `false` 时禁用 |
 | `telegram` | `api_base` | 可选，默认 `https://api.telegram.org` |
-| `telegram` | `drop_pending_updates` | 可选，默认 `true`，启动时丢弃历史积压消息 |
+| `telegram` | `drop_pending_updates` | 可选，默认 `true` |
 
-也兼容读取 `tg.token`。配置 token 后适配器会自动启动；脚本侧平台名为 `telegram`。
-
-### 源码编译
-
-```bash
-git clone https://github.com/smallfawn/sillyGirl.git
-cd sillyGirl
-go build -o sillyGirl
-```
-
-### Docker 部署
-
-```bash
-docker pull smallfawn/sillygirl:latest
-docker run -d -p 8080:8080 -v $(pwd)/data:/data smallfawn/sillygirl:latest
-```
-
-### 开发第一个插件
-
-创建 `hello.js`：
-
-```js
-/**
- * @title HelloWorld
- * @rule raw ^你好$
- */
-
-s.reply("Hello World!");
-```
-
-在终端输入 `你好`，即可看到回复 `Hello World!`。
-
-**进阶示例 — 猜拳游戏**：
-
-```js
-/**
- * @title 猜拳游戏
- * @rule 猜拳
- */
-
-s.reply("你先出，请在10秒内出拳！");
-const result = s.listen({
-  rules: ["[出拳:剪刀,石头,布]"],
-  timeout: 10000,
-  handle: (s) => {
-    const choose = s.param("出拳");
-    const win = { "石头": "布", "剪刀": "石头", "布": "剪刀" };
-    s.reply(`我出${win[choose]}，我赢了！`);
-  },
-});
-if (!result) {
-  s.reply("你没出拳，算我赢了！");
-}
-```
-
-更多开发文档见 [docs/](docs/)。
-
-## 项目结构
-
-```
-sillyGirl/
-├── adapters/              # 平台适配器
-│   ├── qq/               # QQ 机器人适配器
-│   ├── telegram/         # Telegram Bot 适配器
-│   ├── web/              # Web 聊天适配器
-│   └── pagermaid/        # Pagermaid 桥接适配器
-├── core/                  # 核心框架
-│   ├── admin/            # Vue 管理面板（编译产物，embed）
-│   ├── common/           # 公共接口定义（Sender、Function）
-│   ├── logs/             # 分级日志框架
-│   ├── storage/          # 存储抽象与后端实现
-│   ├── adapter.go        # 适配器工厂与消息收发
-│   ├── bucket.go         # Bucket 键值存储
-│   ├── function.go       # 消息路由与规则匹配
-│   ├── init.go           # 系统初始化流程
-│   ├── plugin_core.go    # 插件引擎（加载/卸载/热重载）
-│   ├── plugin_impl.go    # JS API 实现（Sender、Cron、Bucket）
-│   ├── web.go            # Gin Web 服务器与 Admin 面板
-│   └── grpc_*.go         # gRPC 服务实现
-├── proto3/               # Protobuf 定义与多语言生成代码
-├── mongodb/              # MongoDB 存储后端
-├── emoji/                # Emoji 数据处理
-├── docs/                 # 项目文档
-├── main.go               # 程序入口
-├── go.mod                # Go 模块依赖
-└── .dockerfile           # 容器构建配置
-```
-
-## 技术栈
-
-| 层次 | 技术 | 说明 |
-|------|------|------|
-| 语言 | Go 1.18+ | 核心框架开发语言 |
-| JS 运行时 | [Goja](https://github.com/dop251/goja) | ECMAScript 5.1，纯 Go 实现 |
-| Web 框架 | [Gin](https://github.com/gin-gonic/gin) | HTTP 服务与 REST API |
-| 前端 | Vue / Vite / Ant Design Vue | Admin 管理面板 |
-| 存储 | BoltDB / Redis / MongoDB | 键值对持久化 |
-| 定时任务 | [robfig/cron/v3](https://github.com/robfig/cron) | Cron 表达式调度 |
-| RPC | [gRPC](https://grpc.io) | 跨语言服务接口 |
-| 消息协议 | CQHTTP / Telegram Bot API / 自定义 | QQ、Telegram 等平台的通信协议 |
-
-## 文档
-
-| 文档 | 说明 |
-|------|------|
-| [docs/quickstart.md](docs/quickstart.md) | 详细安装与配置指南 |
-| [docs/plugin-dev.md](docs/plugin-dev.md) | 插件开发完整指南与 API 详解 |
-| [docs/architecture.md](docs/architecture.md) | 架构设计与核心模块分析 |
-| [docs/api-reference.md](docs/api-reference.md) | REST、gRPC 与 JavaScript API 参考 |
-| [docs/deployment.md](docs/deployment.md) | 二进制、Docker 与反向代理部署 |
-
-## 版本历史
-
-本项目经历了两个主要阶段：
-
-- **v1 (2021)** — 早期探索版本，基于直接函数调用的简单机器人框架
-- **v2 (2023)** — 全面重构，引入 Goja JS 插件系统、Bucket 存储抽象、gRPC 服务、Admin 面板等现代架构
+更多细节见 `docs/` 目录。
 
 ## 致谢
 
@@ -305,7 +260,3 @@ sillyGirl/
 ## 许可
 
 [MIT](LICENSE)
-
----
-
-*本项目不再活跃维护，但代码和文档保持开源状态，供社区参考和使用。*

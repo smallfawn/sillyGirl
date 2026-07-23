@@ -41,7 +41,6 @@ func installSmallcatRuntime(vm *goja.Runtime) {
 		o.Set("request", client.Request)
 		o.Set("createQr", client.CreateQr)
 		o.Set("checkQr", client.CheckQr)
-		o.Set("chechQr", client.CheckQr)
 		o.Set("addUser", client.AddUser)
 		o.Set("userList", client.UserList)
 		return o
