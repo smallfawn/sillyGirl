@@ -78,6 +78,7 @@ docker pull smallfawn/sillygirl:latest
 docker run -d \
   --name sillygirl \
   -p 8080:8080 \
+  -e SILLYGIRL_DATA_PATH=/data \
   -v $(pwd)/data:/data \
   --restart unless-stopped \
   smallfawn/sillygirl:latest
@@ -100,7 +101,7 @@ docker logs -f sillygirl
 
 ### 访问管理面板
 
-打开浏览器访问 `http://localhost:8080/admin`。未设置后台密码时仅允许本机访问；如果需要在局域网或公网访问，请先在存储中设置 `sillyGirl.password`。
+打开浏览器访问 `http://localhost:8080/admin`。首次访问会要求创建后台管理员账号和密码；创建成功后才会进入管理面板。
 
 ### 终端模式交互
 

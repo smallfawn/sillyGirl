@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +17,7 @@ import (
 var authBucket = MakeBucket("auths")
 var auths = []*Auth{}
 var password = ""
+var setupLock sync.Mutex
 
 func init() {
 	storage.Watch(sillyGirl, "name", func(old, new, key string) *storage.Final {
@@ -59,17 +59,74 @@ func init() {
 		return nil
 	})
 	///可视化部分
+	GinApi(GET, "/api/setup/status", func(ctx *gin.Context) {
+		ctx.JSON(200, map[string]interface{}{
+			"success": true,
+			"data": map[string]interface{}{
+				"initialized": strings.TrimSpace(password) != "",
+			},
+		})
+	})
+	GinApi(POST, "/api/setup/admin", func(ctx *gin.Context) {
+		setupLock.Lock()
+		defer setupLock.Unlock()
+		if strings.TrimSpace(password) != "" {
+			ctx.JSON(200, map[string]interface{}{
+				"success": false,
+				"errorMessage": "后台账号已初始化",
+			})
+			return
+		}
+		payload := struct {
+			Password string `json:"password"`
+			Username string `json:"username"`
+		}{}
+		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		payload.Username = strings.TrimSpace(payload.Username)
+		if payload.Username == "" {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "账号不能为空"})
+			return
+		}
+		if strings.TrimSpace(payload.Password) == "" {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "密码不能为空"})
+			return
+		}
+		sillyGirl.Set("name", payload.Username)
+		sillyGirl.Set("password", payload.Password)
+		name = payload.Username
+		token := utils.GenUUID()
+		auth := &Auth{
+			IP:        ctx.ClientIP(),
+			UserAgent: ctx.Request.UserAgent(),
+			Token:     token,
+			CreatedAt: int(time.Now().Unix()),
+		}
+		authBucket.Create(auth)
+		auths = append(auths, auth)
+		ctx.SetCookie("token", token, 86400, "/", "", false, true)
+		ctx.JSON(200, map[string]interface{}{
+			"success":          true,
+			"status":           "ok",
+			"type":             "account",
+			"currentAuthority": "admin",
+		})
+	})
 	GinApi(POST, "/api/login/account", func(ctx *gin.Context) {
 		var auth = struct {
 			Password string `json:"password"`
 			Username string `json:"username"`
 		}{}
 		json.NewDecoder(ctx.Request.Body).Decode(&auth)
-		if password == "" && !isLoopbackRequest(ctx) {
+		if strings.TrimSpace(password) == "" {
 			ctx.JSON(200, map[string]interface{}{
-				"status":           "error",
+				"success":          true,
+				"status":           "setup_required",
 				"type":             "account",
 				"currentAuthority": "guest",
+				"setupRequired":    true,
 			})
 			return
 		}
@@ -275,20 +332,18 @@ func checkTempAuth(uuid string) bool {
 }
 
 func RequireAuth(c *gin.Context) {
-	if password == "" {
-		if isLoopbackRequest(c) {
-			return
-		}
+	if strings.TrimSpace(password) == "" {
 		c.JSON(401, map[string]interface{}{
 			"data": map[string]interface{}{
-				"isLogin": false,
+				"isLogin":       false,
+				"setupRequired": true,
 			},
 			"errorCode":    "401",
-			"errorMessage": "后台未设置密码，仅允许本机访问",
+			"errorMessage": "后台未初始化，请先设置账号密码",
 			"success":      true,
 			"showType":     9,
 		})
-		panic(errors.New("后台未设置密码，仅允许本机访问"))
+		panic(errors.New("后台未初始化，请先设置账号密码"))
 	}
 	token, _ := c.Cookie("token")
 	_, err := CheckAuth(token)
@@ -304,15 +359,6 @@ func RequireAuth(c *gin.Context) {
 		})
 		panic(err)
 	}
-}
-
-func isLoopbackRequest(c *gin.Context) bool {
-	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-	if err != nil {
-		host = c.Request.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func CheckAuth(token string) (*Auth, error) {

@@ -11,11 +11,12 @@ docker run -d \
   --name sillygirl \
   --restart unless-stopped \
   -p 8080:8080 \
+  -e SILLYGIRL_DATA_PATH=/data \
   -v $(pwd)/data:/data \
   smallfawn/sillygirl:latest
 ```
 
-访问 `http://localhost:8080/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件和运行数据。
+访问 `http://localhost:8080/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件、配置和 NodeJS 运行文件。
 
 ## Docker Compose
 
@@ -29,6 +30,8 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    environment:
+      SILLYGIRL_DATA_PATH: /data
     volumes:
       - ./data:/data
 ```
@@ -236,9 +239,9 @@ Web 插件需要声明 `@web true`。
 
 后台首次访问规则：
 
-- 未设置 `sillyGirl.password` 时，本机访问可直接进入。
-- 非本机访问需要先设置后台密码。
-- 设置位置：Admin 面板「基础设置」里的后台账号名和修改密码。
+- 未设置 `sillyGirl.password` 时，首次打开后台会强制创建管理员账号和密码。
+- 初始化成功后才会进入管理页面，并写入登录 Cookie。
+- 初始化后可在 Admin 面板「基础设置」中修改后台账号名和密码。
 
 Telegram Bot 配置：
 

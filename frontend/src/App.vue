@@ -89,6 +89,8 @@ const booting = ref(true);
 const page = ref<PageKey>(pageFromPath());
 const selectedScriptId = ref(scriptIdFromPath());
 const loginModel = reactive({ username: '傻妞', password: '' });
+const setupRequired = ref(false);
+const setupModel = reactive({ username: '傻妞', password: '', confirm: '' });
 
 const scripts = computed(() => user.value?.plugins || []);
 const realScripts = computed(() => scripts.value.filter((item) => item.path?.startsWith('/script/') && !item.name?.startsWith('+')));
@@ -180,21 +182,36 @@ function navigate(next: PageKey, path?: string) {
   selectedScriptId.value = scriptIdFromPath();
 }
 
-async function loadUser() {
-  booting.value = true;
+async function loadSetupStatus() {
+  const res = await get<{ success: boolean; data: { initialized: boolean } }>('/api/setup/status');
+  setupRequired.value = !res.data?.initialized;
+  return !!res.data?.initialized;
+}
+
+async function loadUser(setBooting = true) {
+  if (setBooting) booting.value = true;
   try {
     const res = await get<{ success: boolean; data: CurrentUser }>('/api/currentUser');
     user.value = res.data || {};
+    setupRequired.value = false;
   } catch (error) {
     if (error instanceof ApiError && error.status !== 401) message.error(error.message);
     user.value = null;
+    if (error instanceof ApiError && error.status === 401) {
+      await loadSetupStatus().catch(() => undefined);
+    }
   } finally {
-    booting.value = false;
+    if (setBooting) booting.value = false;
   }
 }
 
 async function login() {
   const res = await post<{ status: string }>('/api/login/account', loginModel);
+  if (res.status === 'setup_required') {
+    setupRequired.value = true;
+    message.error('请先设置管理员账号和密码');
+    return;
+  }
   if (res.status !== 'ok') {
     message.error('账号或密码不正确');
     return;
@@ -203,13 +220,50 @@ async function login() {
   await loadUser();
 }
 
+async function setupAdmin() {
+  if (!setupModel.username.trim()) {
+    message.error('账号不能为空');
+    return;
+  }
+  if (!setupModel.password.trim()) {
+    message.error('密码不能为空');
+    return;
+  }
+  if (setupModel.password !== setupModel.confirm) {
+    message.error('两次输入的密码不一致');
+    return;
+  }
+  await post('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
+  message.success('账号已创建');
+  setupRequired.value = false;
+  loginModel.username = setupModel.username.trim();
+  loginModel.password = '';
+  setupModel.password = '';
+  setupModel.confirm = '';
+  await loadUser();
+}
+
 async function logout() {
   await post('/api/login/outLogin').catch(() => undefined);
   user.value = null;
 }
 
+async function bootApp() {
+  booting.value = true;
+  try {
+    const initialized = await loadSetupStatus();
+    if (initialized) {
+      await loadUser(false);
+    } else {
+      user.value = null;
+    }
+  } finally {
+    booting.value = false;
+  }
+}
+
 onMounted(() => {
-  loadUser();
+  bootApp();
   window.addEventListener('popstate', () => {
     page.value = pageFromPath();
     selectedScriptId.value = scriptIdFromPath();
@@ -1125,19 +1179,39 @@ function recordOptions(record?: Record<string, string>) {
     <AntApp>
       <div v-if="!booting && !user" class="login-page">
         <div class="login-card">
-          <Typography.Title :level="3" style="margin-top: 0">SillyGirl Admin</Typography.Title>
-          <Typography.Paragraph class="muted">使用 sillyGirl.name 和 sillyGirl.password 登录。</Typography.Paragraph>
-          <Form layout="vertical" @finish="login">
-            <Form.Item label="账号" required>
-              <Input v-model:value="loginModel.username">
-                <template #prefix><User :size="16" /></template>
-              </Input>
-            </Form.Item>
-            <Form.Item label="密码" required>
-              <Input.Password v-model:value="loginModel.password" />
-            </Form.Item>
-            <Button type="primary" html-type="submit" block>登录</Button>
-          </Form>
+          <template v-if="setupRequired">
+            <Typography.Title :level="3" style="margin-top: 0">初始化管理员</Typography.Title>
+            <Typography.Paragraph class="muted">首次使用需要创建后台账号和密码。</Typography.Paragraph>
+            <Form layout="vertical" @finish="setupAdmin">
+              <Form.Item label="账号" required>
+                <Input v-model:value="setupModel.username">
+                  <template #prefix><User :size="16" /></template>
+                </Input>
+              </Form.Item>
+              <Form.Item label="密码" required>
+                <Input.Password v-model:value="setupModel.password" />
+              </Form.Item>
+              <Form.Item label="确认密码" required>
+                <Input.Password v-model:value="setupModel.confirm" />
+              </Form.Item>
+              <Button type="primary" html-type="submit" block>创建账号</Button>
+            </Form>
+          </template>
+          <template v-else>
+            <Typography.Title :level="3" style="margin-top: 0">SillyGirl Admin</Typography.Title>
+            <Typography.Paragraph class="muted">使用后台账号和密码登录。</Typography.Paragraph>
+            <Form layout="vertical" @finish="login">
+              <Form.Item label="账号" required>
+                <Input v-model:value="loginModel.username">
+                  <template #prefix><User :size="16" /></template>
+                </Input>
+              </Form.Item>
+              <Form.Item label="密码" required>
+                <Input.Password v-model:value="loginModel.password" />
+              </Form.Item>
+              <Button type="primary" html-type="submit" block>登录</Button>
+            </Form>
+          </template>
         </div>
       </div>
 

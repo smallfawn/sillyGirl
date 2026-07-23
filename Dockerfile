@@ -31,12 +31,17 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /data/plugins /data/conf /data/language \
+    && ln -s /data/plugins /app/plugins \
+    && ln -s /data/conf /app/conf \
+    && ln -s /data/language /app/language
 
 COPY --from=builder /out/sillyGirl /app/sillyGirl
 
-ENV TZ=Asia/Shanghai
+ENV TZ=Asia/Shanghai \
+    SILLYGIRL_DATA_PATH=/data
 EXPOSE 8080 50051
-VOLUME ["/app/.sillyGirl", "/app/plugins", "/app/conf"]
+VOLUME ["/data"]
 
-ENTRYPOINT ["/app/sillyGirl"]
+ENTRYPOINT ["sh", "-c", "mkdir -p /data/plugins /data/conf /data/language && exec /app/sillyGirl \"$@\"", "--"]
