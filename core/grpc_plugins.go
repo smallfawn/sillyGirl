@@ -28,7 +28,6 @@ func init() {
 var processes sync.Map
 
 func initNodePlugins() {
-	initLanguage()
 	root := strings.ReplaceAll(nodePluginsRoot(), "\\", "/")
 	plugins := []string{root}
 	os.Mkdir(root, 0755)
@@ -245,7 +244,12 @@ func AddNodePlugin(path, name, class string) error {
 		var cmd *exec.Cmd
 		switch class {
 		case NODE:
-			bin = utils.ExecPath + "/language/node/node"
+			var err error
+			bin, err = resolveNodeCommand()
+			if err != nil {
+				console.Error("NodeJS 运行时未找到：%v", err)
+				return nil
+			}
 			if preload, err := ensureNodeRuntimePreload(); err == nil {
 				cmd = exec.Command(bin, "--require", preload, path)
 			} else {
@@ -553,6 +557,29 @@ func FindMainIndex(home string) (string, string) {
 	if info, err := os.Stat(home + "/main.py"); err == nil && !info.IsDir() {
 		return home + "/main.py", PYTHON
 	}
+	pluginName := filepath.Base(filepath.Clean(home))
+	if pluginName != "." && pluginName != string(filepath.Separator) {
+		index := filepath.Join(home, pluginName+".js")
+		if info, err := os.Stat(index); err == nil && !info.IsDir() {
+			return strings.ReplaceAll(index, "\\", "/"), NODE
+		}
+	}
+	files, err := os.ReadDir(home)
+	if err == nil {
+		indexes := []string{}
+		for _, file := range files {
+			if file.IsDir() || !strings.EqualFold(filepath.Ext(file.Name()), ".js") {
+				continue
+			}
+			if file.Name() == "demo.main.js" {
+				continue
+			}
+			indexes = append(indexes, filepath.Join(home, file.Name()))
+		}
+		if len(indexes) == 1 {
+			return strings.ReplaceAll(indexes[0], "\\", "/"), NODE
+		}
+	}
 	return "", ""
 }
 
@@ -562,6 +589,9 @@ func CheckMainIndex(filename string) (string, bool) {
 		return NODE, true
 	case "main.py":
 		return PYTHON, true
+	}
+	if strings.EqualFold(filepath.Ext(filename), ".js") && filename != "demo.main.js" {
+		return NODE, true
 	}
 	return "", false
 }

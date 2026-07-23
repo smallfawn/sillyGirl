@@ -24,6 +24,7 @@ import (
 )
 
 var pluginLock = new(sync.Mutex)
+var plugin_dir = nodePluginsRoot()
 
 type myFieldNameMapper struct{}
 

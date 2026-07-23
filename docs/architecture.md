@@ -266,7 +266,6 @@ gRPC 服务使 SillyGirl 可以被其他语言编写的客户端调用。
 | Bucket 操作 | `grpc_bucket.go` | 存储读写、监听 |
 | Adapter 管理 | `grpc_adapter.go` | 适配器注册、接收、推送 |
 | Plugin 管理 | `grpc_plugins.go` | 插件安装、卸载、列表 |
-| Asset 管理 | `grpc_asset.go` | 静态资源 |
 | Queue 服务 | `grpc_queue.go` | 队列操作 |
 | Runtime 服务 | `grpc_runtime.go` | 运行时控制 |
 

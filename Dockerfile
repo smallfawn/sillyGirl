@@ -38,10 +38,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable \
     && corepack prepare pnpm@11.16.0 --activate \
-    && mkdir -p /data/plugins /data/conf /data/language \
+    && mkdir -p /data/plugins /data/conf \
     && ln -s /data/plugins /app/plugins \
-    && ln -s /data/conf /app/conf \
-    && ln -s /data/language /app/language
+    && ln -s /data/conf /app/conf
 
 COPY --from=builder /out/sillyGirl /app/sillyGirl
 
@@ -50,4 +49,4 @@ ENV TZ=Asia/Shanghai \
 EXPOSE 8080 50051
 VOLUME ["/data"]
 
-ENTRYPOINT ["sh", "-c", "mkdir -p /data/plugins /data/conf /data/language && exec /app/sillyGirl \"$@\"", "--"]
+ENTRYPOINT ["sh", "-c", "mkdir -p /data/plugins /data/conf && rm -rf /data/language/node && rmdir /data/language 2>/dev/null || true; exec /app/sillyGirl \"$@\"", "--"]

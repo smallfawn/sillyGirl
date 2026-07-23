@@ -815,7 +815,7 @@ func installGithubNodePlugin(address string) error {
 	if err != nil {
 		return err
 	}
-	mainFile := filepath.Join(target, "main.js")
+	mainFile := filepath.Join(target, filepath.Base(pluginPath))
 	if err := ensureChildPath(target, mainFile); err != nil {
 		return err
 	}

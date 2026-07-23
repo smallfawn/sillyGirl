@@ -18,7 +18,7 @@ docker run -d \
   smallfawn/sillygirl:latest
 ```
 
-访问 `http://localhost:8080/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件、配置和 NodeJS 运行文件。
+访问 `http://localhost:8080/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件和配置。
 
 ## Docker Compose
 

@@ -980,11 +980,13 @@ const nodeDeps = reactive({
   plugin: '',
   rows: [] as NodeDependencyRow[],
   packageName: '',
+  registry: 'https://registry.npmmirror.com',
   dev: false,
   loading: false,
   saving: false,
+  savingRegistry: false,
   removing: {} as Record<string, boolean>,
-  pnpm: { available: false, path: '', message: '' } as { available: boolean; path?: string; message?: string },
+  pnpm: { available: false, path: '', message: '', registry: '' } as { available: boolean; path?: string; message?: string; registry?: string },
 });
 async function loadNodeDependencies(plugin = '') {
   nodeDeps.loading = true;
@@ -995,8 +997,20 @@ async function loadNodeDependencies(plugin = '') {
     nodeDeps.plugin = res.data.plugin || '';
     nodeDeps.rows = res.data.dependencies || [];
     nodeDeps.pnpm = res.data.pnpm || { available: false };
+    nodeDeps.registry = nodeDeps.pnpm.registry || 'https://registry.npmmirror.com';
   } finally {
     nodeDeps.loading = false;
+  }
+}
+async function saveNodeDependencyRegistry() {
+  nodeDeps.savingRegistry = true;
+  try {
+    const res = await put<{ data: { registry: string } }>('/api/node/dependency/registry', { registry: nodeDeps.registry });
+    nodeDeps.registry = res.data?.registry || nodeDeps.registry;
+    nodeDeps.pnpm.registry = nodeDeps.registry;
+    message.success('pnpm 镜像已保存');
+  } finally {
+    nodeDeps.savingRegistry = false;
   }
 }
 async function installNodeDependency() {
@@ -1481,6 +1495,12 @@ function recordOptions(record?: Record<string, string>) {
                 <Button type="primary" :disabled="!nodeDeps.pnpm.available || nodeDeps.plugins.length !== 1" :loading="nodeDeps.saving" @click="installNodeDependency">
                   <template #icon><Download :size="16" /></template>安装依赖
                 </Button>
+                <Space.Compact>
+                  <Input v-model:value="nodeDeps.registry" style="width: 300px" placeholder="pnpm 镜像地址" @press-enter="saveNodeDependencyRegistry" />
+                  <Button :loading="nodeDeps.savingRegistry" @click="saveNodeDependencyRegistry">
+                    <template #icon><Save :size="16" /></template>保存镜像
+                  </Button>
+                </Space.Compact>
               </div>
               <Table :row-key="(row:any) => `${row.plugin}.${row.name}`" :loading="nodeDeps.loading" :data-source="nodeDeps.rows" :pagination="{ pageSize: 20 }">
                 <Table.Column title="#" :width="64">

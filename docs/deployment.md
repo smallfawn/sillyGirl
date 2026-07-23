@@ -110,7 +110,7 @@ docker run -d \
   smallfawn/sillygirl:latest
 ```
 
-镜像默认使用 `/data` 作为数据目录，`/app/plugins`、`/app/conf`、`/app/language` 会指向 `/data` 下的对应目录，所以只需要映射 `./data:/data` 即可持久化数据库、插件、配置和 NodeJS 运行文件。
+镜像默认使用 `/data` 作为数据目录，`/app/plugins`、`/app/conf` 会指向 `/data` 下的对应目录，所以只需要映射 `./data:/data` 即可持久化数据库、插件和配置。
 
 ### Docker Compose
 

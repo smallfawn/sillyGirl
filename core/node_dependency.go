@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +62,8 @@ type pnpmCommand struct {
 	Args []string
 }
 
+const defaultPnpmRegistry = "https://registry.npmmirror.com"
+
 func init() {
 	GinApi(GET, "/api/node/dependencies", RequireAuth, func(ctx *gin.Context) {
 		pluginName := strings.TrimSpace(ctx.Query("plugin"))
@@ -74,6 +77,7 @@ func init() {
 				"available": err == nil,
 				"path":      pnpm.Bin,
 				"message":   "",
+				"registry":  pnpmRegistry(),
 			},
 		}
 		if err != nil {
@@ -104,6 +108,23 @@ func init() {
 			data["dependencies"] = rows
 		}
 		ctx.JSON(200, map[string]interface{}{"success": true, "data": data})
+	})
+
+	GinApi(PUT, "/api/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
+		req := struct {
+			Registry string `json:"registry"`
+		}{}
+		if err := ctx.BindJSON(&req); err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		registry, err := normalizePnpmRegistry(req.Registry)
+		if err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		sillyGirl.Set("pnpm_registry", registry)
+		ctx.JSON(200, map[string]interface{}{"success": true, "data": map[string]string{"registry": registry}})
 	})
 
 	GinApi(POST, "/api/node/dependency", RequireAuth, func(ctx *gin.Context) {
@@ -279,7 +300,11 @@ func nodeDependencyPluginByName(plugins []nodeDependencyPlugin, name string) (no
 		}
 	}
 	if dir, err := nodePluginDir(name); err == nil {
-		return nodeDependencyPlugin{Name: name, Title: name, File: "main.js", Path: dir}, nil
+		file := "main.js"
+		if index, class := FindMainIndex(strings.ReplaceAll(dir, "\\", "/")); index != "" && class == NODE {
+			file = filepath.Base(index)
+		}
+		return nodeDependencyPlugin{Name: name, Title: name, File: file, Path: dir}, nil
 	}
 	return nodeDependencyPlugin{}, errors.New("NodeJS 脚本插件不存在")
 }
@@ -297,7 +322,7 @@ func nodePluginNameFromPath(path string) string {
 		return ""
 	}
 	dir := filepath.Dir(filepath.Clean(path))
-	if filepath.Base(path) == "main.js" {
+	if strings.EqualFold(filepath.Ext(path), ".js") {
 		return filepath.Base(dir)
 	}
 	return ""
@@ -339,8 +364,8 @@ func checkedNodePluginDir(dir string) (string, error) {
 
 func checkedNodeScriptPath(path string) (string, error) {
 	clean := filepath.Clean(path)
-	if filepath.Base(clean) != "main.js" {
-		return "", errors.New("只允许编辑 NodeJS 插件入口 main.js")
+	if !strings.EqualFold(filepath.Ext(clean), ".js") {
+		return "", errors.New("只允许编辑 NodeJS 插件入口 JS 文件")
 	}
 	if _, err := checkedNodePluginDir(filepath.Dir(clean)); err != nil {
 		return "", err
@@ -467,7 +492,11 @@ func readNodeDependencies(plugin nodeDependencyPlugin) ([]nodeDependencyRow, err
 }
 
 func nodePluginRequiredDependencies(dir string) []string {
-	data, err := os.ReadFile(filepath.Join(dir, "main.js"))
+	index, class := FindMainIndex(strings.ReplaceAll(dir, "\\", "/"))
+	if index == "" || class != NODE {
+		return nil
+	}
+	data, err := os.ReadFile(index)
 	if err != nil {
 		return nil
 	}
@@ -618,13 +647,17 @@ func runPnpm(dir string, args ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	registry := pnpmRegistry()
 	cmdArgs := append([]string{}, pnpm.Args...)
 	cmdArgs = append(cmdArgs, args...)
+	if registry != "" {
+		cmdArgs = append(cmdArgs, "--registry", registry)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, pnpm.Bin, cmdArgs...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "PATH="+nodePathWithRuntime())
+	cmd.Env = os.Environ()
 	data, err := cmd.CombinedOutput()
 	output := strings.TrimSpace(string(data))
 	if ctx.Err() == context.DeadlineExceeded {
@@ -648,30 +681,45 @@ func resolvePnpmCommand() (pnpmCommand, error) {
 			return pnpmCommand{Bin: path}, nil
 		}
 	}
-	nodeDir := filepath.Join(utils.ExecPath, "language", "node")
-	for _, name := range []string{"pnpm", "pnpm.cmd", "pnpm.exe"} {
-		path := filepath.Join(nodeDir, name)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return pnpmCommand{Bin: path}, nil
-		}
-	}
 	for _, name := range []string{"corepack", "corepack.cmd", "corepack.exe"} {
 		if path, err := exec.LookPath(name); err == nil {
-			return pnpmCommand{Bin: path, Args: []string{"pnpm"}}, nil
-		}
-		path := filepath.Join(nodeDir, name)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			return pnpmCommand{Bin: path, Args: []string{"pnpm"}}, nil
 		}
 	}
 	return pnpmCommand{}, errors.New("未找到 pnpm，请先安装 pnpm 或启用 Node.js corepack")
 }
 
-func nodePathWithRuntime() string {
-	nodeDir := filepath.Join(utils.ExecPath, "language", "node")
-	path := os.Getenv("PATH")
-	if path == "" {
-		return nodeDir
+func pnpmRegistry() string {
+	registry := strings.TrimSpace(sillyGirl.GetString("pnpm_registry"))
+	if registry == "" {
+		return defaultPnpmRegistry
 	}
-	return nodeDir + string(os.PathListSeparator) + path
+	return registry
+}
+
+func normalizePnpmRegistry(registry string) (string, error) {
+	registry = strings.TrimSpace(registry)
+	if registry == "" {
+		registry = defaultPnpmRegistry
+	}
+	parsed, err := url.Parse(registry)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("pnpm 镜像地址格式错误")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("pnpm 镜像地址只支持 http 或 https")
+	}
+	return strings.TrimRight(registry, "/"), nil
+}
+
+func resolveNodeCommand() (string, error) {
+	if env := strings.TrimSpace(os.Getenv("SILLYGIRL_NODE")); env != "" {
+		return env, nil
+	}
+	for _, name := range []string{"node", "node.exe"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path, nil
+		}
+	}
+	return "", errors.New("未找到 node，请先安装 Node.js 或使用 Docker 镜像内置 Node")
 }
