@@ -273,6 +273,11 @@ func AddNodePlugin(path, name, class string) error {
 		cmd.Dir = filepath.Dir(path)
 		RUNTIME_ID := utils.GenUUID()
 		cmd.Env = append(os.Environ(), cmd.Env...)
+		if class == NODE {
+			if nodePath := nodeRuntimeNodePath(); nodePath != "" {
+				cmd.Env = append(cmd.Env, "NODE_PATH="+nodePath)
+			}
+		}
 		cmd.Env = append(cmd.Env, "RUNTIME_ID="+RUNTIME_ID)
 		cmd.Env = append(cmd.Env, "PLUGIN_ID="+uuid)
 		// 获取标准输出和标准错误输出的管道

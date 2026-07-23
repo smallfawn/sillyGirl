@@ -811,7 +811,7 @@ func ensureNodeRuntimeDependencies(dir string) error {
 	}
 	missing := false
 	for name := range nodeSillygirlRuntimeDependencies {
-		if !nodeDependencyInstalled(dir, name) {
+		if !nodeRuntimeDependencyInstalled(dir, name) {
 			missing = true
 			break
 		}
@@ -827,19 +827,71 @@ func ensureNodeRuntimeDependencies(dir string) error {
 }
 
 func nodeDependencyInstalled(dir, name string) bool {
+	return nodeDependencyInstalledAt(filepath.Join(dir, "node_modules"), name)
+}
+
+func nodeRuntimeDependencyInstalled(dir, name string) bool {
+	if nodeDependencyInstalled(dir, name) {
+		return true
+	}
+	for _, root := range nodeRuntimeModulePaths() {
+		if nodeDependencyInstalledAt(root, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeDependencyInstalledAt(root, name string) bool {
+	if root == "" {
+		return false
+	}
 	parts := strings.Split(name, "/")
-	path := filepath.Join(append([]string{dir, "node_modules"}, parts...)...)
+	path := filepath.Join(append([]string{root}, parts...)...)
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
 
 func nodeRuntimeDependenciesInstalled(dir string) bool {
 	for name := range nodeSillygirlRuntimeDependencies {
-		if !nodeDependencyInstalled(dir, name) {
+		if !nodeRuntimeDependencyInstalled(dir, name) {
 			return false
 		}
 	}
 	return true
+}
+
+func nodeRuntimeNodePath() string {
+	return strings.Join(nodeRuntimeModulePaths(), string(os.PathListSeparator))
+}
+
+func nodeRuntimeModulePaths() []string {
+	candidates := []string{}
+	for _, env := range []string{os.Getenv("SILLYGIRL_NODE_PATH"), os.Getenv("NODE_PATH")} {
+		for _, item := range filepath.SplitList(env) {
+			candidates = append(candidates, item)
+		}
+	}
+	candidates = append(candidates,
+		filepath.Join(utils.ExecPath, "node-runtime", "node_modules"),
+		filepath.Join(filepath.Dir(utils.ExecPath), "node-runtime", "node_modules"),
+		"/app/node-runtime/node_modules",
+	)
+	seen := map[string]bool{}
+	paths := []string{}
+	for _, item := range candidates {
+		item = filepath.Clean(strings.TrimSpace(item))
+		if item == "." || item == "" {
+			continue
+		}
+		key := strings.ToLower(item)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		paths = append(paths, item)
+	}
+	return paths
 }
 
 func runPnpm(dir string, args ...string) (string, error) {
