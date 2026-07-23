@@ -53,6 +53,7 @@ import {
   ShieldCheck,
   Trash2,
   User,
+  Menu as MenuIcon,
   Wand2,
 } from 'lucide-vue-next';
 import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
@@ -90,6 +91,7 @@ const user = ref<CurrentUser | null>(null);
 const booting = ref(true);
 const page = ref<PageKey>(pageFromPath());
 const selectedScriptId = ref(scriptIdFromPath());
+const mobileMenuOpen = ref(false);
 const loginModel = reactive({ username: 'admin', password: '' });
 const setupRequired = ref(false);
 const setupModel = reactive({ username: 'admin', password: '', confirm: '' });
@@ -191,6 +193,7 @@ function navigate(next: PageKey, path?: string) {
   window.history.pushState({}, '', url);
   page.value = next;
   selectedScriptId.value = scriptIdFromPath();
+  mobileMenuOpen.value = false;
 }
 
 async function loadSetupStatus() {
@@ -1398,17 +1401,22 @@ function recordOptions(record?: Record<string, string>) {
       </div>
 
       <Layout v-else class="shell">
-        <Layout.Sider :width="220" breakpoint="lg" :collapsed-width="0" theme="light">
+        <Layout.Sider class="desktop-sider" :width="220" theme="light">
           <div class="brand"><span class="brand-mark">S</span><span>SillyGirl</span></div>
           <Menu mode="inline" :selected-keys="[page]" :items="menuItems" style="border-inline-end: 0; padding-top: 8px" @click="(e:any) => navigate(e.key)" />
         </Layout.Sider>
         <Layout>
           <div class="topbar">
-            <div>
+            <div class="topbar-title">
+              <Button class="mobile-menu-button" type="text" @click="mobileMenuOpen = true">
+                <template #icon><MenuIcon :size="18" /></template>
+              </Button>
+              <div class="topbar-heading">
               <Typography.Text strong>{{ menuItems.find((item) => item.key === page)?.label || '后台' }}</Typography.Text>
               <Typography.Text class="muted" style="margin-left: 10px">{{ user?.name || '傻妞' }}</Typography.Text>
+              </div>
             </div>
-            <Button @click="logout"><template #icon><LogOut :size="16" /></template>退出</Button>
+            <Button class="logout-button" @click="logout"><template #icon><LogOut :size="16" /></template>退出</Button>
           </div>
           <main class="content">
             <section v-if="page === 'welcome'" class="panel">
@@ -1970,6 +1978,18 @@ function recordOptions(record?: Record<string, string>) {
             </section>
           </main>
         </Layout>
+
+        <a-drawer
+          v-model:open="mobileMenuOpen"
+          class="mobile-menu-drawer"
+          placement="left"
+          :width="280"
+          :body-style="{ padding: 0 }"
+          :closable="false"
+        >
+          <div class="brand"><span class="brand-mark">S</span><span>SillyGirl</span></div>
+          <Menu mode="inline" :selected-keys="[page]" :items="menuItems" style="border-inline-end: 0; padding-top: 8px" @click="(e:any) => navigate(e.key)" />
+        </a-drawer>
       </Layout>
 
       <Modal :open="!!replies.editing" title="回复规则" @cancel="replies.editing = null" @ok="saveReply">
