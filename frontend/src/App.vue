@@ -89,9 +89,9 @@ const user = ref<CurrentUser | null>(null);
 const booting = ref(true);
 const page = ref<PageKey>(pageFromPath());
 const selectedScriptId = ref(scriptIdFromPath());
-const loginModel = reactive({ username: '傻妞', password: '' });
+const loginModel = reactive({ username: 'admin', password: '' });
 const setupRequired = ref(false);
-const setupModel = reactive({ username: '傻妞', password: '', confirm: '' });
+const setupModel = reactive({ username: 'admin', password: '', confirm: '' });
 
 type AuthResponse = {
   success?: boolean;
@@ -483,11 +483,21 @@ onBeforeUnmount(() => {
 
 const storageState = reactive({
   keys: 'sillyGirl',
+  newBucketName: '',
   rows: [] as any[],
   buckets: [] as Array<{ value: string; label: string }>,
   loading: false,
   loadingBuckets: false,
+  creatingBucket: false,
+  deletingBucket: false,
 });
+const protectedStorageBuckets = new Set(['plugins', 'sillyGirl', 'auths']);
+const selectedStorageBucket = computed(() => {
+  const value = storageState.keys.trim();
+  if (!value || value.includes('.') || value.includes(',')) return '';
+  return value;
+});
+const canRemoveStorageBucket = computed(() => !!selectedStorageBucket.value && !protectedStorageBuckets.has(selectedStorageBucket.value));
 async function loadStorageBuckets() {
   storageState.loadingBuckets = true;
   try {
@@ -517,6 +527,41 @@ async function selectStorageBucket(bucket?: string) {
   if (!bucket) return;
   storageState.keys = bucket;
   await loadStorage();
+}
+async function createStorageBucket() {
+  const bucket = storageState.newBucketName.trim();
+  if (!bucket) {
+    message.error('请输入存储桶名称');
+    return;
+  }
+  storageState.creatingBucket = true;
+  try {
+    await post('/api/storage/bucket', { bucket });
+    message.success('存储桶已创建');
+    storageState.newBucketName = '';
+    storageState.keys = bucket;
+    await loadStorageBuckets();
+    await loadStorage();
+  } finally {
+    storageState.creatingBucket = false;
+  }
+}
+async function removeStorageBucket() {
+  const bucket = selectedStorageBucket.value;
+  if (!bucket) {
+    message.error('请选择单个存储桶');
+    return;
+  }
+  storageState.deletingBucket = true;
+  try {
+    await del('/api/storage/bucket', { bucket });
+    message.success('存储桶已删除');
+    storageState.keys = 'sillyGirl';
+    await loadStorageBuckets();
+    await loadStorage();
+  } finally {
+    storageState.deletingBucket = false;
+  }
 }
 
 const replies = reactive({ rows: [] as Reply[], total: 0, editing: null as Reply | null, form: {} as Reply });
@@ -1485,6 +1530,23 @@ function recordOptions(record?: Record<string, string>) {
                 <Input v-model:value="storageState.keys" style="width: 360px" placeholder="bucket 或 bucket.key，多个用逗号分隔" />
                 <Button type="primary" @click="loadStorage"><template #icon><Search :size="16" /></template>查询</Button>
                 <Button @click="loadStorage"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                <Space.Compact>
+                  <Input v-model:value="storageState.newBucketName" style="width: 180px" placeholder="新存储桶名称" @press-enter="createStorageBucket" />
+                  <Button :loading="storageState.creatingBucket" @click="createStorageBucket">
+                    <template #icon><Plus :size="16" /></template>新建桶
+                  </Button>
+                </Space.Compact>
+                <Popconfirm
+                  :title="`确认删除存储桶 ${selectedStorageBucket || storageState.keys}？`"
+                  description="删除后该桶内所有键值都会被移除，无法恢复。"
+                  ok-text="确认删除"
+                  cancel-text="取消"
+                  @confirm="removeStorageBucket"
+                >
+                  <Button danger :disabled="!canRemoveStorageBucket" :loading="storageState.deletingBucket">
+                    <template #icon><Trash2 :size="16" /></template>删除桶
+                  </Button>
+                </Popconfirm>
               </div>
               <Table :row-key="(row:any) => `${row.bucket}.${row.key}`" :loading="storageState.loading" :data-source="storageState.rows" :pagination="{ pageSize: 20 }">
                 <Table.Column title="#" data-index="index" :width="64" />

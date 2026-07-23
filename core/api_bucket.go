@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -14,6 +15,32 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/smallfawn/sillyGirl/utils"
 )
+
+const storageBucketMarkerKey = "__sillygirl_bucket_marker__"
+
+var protectedStorageBuckets = map[string]string{
+	"plugins":   "plugins 存储桶不允许在这里删除",
+	"sillyGirl": "sillyGirl 存储桶不允许删除",
+	"auths":     "auths 存储桶不允许删除",
+}
+
+type storageBucketRequest struct {
+	Bucket string `json:"bucket"`
+}
+
+func normalizeStorageBucketName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("存储桶名称不能为空")
+	}
+	if len(name) > 128 {
+		return "", errors.New("存储桶名称不能超过128个字符")
+	}
+	if strings.ContainsAny(name, ".,\r\n\t ") {
+		return "", errors.New("存储桶名称不能包含点号、逗号或空白字符")
+	}
+	return name, nil
+}
 
 func checkFilePlugin(key string, value *string) {
 	if isNameUuid(key) {
@@ -65,6 +92,9 @@ func init() {
 			}
 			if len(ar) == 1 {
 				MakeBucket(ar[0]).Foreach(func(b1, b2 []byte) error {
+					if string(b1) == storageBucketMarkerKey {
+						return nil
+					}
 					data = append(data, map[string]string{
 						"bucket": bk,
 						"key":    string(b1),
@@ -127,6 +157,9 @@ func init() {
 				b := MakeBucket(bucket)
 				b.Foreach(func(b1, b2 []byte) error {
 					key := string(b1)
+					if key == storageBucketMarkerKey {
+						return nil
+					}
 					value := string(b2)
 					if strings.Contains(key, search) {
 						res = append(res, map[string]interface{}{
@@ -168,6 +201,9 @@ func init() {
 			}
 			if len(ar) == 1 {
 				MakeBucket(ar[0]).Foreach(func(b1, b2 []byte) error {
+					if string(b1) == storageBucketMarkerKey {
+						return nil
+					}
 					data[bk+"."+string(b1)] = TransformBucketKeyValue(string(b2))
 					return nil
 				})
@@ -259,5 +295,60 @@ func init() {
 			"errors":   errors,
 			"changes":  changes,
 		})
+	})
+	GinApi(POST, "/api/storage/bucket", RequireAuth, func(ctx *gin.Context) {
+		req := storageBucketRequest{}
+		if err := ctx.BindJSON(&req); err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		name, err := normalizeStorageBucketName(req.Bucket)
+		if err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		for _, bucket := range sillyGirl.Buckets() {
+			if bucket == name {
+				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "存储桶已存在"})
+				return
+			}
+		}
+		if _, _, err := MakeBucket(name).Set2(storageBucketMarkerKey, "1"); err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		ctx.JSON(200, map[string]interface{}{"success": true})
+	})
+	GinApi(DELETE, "/api/storage/bucket", RequireAuth, func(ctx *gin.Context) {
+		req := storageBucketRequest{}
+		if err := ctx.BindJSON(&req); err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		name, err := normalizeStorageBucketName(req.Bucket)
+		if err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		if message, ok := protectedStorageBuckets[name]; ok {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": message})
+			return
+		}
+		found := false
+		for _, bucket := range sillyGirl.Buckets() {
+			if bucket == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "存储桶不存在"})
+			return
+		}
+		if err := MakeBucket(name).Delete(); err != nil {
+			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			return
+		}
+		ctx.JSON(200, map[string]interface{}{"success": true})
 	})
 }
