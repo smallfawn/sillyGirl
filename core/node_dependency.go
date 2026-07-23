@@ -819,7 +819,10 @@ func ensureNodeRuntimeDependencies(dir string) error {
 	if !missing {
 		return nil
 	}
-	_, err := runPnpm(dir, "install")
+	_, err := runPnpm(dir, "install", "--ignore-scripts")
+	if err == nil || nodeRuntimeDependenciesInstalled(dir) {
+		return nil
+	}
 	return err
 }
 
@@ -828,6 +831,15 @@ func nodeDependencyInstalled(dir, name string) bool {
 	path := filepath.Join(append([]string{dir, "node_modules"}, parts...)...)
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func nodeRuntimeDependenciesInstalled(dir string) bool {
+	for name := range nodeSillygirlRuntimeDependencies {
+		if !nodeDependencyInstalled(dir, name) {
+			return false
+		}
+	}
+	return true
 }
 
 func runPnpm(dir string, args ...string) (string, error) {
