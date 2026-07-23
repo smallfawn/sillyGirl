@@ -43,6 +43,9 @@ RUN apt-get update \
     && ln -s /data/conf /app/conf
 
 COPY --from=builder /out/sillyGirl /app/sillyGirl
+COPY --from=builder /src/proto3/sillygirl.js /app/proto3/sillygirl.js
+COPY --from=builder /src/proto3/sillygirl.d.ts /app/proto3/sillygirl.d.ts
+COPY --from=builder /src/proto3/srpc.js /app/proto3/srpc.js
 
 ENV TZ=Asia/Shanghai \
     SILLYGIRL_DATA_PATH=/data

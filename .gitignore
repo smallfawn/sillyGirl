@@ -19,6 +19,8 @@ fanli_vip
 cable
 sillyGirl.cache
 sillyGirl.*
+!proto3/sillygirl.js
+!proto3/sillygirl.d.ts
 main
 sillyGirl.pid
 sillyGirl.pid

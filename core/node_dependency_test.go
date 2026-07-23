@@ -21,7 +21,34 @@ func TestEnsureNodePackageJSONRepairsInvalidDependencyFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readNodeDependencies returned error: %v", err)
 	}
-	if len(deps) != 1 || deps[0].Name != "ipp" {
+	if len(deps) != 3 {
 		t.Fatalf("unexpected dependencies: %#v", deps)
+	}
+	names := map[string]bool{}
+	for _, dep := range deps {
+		names[dep.Name] = true
+	}
+	for _, name := range []string{"ipp", "@grpc/grpc-js", "google-protobuf"} {
+		if !names[name] {
+			t.Fatalf("missing dependency %s in %#v", name, deps)
+		}
+	}
+}
+
+func TestEnsureNodeSillygirlModuleWritesRuntimeFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := ensureNodeSillygirlModule(dir); err != nil {
+		t.Fatalf("ensureNodeSillygirlModule returned error: %v", err)
+	}
+	for _, name := range []string{
+		filepath.Join("node_modules", "sillygirl", "index.js"),
+		filepath.Join("node_modules", "sillygirl", "srpc.js"),
+		filepath.Join("node_modules", "sillygirl", "sillygirl.d.ts"),
+		filepath.Join("node_modules", "sillygirl", "package.json"),
+		filepath.Join("node_modules", "sillygirl.d.ts"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("expected runtime file %s: %v", name, err)
+		}
 	}
 }

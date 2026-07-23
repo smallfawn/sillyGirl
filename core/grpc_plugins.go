@@ -40,6 +40,7 @@ func initNodePlugins() {
 		name := file.Name()
 		path := root + "/" + name
 		plugins = append(plugins, path)
+		_ = ensureNodeSillygirlModule(path)
 		index, class := FindMainIndex(path)
 
 		if index != "" {
@@ -126,8 +127,7 @@ func initNodePlugins() {
 					tf := event.Name + "/node_modules/sillygirl.d.ts"
 					ti := event.Name + "/demo.main.js"
 					if _, err := os.Stat(tf); err != nil {
-						os.Mkdir(event.Name+"/node_modules", 0700)
-						os.WriteFile(tf, []byte(typeat), 0700)
+						_ = ensureNodeSillygirlModule(event.Name)
 					}
 					go func() {
 						time.Sleep(time.Second)
@@ -244,6 +244,14 @@ func AddNodePlugin(path, name, class string) error {
 		var cmd *exec.Cmd
 		switch class {
 		case NODE:
+			if err := ensureNodeSillygirlModule(filepath.Dir(path)); err != nil {
+				console.Error("NodeJS sillygirl 模块初始化失败：%v", err)
+				return nil
+			}
+			if err := ensureNodeRuntimeDependencies(filepath.Dir(path)); err != nil {
+				console.Error("NodeJS sillygirl 运行时依赖安装失败：%v", err)
+				return nil
+			}
 			var err error
 			bin, err = resolveNodeCommand()
 			if err != nil {

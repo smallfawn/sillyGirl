@@ -822,10 +822,7 @@ func installGithubNodePlugin(address string) error {
 	if err := os.WriteFile(mainFile, data, 0644); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(target, "node_modules"), 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(target, "node_modules", "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
+	if err := ensureNodeSillygirlModule(target); err != nil {
 		return err
 	}
 	if err := ensureNodePackageJSON(target, pluginName); err != nil {

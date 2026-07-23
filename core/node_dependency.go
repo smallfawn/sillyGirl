@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -63,6 +64,11 @@ type pnpmCommand struct {
 }
 
 const defaultPnpmRegistry = "https://registry.npmmirror.com"
+
+var nodeSillygirlRuntimeDependencies = map[string]string{
+	"@grpc/grpc-js":   "^1.8.18",
+	"google-protobuf": "^3.21.2",
+}
 
 func init() {
 	GinApi(GET, "/api/node/dependencies", RequireAuth, func(ctx *gin.Context) {
@@ -416,7 +422,7 @@ func createNodePlugin(pluginName, title string) (string, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules"), 0755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "node_modules", "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
+	if err := ensureNodeSillygirlModule(dir); err != nil {
 		return "", err
 	}
 	if err := ensureNodePackageJSON(dir, pluginName); err != nil {
@@ -592,13 +598,83 @@ func ensureNodePackageJSON(dir, pluginName string) error {
 		Name:         safePackageName(pluginName),
 		Version:      "1.0.0",
 		Private:      true,
-		Dependencies: map[string]string{},
+		Dependencies: nodeSillygirlRuntimeDependencyCopy(),
 	}
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+func ensureNodeSillygirlModule(dir string) error {
+	nodeModules := filepath.Join(dir, "node_modules")
+	if err := os.MkdirAll(nodeModules, 0755); err != nil {
+		return err
+	}
+	moduleDir := filepath.Join(nodeModules, "sillygirl")
+	if err := os.MkdirAll(moduleDir, 0755); err != nil {
+		return err
+	}
+	if err := copyNodeRuntimeFile("sillygirl.js", filepath.Join(moduleDir, "index.js")); err != nil {
+		return err
+	}
+	if err := copyNodeRuntimeFile("srpc.js", filepath.Join(moduleDir, "srpc.js")); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(nodeModules, "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
+		return err
+	}
+	packageJSON := []byte(`{"name":"sillygirl","main":"index.js","types":"sillygirl.d.ts","private":true}
+`)
+	return os.WriteFile(filepath.Join(moduleDir, "package.json"), packageJSON, 0644)
+}
+
+func copyNodeRuntimeFile(name, target string) error {
+	for _, source := range nodeRuntimeSourceCandidates(name) {
+		if err := copyFile(source, target); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("缺少 NodeJS sillygirl 运行时文件：%s", name)
+}
+
+func nodeRuntimeSourceCandidates(name string) []string {
+	return []string{
+		filepath.Join("proto3", name),
+		filepath.Join("..", "proto3", name),
+		filepath.Join(utils.ExecPath, "proto3", name),
+		filepath.Join(filepath.Dir(utils.ExecPath), "proto3", name),
+	}
+}
+
+func copyFile(source, target string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return err
+	}
+	out, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func nodeSillygirlRuntimeDependencyCopy() map[string]string {
+	deps := map[string]string{}
+	for name, version := range nodeSillygirlRuntimeDependencies {
+		deps[name] = version
+	}
+	return deps
 }
 
 func normalizeNodePackageJSON(data []byte, pluginName string) ([]byte, bool, error) {
@@ -630,6 +706,17 @@ func normalizeNodePackageJSON(data []byte, pluginName string) ([]byte, bool, err
 			changed = true
 		}
 	}
+	dependencies, depChanged := normalizeNodePackageDependencyField(manifest["dependencies"])
+	if manifest["dependencies"] == nil || depChanged {
+		changed = true
+	}
+	for name, version := range nodeSillygirlRuntimeDependencies {
+		if _, ok := dependencies[name]; !ok {
+			dependencies[name] = version
+			changed = true
+		}
+	}
+	manifest["dependencies"] = dependencies
 	if !changed {
 		return data, false, nil
 	}
@@ -716,6 +803,31 @@ func removeNodeDependency(pluginName, pkg string) (string, error) {
 		return "", err
 	}
 	return runPnpm(dir, "remove", pkg)
+}
+
+func ensureNodeRuntimeDependencies(dir string) error {
+	if err := ensureNodePackageJSON(dir, filepath.Base(dir)); err != nil {
+		return err
+	}
+	missing := false
+	for name := range nodeSillygirlRuntimeDependencies {
+		if !nodeDependencyInstalled(dir, name) {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return nil
+	}
+	_, err := runPnpm(dir, "install")
+	return err
+}
+
+func nodeDependencyInstalled(dir, name string) bool {
+	parts := strings.Split(name, "/")
+	path := filepath.Join(append([]string{dir, "node_modules"}, parts...)...)
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func runPnpm(dir string, args ...string) (string, error) {

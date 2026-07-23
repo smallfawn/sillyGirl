@@ -23,9 +23,13 @@ const nodeRuntimePreloadScript = `
 (function () {
   let sg;
   try {
-    sg = require("sillygirl");
+    sg = require(require("path").join(process.cwd(), "node_modules", "sillygirl"));
   } catch (error) {
-    return;
+    try {
+      sg = require("sillygirl");
+    } catch (_) {
+      sg = globalThis.sillygirl || {};
+    }
   }
   const Bucket = sg && sg.Bucket;
   if (!Bucket) return;
