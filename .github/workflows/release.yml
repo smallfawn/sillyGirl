@@ -130,13 +130,25 @@ jobs:
           input_version="$(jq -r '.inputs.version // ""' "${GITHUB_EVENT_PATH}")"
           if [[ -n "${input_version}" ]]; then
             version="${input_version}"
+            publish_latest="true"
           elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME}"
+            publish_latest="true"
           else
             version="dev-${GITHUB_SHA::7}"
+            publish_latest="false"
           fi
+          dockerhub_image="docker.io/smallfawn/sillygirl"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "dockerhub_image=docker.io/smallfawn/sillygirl" >> "${GITHUB_OUTPUT}"
+          echo "dockerhub_image=${dockerhub_image}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "docker_tags<<EOF"
+            echo "${dockerhub_image}:${version}"
+            if [[ "${publish_latest}" == "true" ]]; then
+              echo "${dockerhub_image}:latest"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -158,9 +170,7 @@ jobs:
             VERSION=${{ steps.vars.outputs.version }}
           cache-from: type=gha,scope=sillygirl-docker
           cache-to: type=gha,mode=max,scope=sillygirl-docker
-          tags: |
-            ${{ steps.vars.outputs.dockerhub_image }}:${{ steps.vars.outputs.version }}
-            ${{ steps.vars.outputs.dockerhub_image }}:latest
+          tags: ${{ steps.vars.outputs.docker_tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

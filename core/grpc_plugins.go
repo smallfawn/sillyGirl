@@ -590,13 +590,17 @@ declare class Adapter {
 declare let sender: Sender;
 declare function sleep(ms?: number): Promise<unknown>;
 interface UpdateOptions {
+	mode?: string;
 	appDir?: string;
 	gitRemote?: string;
 	gitBranch?: string;
+	dockerSocket?: string;
+	dockerWatchtowerImage?: string;
 	timeout?: number;
 	restart?: boolean;
 }
 interface UpdateResult {
+	mode?: string;
 	repo: string;
 	before: string;
 	after: string;

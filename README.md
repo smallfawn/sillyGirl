@@ -15,10 +15,12 @@ docker run -d \
   -p 8080:8080 \
   -e SILLYGIRL_DATA_PATH=/data \
   -v $(pwd)/data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   smallfawn/sillygirl:latest
 ```
 
 访问 `http://localhost:8080/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件和配置。
+如果需要在机器人里发送 `更新` 来自动更新 Docker 容器，需要保留 `/var/run/docker.sock` 映射；不需要容器内更新时可以去掉这一行。
 
 ## Docker Compose
 
@@ -36,6 +38,7 @@ services:
       SILLYGIRL_DATA_PATH: /data
     volumes:
       - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
 ```
 
 启动：

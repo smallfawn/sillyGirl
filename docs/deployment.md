@@ -108,10 +108,12 @@ docker run -d \
   -p 8080:8080 \
   -e SILLYGIRL_DATA_PATH=/data \
   -v $(pwd)/data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   smallfawn/sillygirl:latest
 ```
 
 镜像默认使用 `/data` 作为数据目录，`/app/plugins`、`/app/conf` 会指向 `/data` 下的对应目录，所以只需要映射 `./data:/data` 即可持久化数据库、插件和配置。
+如果需要通过后台或官方命令插件执行 Docker 自动更新，需要挂载 `/var/run/docker.sock`；不需要容器内更新时可以去掉这一行。
 
 ### Docker Compose
 
@@ -129,6 +131,7 @@ services:
       - "8080:8080"
     volumes:
       - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
     environment:
       - SILLYGIRL_PORT=8080

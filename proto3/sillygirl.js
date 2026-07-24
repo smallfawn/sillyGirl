@@ -43,6 +43,8 @@ const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
 const { execFile } = require("child_process");
+const fs = require("fs");
+const http = require("http");
 const path = require("path");
 grpc_1.setLogVerbosity(grpc_1.logVerbosity.NONE);
 let client = new srpc_1.srpc.SillyGirlServiceClient(process.env?.SILLYGIRL_GRPC_ADDR || "127.0.0.1:50051", grpc_1.credentials.createInsecure());
@@ -1203,6 +1205,19 @@ async function restart() {
 }
 async function update(options = {}) {
     const timeout = clampNumber(options.timeout || 120, 10, 600);
+    const mode = String(options.mode || "auto").trim().toLowerCase();
+    if (mode === "docker")
+        return updateDocker(options, timeout);
+    try {
+        return await updateGit(options, timeout);
+    }
+    catch (error) {
+        if (mode === "git" || !(await canUseDockerUpdate(options)))
+            throw error;
+        return updateDocker(options, timeout, error);
+    }
+}
+async function updateGit(options, timeout) {
     const repo = await resolveSillyGirlRepo(options.appDir, timeout);
     const remote = String(options.gitRemote || "origin").trim() || "origin";
     const before = (await git(repo, ["rev-parse", "--short", "HEAD"], timeout)).stdout.trim();
@@ -1214,6 +1229,7 @@ async function update(options = {}) {
     if (restarted)
         await restart();
     return {
+        mode: "git",
         repo,
         before,
         after,
@@ -1221,6 +1237,140 @@ async function update(options = {}) {
         output: compactRuntimeOutput(pulled.stdout || pulled.stderr),
         restarted,
     };
+}
+async function canUseDockerUpdate(options) {
+    const socket = dockerSocketPath(options);
+    return fs.existsSync(socket) && (fs.existsSync("/.dockerenv") || Boolean(process.env?.HOSTNAME));
+}
+async function updateDocker(options, timeout, gitError) {
+    const socket = dockerSocketPath(options);
+    if (!fs.existsSync(socket)) {
+        const suffix = gitError ? `；Git 更新失败：${errorMessage(gitError)}` : "";
+        throw new Error(`Docker 更新需要挂载 ${socket}，请在部署命令中增加 -v /var/run/docker.sock:/var/run/docker.sock${suffix}`);
+    }
+    const containerID = await currentDockerContainerID(socket, timeout);
+    const inspect = await dockerJSON(socket, "GET", `/containers/${encodeURIComponent(containerID)}/json`, undefined, timeout);
+    const containerName = String(inspect.Name || "").replace(/^\/+/, "");
+    if (!containerName)
+        throw new Error("Docker 更新失败：无法识别当前容器名称");
+    const currentImage = String(inspect.Config?.Image || inspect.Image || "");
+    const watchtowerImage = String(options.dockerWatchtowerImage || process.env?.SILLYGIRL_WATCHTOWER_IMAGE || "containrrr/watchtower:latest").trim();
+    await pullDockerImage(socket, watchtowerImage, timeout);
+    const helperName = `sillygirl-watchtower-${Date.now()}`;
+    const create = await dockerJSON(socket, "POST", `/containers/create?name=${encodeURIComponent(helperName)}`, {
+        Image: watchtowerImage,
+        Cmd: ["--run-once", "--cleanup", "--include-restarting", containerName],
+        Labels: {
+            "sillygirl.update": "watchtower",
+            "sillygirl.target": containerName,
+        },
+        HostConfig: {
+            AutoRemove: true,
+            Binds: [`${socket}:/var/run/docker.sock`],
+        },
+    }, timeout);
+    const helperID = String(create.Id || create.ID || "");
+    if (!helperID)
+        throw new Error("Docker 更新失败：Watchtower helper 创建失败");
+    await dockerRequest(socket, "POST", `/containers/${encodeURIComponent(helperID)}/start`, undefined, timeout);
+    return {
+        mode: "docker",
+        repo: `docker:${containerName}`,
+        before: currentImage,
+        after: currentImage,
+        changed: true,
+        output: `已启动一次性 Watchtower 更新容器 ${containerName}，镜像会拉取并重建；如果当前镜像使用 latest 标签，稍后会自动切换到最新正式镜像。`,
+        restarted: true,
+    };
+}
+function dockerSocketPath(options) {
+    return String(options.dockerSocket || process.env?.DOCKER_HOST_SOCKET || "/var/run/docker.sock").trim() || "/var/run/docker.sock";
+}
+async function currentDockerContainerID(socket, timeout) {
+    const candidates = [];
+    addDockerIDCandidate(candidates, process.env?.HOSTNAME);
+    for (const file of ["/proc/self/cgroup", "/proc/self/mountinfo"]) {
+        try {
+            const text = fs.readFileSync(file, "utf8");
+            for (const match of text.matchAll(/[0-9a-f]{64}/g))
+                addDockerIDCandidate(candidates, match[0]);
+            for (const match of text.matchAll(/(?:docker|containers)[-/]([0-9a-f]{12,64})/g))
+                addDockerIDCandidate(candidates, match[1]);
+        }
+        catch (_) { }
+    }
+    for (const candidate of candidates) {
+        try {
+            await dockerJSON(socket, "GET", `/containers/${encodeURIComponent(candidate)}/json`, undefined, timeout);
+            return candidate;
+        }
+        catch (_) { }
+    }
+    throw new Error("Docker 更新失败：无法识别当前容器 ID");
+}
+function addDockerIDCandidate(list, value) {
+    value = String(value || "").trim();
+    if (/^[0-9a-f]{12,64}$/i.test(value) && !list.includes(value))
+        list.push(value);
+}
+async function pullDockerImage(socket, image, timeout) {
+    const parsed = splitDockerImage(image);
+    const path = `/images/create?fromImage=${encodeURIComponent(parsed.name)}&tag=${encodeURIComponent(parsed.tag)}`;
+    const result = await dockerRequest(socket, "POST", path, undefined, timeout);
+    return result.body;
+}
+function splitDockerImage(image) {
+    image = String(image || "").trim();
+    const slash = image.lastIndexOf("/");
+    const colon = image.lastIndexOf(":");
+    if (colon > slash)
+        return { name: image.slice(0, colon), tag: image.slice(colon + 1) || "latest" };
+    return { name: image, tag: "latest" };
+}
+async function dockerJSON(socket, method, requestPath, body, timeout) {
+    const result = await dockerRequest(socket, method, requestPath, body, timeout);
+    if (!result.body.trim())
+        return {};
+    try {
+        return JSON.parse(result.body);
+    }
+    catch (_) {
+        throw new Error(`Docker API 返回非 JSON：${result.body.slice(0, 200)}`);
+    }
+}
+function dockerRequest(socket, method, requestPath, body, timeout) {
+    return new Promise((resolve, reject) => {
+        const payload = body === undefined ? undefined : JSON.stringify(body);
+        const req = http.request({
+            socketPath: socket,
+            method,
+            path: requestPath,
+            timeout: Math.max(10, Number(timeout || 120)) * 1000,
+            headers: payload ? {
+                "content-type": "application/json",
+                "content-length": Buffer.byteLength(payload),
+            } : undefined,
+        }, (res) => {
+            const chunks = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => {
+                const text = Buffer.concat(chunks).toString("utf8");
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(new Error(`Docker API ${method} ${requestPath} HTTP ${res.statusCode}: ${text.slice(0, 300)}`));
+                    return;
+                }
+                resolve({ status: res.statusCode, body: text });
+            });
+        });
+        req.on("timeout", () => req.destroy(new Error("Docker API 请求超时")));
+        req.on("error", reject);
+        if (payload)
+            req.write(payload);
+        req.end();
+    });
+}
+function errorMessage(error) {
+    return String(error && error.message ? error.message : error || "").trim();
 }
 async function pullCommand(repo, remote, configuredBranch, timeout) {
     const branch = String(configuredBranch || "").trim() || (await currentBranch(repo, timeout)) || "main";
