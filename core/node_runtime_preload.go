@@ -288,6 +288,18 @@ const nodeRuntimePreloadScript = `
       const body = Object.assign({}, options || {});
       return this.request("POST", "/wx/getuserinfo", body);
     }
+    getPhoneNumber(options) {
+      const body = Object.assign({}, options || {});
+      return this.request("POST", "/wx/getphonenumber", body);
+    }
+    qrCodeAuth(options) {
+      const body = Object.assign({}, options || {});
+      return this.request("POST", "/wx/qrcodeauth", body);
+    }
+    oAuth(options) {
+      const body = Object.assign({}, options || {});
+      return this.request("POST", "/wx/oauth", body);
+    }
   }
 
   class DaiDai {

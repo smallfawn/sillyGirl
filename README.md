@@ -221,6 +221,9 @@ const sc = new SmallCat({ id: 1 });
 | `userList()` | 获取用户列表 |
 | `getCode(options)` | 获取小程序 code，参数 `{ openid, appid }`，返回 smallcat API 原始 JSON |
 | `getUserInfo(options)` | 获取小程序用户信息，参数 `{ openid, appid }`，返回 smallcat API 原始 JSON |
+| `getPhoneNumber(options)` | 获取手机号 code，调用 `POST /wx/getphonenumber`，返回 smallcat API 原始 JSON |
+| `qrCodeAuth(options)` | 二维码 OAuth 授权，调用 `POST /wx/qrcodeauth`，返回 smallcat API 原始 JSON |
+| `oAuth(options)` | OAuth 授权，调用 `POST /wx/oauth`，返回 smallcat API 原始 JSON |
 | `request(method, path, body, query)` | 调用其他 smallcat API |
 
 示例：
@@ -247,6 +250,21 @@ const userInfo = sc.getUserInfo({
   appid: "wx1234567890abcdef",
 });
 s.reply(JSON.stringify(userInfo));
+
+const oauth = sc.oAuth({
+  openid: "用户 openid",
+  appid: "wx2f5d8f9715c59d10",
+  redirect_uri: "https://example.com/callback",
+  scope: "snsapi_userinfo",
+  state: "STATE",
+});
+s.reply(JSON.stringify(oauth));
+
+const qrOAuth = sc.qrCodeAuth({
+  openid: "用户 openid",
+  uuid: "二维码 UUID",
+});
+s.reply(JSON.stringify(qrOAuth));
 ```
 
 smallcat 返回值保持原始 API 响应，不额外改写。

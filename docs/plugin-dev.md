@@ -417,6 +417,9 @@ sc.address  // smallcat 地址
 | `userList()` | `GET /api/accounts` | 无 | 原始 API 响应 |
 | `getCode(options)` | `POST /wx/code` | `{ openid, appid }` | 原始 API 响应 |
 | `getUserInfo(options)` | `POST /wx/getuserinfo` | `{ openid, appid }` | 原始 API 响应 |
+| `getPhoneNumber(options)` | `POST /wx/getphonenumber` | `{ openid, appid }` | 原始 API 响应 |
+| `qrCodeAuth(options)` | `POST /wx/qrcodeauth` | `{ openid, uuid }` | 原始 API 响应 |
+| `oAuth(options)` | `POST /wx/oauth` | `{ openid, appid, redirect_uri, scope?, state?, component_appid? }` 等 | 原始 API 响应 |
 | `request(method, path, body, query)` | 任意 smallcat API | 自定义方法、路径、请求体、查询参数 | 原始 API 响应 |
 
 smallcat 运行时不会改写 API 返回。脚本收到的就是 smallcat 原始 JSON，一般结构为：
@@ -468,6 +471,27 @@ const userInfo = sc.getUserInfo({
   appid: "wx1234567890abcdef",
 });
 console.log(userInfo.status, userInfo.message, userInfo.data);
+
+const phone = sc.getPhoneNumber({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+console.log(phone.status, phone.message, phone.data);
+
+const oauth = sc.oAuth({
+  openid: "用户 openid",
+  appid: "wx2f5d8f9715c59d10",
+  redirect_uri: "https://example.com/callback",
+  scope: "snsapi_userinfo",
+  state: "STATE",
+});
+console.log(oauth.status, oauth.message, oauth.data);
+
+const qrOAuth = sc.qrCodeAuth({
+  openid: "用户 openid",
+  uuid: "二维码 UUID",
+});
+console.log(qrOAuth.status, qrOAuth.message, qrOAuth.data);
 ```
 
 注意：
