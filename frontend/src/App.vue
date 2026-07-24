@@ -147,8 +147,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.0.8',
-    remote: info.remote || info.local || '0.0.8',
+    local: info.local || '0.0.9',
+    remote: info.remote || info.local || '0.0.9',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -1311,15 +1311,7 @@ async function savePluginConfig() {
   await loadPluginConfigs();
 }
 async function putPluginConfig(uuid: string, value: Record<string, any>) {
-  await fetch('/api/plugin/config', {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ uuid, value }),
-  }).then(async (res) => {
-    const data = await res.json();
-    if (!res.ok || data.success === false) throw new Error(data.errorMessage || '保存失败');
-  });
+  await put('/api/plugin/config', { uuid, value });
 }
 
 const settings = reactive({ form: {} as any });
