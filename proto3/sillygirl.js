@@ -37,6 +37,7 @@ exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig
 exports.form = form;
 exports.pluginConfigDefaults = pluginConfigDefaults;
 exports.sleep = sleep;
+Object.defineProperty(exports, "express", { enumerable: true, get: function () { return require("express"); } });
 const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");

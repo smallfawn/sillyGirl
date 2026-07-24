@@ -41,7 +41,7 @@ RUN apt-get update \
     && mkdir -p /app/node-runtime \
     && cd /app/node-runtime \
     && printf '{"name":"sillygirl-node-runtime","private":true,"version":"1.0.0"}\n' > package.json \
-    && pnpm add --ignore-scripts @grpc/grpc-js@^1.8.18 google-protobuf@^3.21.2 \
+    && pnpm add --ignore-scripts @grpc/grpc-js@^1.8.18 express@^4.21.2 google-protobuf@^3.21.2 \
     && mkdir -p /data/plugins /data/conf \
     && ln -s /data/plugins /app/plugins \
     && ln -s /data/conf /app/conf

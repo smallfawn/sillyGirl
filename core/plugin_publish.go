@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/beego/beego/v2/client/httplib"
 	"github.com/goccy/go-json"
@@ -74,21 +73,14 @@ func publicScript(str string) string {
 	if su.GetValue("author") == "" {
 		su.SetValue("author", "佚名")
 	}
-	if su.GetValue("description") == "" {
-		su.SetValue("description", "🐒这个人很懒什么都没有留下")
+	if su.GetValue("desc") == "" {
+		su.SetValue("desc", "🐒这个人很懒什么都没有留下")
 	}
 	if su.GetValue("public") == "true" {
 		su.SetValue("public", "false")
 	}
 	if su.GetValue("title") == "" {
 		su.SetValue("title", "无名脚本")
-	}
-	if su.GetValue("message") != "" {
-		su.DeleteValue("message")
-	}
-	create_at := su.GetValue("create_at")
-	if _, err := time.Parse("2006-01-02 15:04:05", create_at); create_at == "" || err != nil {
-		su.SetValue("create_at", time.Now().Format("2006-01-02 15:04:05"))
 	}
 	if su.GetValue("encrypt") == "true" {
 		su.script = EncryptPlugin(su.script)

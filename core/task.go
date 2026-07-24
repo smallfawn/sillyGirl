@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -17,6 +18,8 @@ import (
 )
 
 var tasks = MakeBucket("tasks")
+
+const pluginCronTaskPrefix = "plugin-cron:"
 
 type TasksResult struct {
 	Success bool      `json:"success"`
@@ -50,6 +53,77 @@ type Tasks struct {
 }
 
 var pts = []*Tasks{}
+
+func pluginCronTaskID(uuid, platform string) string {
+	return pluginCronTaskPrefix + uuid + ":" + platform
+}
+
+func parsePluginCronTaskID(taskID string) (string, string, bool) {
+	if !strings.HasPrefix(taskID, pluginCronTaskPrefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(taskID, pluginCronTaskPrefix)
+	parts := strings.SplitN(rest, ":", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func nodeCommandForFunction(f *common.Function) string {
+	name := nodePluginNameFromPath(f.Path)
+	if name == "" {
+		name = strings.TrimSuffix(f.Title, ".js")
+	}
+	if name == "" {
+		return ""
+	}
+	return "node " + name + ".js"
+}
+
+func pluginCronTasks() []*Tasks {
+	rows := []*Tasks{}
+	for _, f := range Functions {
+		if f == nil || f.Type != NODE || len(f.Cron) == 0 {
+			continue
+		}
+		platforms := make([]string, 0, len(f.Cron))
+		for platform := range f.Cron {
+			platforms = append(platforms, platform)
+		}
+		sort.Strings(platforms)
+		for _, platform := range platforms {
+			title := f.Title
+			if title == "" {
+				title = strings.TrimPrefix(nodeCommandForFunction(f), "node ")
+			}
+			rows = append(rows, &Tasks{
+				ID:       pluginCronTaskID(f.UUID, platform),
+				Title:    title,
+				Schedule: f.Cron[platform],
+				Command:  nodeCommandForFunction(f),
+				Scripts:  []string{f.UUID},
+				Remark:   "来自脚本注释 @cron",
+				Enable:   !f.Disable,
+			})
+		}
+	}
+	return rows
+}
+
+func findNodeFunctionByTask(taskID, command string) (*common.Function, string) {
+	if uuid, platform, ok := parsePluginCronTaskID(taskID); ok {
+		for _, f := range Functions {
+			if f != nil && f.UUID == uuid && f.Type == NODE {
+				return f, platform
+			}
+		}
+	}
+	if target := nodeTaskTarget(command); target != "" {
+		return nodeFunctionByCommandTarget(target), "task"
+	}
+	return nil, ""
+}
 
 func RegistTasks(pt *Tasks) {
 	pt.Handle = func() {
@@ -164,6 +238,7 @@ func init() {
 			Success: true,
 		}
 		rows := append([]*Tasks{}, pts...)
+		rows = append(rows, pluginCronTasks()...)
 		for i := range rows {
 			rows[i].Index = i + 1
 		}
@@ -288,6 +363,22 @@ func init() {
 			})
 			return
 		}
+		if f, platform := findNodeFunctionByTask(task_id, tp.Command); f != nil {
+			if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
+				ctx.JSON(200, map[string]interface{}{
+					"success":      false,
+					"errorMessage": err.Error(),
+				})
+				return
+			}
+			if task_id != "" {
+				tasks.Set(task_id, "")
+			}
+			ctx.JSON(200, map[string]interface{}{
+				"success": true,
+			})
+			return
+		}
 		tasks.Set(task_id, utils.JsonMarshal(tp))
 		if err != nil {
 			ctx.JSON(200, map[string]interface{}{
@@ -314,6 +405,20 @@ func init() {
 			ctx.JSON(200, map[string]interface{}{
 				"success":      false,
 				"errorMessage": "任务ID不为空",
+			})
+			return
+		}
+		if f, platform := findNodeFunctionByTask(pt.ID, pt.Command); f != nil {
+			if err := updatePluginCronAnnotation(f, platform, ""); err != nil {
+				ctx.JSON(200, map[string]interface{}{
+					"success":      false,
+					"errorMessage": err.Error(),
+				})
+				return
+			}
+			tasks.Set(pt.ID, "")
+			ctx.JSON(200, map[string]interface{}{
+				"success": true,
 			})
 			return
 		}
@@ -469,6 +574,65 @@ func nodeFunctionByCommandTarget(target string) *common.Function {
 		}
 	}
 	return nil
+}
+
+func updatePluginCronAnnotation(f *common.Function, _ string, schedule string) error {
+	if f == nil || f.Path == "" {
+		return fmt.Errorf("脚本不存在")
+	}
+	schedule = strings.TrimSpace(schedule)
+	data, err := os.ReadFile(f.Path)
+	if err != nil {
+		return err
+	}
+	next := upsertPluginCronAnnotation(string(data), schedule)
+	if err := os.WriteFile(f.Path, []byte(next), 0644); err != nil {
+		return err
+	}
+	if f.Reload != nil {
+		f.Reload()
+	}
+	return nil
+}
+
+func upsertPluginCronAnnotation(script, schedule string) string {
+	newline := "\n"
+	if strings.Contains(script, "\r\n") {
+		newline = "\r\n"
+	}
+	lines := strings.Split(strings.ReplaceAll(script, "\r\n", "\n"), "\n")
+	cronLine := regexp.MustCompile(`^(\s*\*\s*@cron\s+)(.+?)\s*$`)
+	updated := false
+	out := make([]string, 0, len(lines)+1)
+	for _, line := range lines {
+		if match := cronLine.FindStringSubmatch(line); len(match) == 3 {
+			if !updated && schedule != "" {
+				out = append(out, match[1]+formatCronMetaValue(schedule))
+			}
+			updated = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !updated && schedule != "" {
+		insert := " * @cron " + formatCronMetaValue(schedule)
+		inserted := false
+		for i, line := range out {
+			if strings.TrimSpace(line) == "*/" {
+				out = append(out[:i], append([]string{insert}, out[i:]...)...)
+				inserted = true
+				break
+			}
+		}
+		if !inserted {
+			out = append([]string{"/**", insert, " */"}, out...)
+		}
+	}
+	return strings.Join(out, newline)
+}
+
+func formatCronMetaValue(schedule string) string {
+	return strings.TrimSpace(schedule)
 }
 
 type byCreatedAt2 []*Tasks

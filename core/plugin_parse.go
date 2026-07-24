@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/smallfawn/sillyGirl/core/common"
 	"github.com/smallfawn/sillyGirl/utils"
@@ -13,9 +12,6 @@ import (
 func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var cbs = []func(){}
 	var rules []string
-	var imType *common.Filter
-	var userId *common.Filter
-	var groupId *common.Filter
 	var admin bool
 	var disable bool = plugin_disable.GetString(uuid) == "b:true"
 	var priority int
@@ -25,14 +21,11 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var icon string
 	var version string = "v1.0.0"
 	var author string
-	var create_at string
 	var module bool
-	var encrypt bool
 	var onStart bool
+	var web bool
 	var origin = "自定义"
-	var https = []*common.Http{}
-	var message *common.Reply
-	var FindAll bool
+	var crons = map[string]string{}
 	var hasForm bool
 	var carry bool
 	var classes = []string{}
@@ -42,7 +35,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	).FindAllStringSubmatch(script, -1)
 	for _, res := range ress {
 		switch res[1] {
-		case "rule", "match", "regex", "pattern":
+		case "rule":
 			rule := strings.TrimSpace(res[2])
 			rule = parseReply3(rule, func(s1, s2 string) {
 				k := s1 + "." + s2
@@ -101,74 +94,18 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		case "class":
 			classes = append(classes, regexp.MustCompile(`[\S]+`).FindAllString(res[2], -1)...)
 			classes = utils.Unique(classes)
-		case "platform", "imType", "platform+", "imType+":
-			var item []string
-			for _, i := range regexp.MustCompile(`[\d\w-]+`).FindAllString(res[2], -1) {
-				item = append(item, strings.TrimSpace(i))
-			}
-			imType = &common.Filter{
-				BlackMode: false,
-				Items:     item,
-			}
-		case "platform-", "imType-":
-			var item []string
-			for _, i := range regexp.MustCompile(`[\d\w-]+`).FindAllString(res[2], -1) {
-				item = append(item, strings.TrimSpace(i))
-			}
-			imType = &common.Filter{
-				BlackMode: true,
-				Items:     item,
-			}
-		case "userId", "userID", "uid", "userId+", "userID+", "uid+":
-			var item []string
-			for _, i := range regexp.MustCompile(`[\d\w-]+`).FindAllString(res[2], -1) {
-				item = append(item, strings.TrimSpace(i))
-			}
-			userId = &common.Filter{
-				BlackMode: false,
-				Items:     item,
-			}
-		case "userId-", "userID-", "uid-":
-			var item []string
-			for _, i := range regexp.MustCompile(`[\d\w-]+`).FindAllString(res[2], -1) {
-				item = append(item, strings.TrimSpace(i))
-			}
-			userId = &common.Filter{
-				BlackMode: true,
-				Items:     item,
-			}
-		case "groupId", "groupID", "groupCode", "chat_id", "chat_id+", "chatId", "chatID", "gid", "groupId+", "groupID+", "groupCode+", "chatId+", "chatID+", "gid+":
-			var item []string
-			for _, i := range regexp.MustCompile(`[\d\w-]+`).FindAllString(res[2], -1) {
-				item = append(item, strings.TrimSpace(i))
-			}
-			groupId = &common.Filter{
-				BlackMode: false,
-				Items:     item,
-			}
-		case "groupId-", "groupID-", "groupCode-", "chatId-", "chat_id-", "chatID-", "gid-":
-			var item []string
-			for _, i := range regexp.MustCompile(`[\d\w-]+`).FindAllString(res[2], -1) {
-				item = append(item, strings.TrimSpace(i))
-			}
-			groupId = &common.Filter{
-				BlackMode: true,
-				Items:     item,
-			}
 
 		case "admin":
 			admin = strings.TrimSpace(res[2]) == "true"
 		// case "disable":
 		// 	disable = strings.TrimSpace(res[2]) == "true"
-		case "findall":
-			FindAll = strings.TrimSpace(res[2]) == "true"
 		case "priority":
 			priority = utils.Int(strings.TrimSpace(res[2]))
 		case "title", "name", "show":
 			title = strings.TrimSpace(res[2])
 		case "public":
 			public = strings.TrimSpace(res[2]) == "true"
-		case "description":
+		case "desc":
 			description = strings.TrimSpace(res[2])
 		case "icon":
 			icon = strings.TrimSpace(res[2])
@@ -176,64 +113,28 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 			version = strings.TrimSpace(res[2])
 		case "author":
 			author = strings.TrimSpace(res[2])
-		case "http":
-			ss := regexp.MustCompile(`[\S]+`).FindAllString(strings.TrimSpace(res[2]), -1)
-			if len(ss) == 2 {
-				https = append(https, &common.Http{
-					Path:   ss[1],
-					Method: strings.ToUpper(ss[0]),
-				})
-			} else {
-				console.Warn("http param is not 2")
+		case "cron":
+			schedule := parseCronMetaValue(res[2])
+			if schedule != "" {
+				crons["task"] = schedule
 			}
-		case "message":
-			ss := regexp.MustCompile(`[\S]+`).FindAllString(strings.TrimSpace(res[2]), -1)
-			if len(ss) > 1 {
-				if len(ss) == 2 && ss[1] == "*" {
-					message = &common.Reply{
-						Platform: ss[0],
-						BotsID:   []string{},
-					}
-				} else {
-					message = &common.Reply{
-						Platform: ss[0],
-						BotsID:   ss[1:],
-					}
-				}
-
-			} else {
-				console.Warn("message param is 0")
-			}
-		case "create_at":
-			create_at = strings.TrimSpace(res[2])
 		case "origin":
 			origin = strings.TrimSpace(res[2])
 		case "module":
 			module = strings.TrimSpace(res[2]) == "true"
 		case "carry":
 			carry = strings.TrimSpace(res[2]) == "true"
-		case "encrypt":
-			encrypt = strings.TrimSpace(res[2]) == "true"
-		case "on_start", "service":
+		case "on_start":
 			onStart = strings.TrimSpace(res[2]) == "true"
-		case "form":
-			hasForm = true
-		case "paterner":
-			paterner := strings.TrimSpace(res[2])
-			go func() {
-				time.Sleep(time.Second * 2)
-				getPaterner(uuid, strings.TrimSpace(paterner))
-			}()
+		case "web":
+			web = strings.TrimSpace(res[2]) == "true"
 		}
 	}
 	if !hasForm {
-		hasForm = strings.Contains(script, "form(") || strings.Contains(script, "Form(") || strings.Contains(script, "SillyGirlPluginConfig") || strings.Contains(script, "sillyGirlCreateSchema") || strings.Contains(script, "SillyGirlCreateSchema")
+		hasForm = strings.Contains(script, "form(") || strings.Contains(script, "SillyGirlPluginConfig") || strings.Contains(script, "sillyGirlCreateSchema")
 	}
 	return &common.Function{
 		Rules:       rules,
-		ImType:      imType,
-		UserId:      userId,
-		GroupId:     groupId,
 		Admin:       admin,
 		Priority:    priority,
 		Disable:     disable,
@@ -244,17 +145,34 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		Icon:        icon,
 		Version:     version,
 		Author:      author,
-		CreateAt:    create_at,
+		Class:       strings.Join(classes, " "),
 		Module:      module,
-		Encrypt:     encrypt,
-		OnStart:     onStart,
+		OnStart:     onStart || web,
+		Web:         web,
 		Origin:      origin,
-		Running:     onStart,
-		Reply:       message,
-		Https:       https,
-		FindAll:     FindAll,
+		Cron:        crons,
+		Running:     onStart || web,
 		HasForm:     hasForm,
 		Carry:       carry,
 		Classes:     classes,
 	}, cbs
+}
+
+func parseCronMetaValue(value string) string {
+	fields := regexp.MustCompile(`\S+`).FindAllString(strings.TrimSpace(value), -1)
+	if len(fields) == 5 || len(fields) == 6 {
+		if !isCronFieldToken(fields[0]) {
+			return ""
+		}
+		return strings.Join(fields, " ")
+	}
+	return ""
+}
+
+func isCronFieldToken(value string) bool {
+	if value == "" {
+		return false
+	}
+	first := value[0]
+	return first == '*' || first == '?' || (first >= '0' && first <= '9')
 }

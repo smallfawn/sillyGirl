@@ -23,6 +23,7 @@ import (
 
 const pluginSourceReposKey = "plugin_source_repos"
 const pluginSourceGithubProxyKey = "plugin_source_github_proxy"
+const defaultPluginSourceRepo = "https://github.com/smallfawn/sillyGirl_Plugins"
 const githubNodePluginScheme = "github-node"
 
 var builtinGithubAccelerators = []string{
@@ -46,7 +47,7 @@ type RequestPluginResult struct {
 	All     int                `json:"all"`
 	Tab     string             `json:"tab"`
 	Time    time.Time          `json:"time"`
-	Classes map[string]int     `json:"classes"`
+	Class   map[string]int     `json:"class"`
 	Origins map[string]string  `json:"origins"`
 }
 
@@ -236,7 +237,7 @@ func initWebPluginList() {
 			if class != "全部" {
 				list, _ = classes[class]
 			}
-			rr.Classes = classesNum
+			rr.Class = classesNum
 			var origins = map[string]string{}
 			for i := range list { //处理第二分类
 				if list[i].Organization != "" {
@@ -362,7 +363,7 @@ func listPluginSources() []*common.Function {
 func pluginSourceAddresses() []string {
 	raw := strings.TrimSpace(sillyGirl.GetString(pluginSourceReposKey))
 	if raw == "" {
-		return nil
+		return []string{defaultPluginSourceRepo}
 	}
 	sources := []string{}
 	if json.Unmarshal([]byte(strings.TrimPrefix(raw, "o:")), &sources) != nil {
@@ -469,22 +470,22 @@ type githubRepoResponse struct {
 }
 
 type githubPublicFileIndexEntry struct {
-	ID             string               `json:"id"`
-	Name           string               `json:"name"`
-	Title          string               `json:"title"`
-	Author         string               `json:"author"`
-	Version        string               `json:"version"`
-	Description    string               `json:"description"`
-	Classification string               `json:"classification"`
-	Rule           string               `json:"rule"`
-	Public         bool                 `json:"public"`
-	Admin          bool                 `json:"admin"`
-	Disable        bool                 `json:"disable"`
-	Path           string               `json:"path"`
-	Raw            string               `json:"raw"`
-	Type           string               `json:"type"`
-	Origin         string               `json:"origin"`
-	Dependencies   githubDependencyList `json:"dependencies"`
+	ID           string               `json:"id"`
+	Name         string               `json:"name"`
+	Title        string               `json:"title"`
+	Author       string               `json:"author"`
+	Version      string               `json:"version"`
+	Desc         string               `json:"desc"`
+	Class        string               `json:"class"`
+	Rule         string               `json:"rule"`
+	Public       bool                 `json:"public"`
+	Admin        bool                 `json:"admin"`
+	Disable      bool                 `json:"disable"`
+	Path         string               `json:"path"`
+	Raw          string               `json:"raw"`
+	Type         string               `json:"type"`
+	Origin       string               `json:"origin"`
+	Dependencies githubDependencyList `json:"dependencies"`
 }
 
 type githubDependencyList []string
@@ -632,6 +633,7 @@ func githubPluginSourceItems(address string) ([]*common.Function, error) {
 			Description:  item.Path,
 			Version:      "v1.0.0",
 			Author:       source.Owner,
+			Class:        source.Owner,
 			Address:      pluginAddress,
 			Classes:      []string{source.Owner},
 			Dependencies: dependencies,
@@ -677,7 +679,7 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 		}
 		id := nameUuid(pluginName)
 		classes := []string{}
-		for _, item := range strings.FieldsFunc(record.Classification, func(r rune) bool {
+		for _, item := range strings.FieldsFunc(record.Class, func(r rune) bool {
 			return r == ',' || r == '，' || r == ' ' || r == '\t' || r == '\n'
 		}) {
 			if item != "" {
@@ -706,9 +708,10 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 			Title:        title,
 			Type:         NODE,
 			Suffix:       ".js",
-			Description:  record.Description,
+			Description:  record.Desc,
 			Version:      firstNonEmpty(record.Version, "v1.0.0"),
 			Author:       firstNonEmpty(record.Author, source.Owner),
+			Class:        strings.Join(classes, " "),
 			Address:      pluginAddress,
 			Classes:      classes,
 			Public:       record.Public,

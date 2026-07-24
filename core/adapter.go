@@ -586,32 +586,13 @@ func (sender *CustomSender) Action(options map[string]interface{}) (interface{},
 
 		return sender.F.action(options), nil
 	}
-	var platform = sender.F.botplt
-	var any *common.Function
-	var one *common.Function
 	var result interface{}
 	var err error
-	for _, function := range Functions {
-		if function.Reply != nil && function.Reply.Platform == platform {
-			if len(function.Reply.BotsID) == 0 {
-				any = function
-			} else if Contains(function.Reply.BotsID, sender.F.botid) {
-				one = function
-			}
-		}
-	}
-	if one == nil && any != nil {
-		one = any
-	}
-	if one != nil {
-		err = errors.New("legacy action plugin is disabled")
-	}
 	return result, err
 }
 
 func (sender *CustomSender) Reply(msgs ...interface{}) (string, error) {
 	var push = false
-	var platform = sender.F.botplt
 	var bot_id = sender.F.botid
 	var args = []interface{}{}
 	for _, item := range msgs {
@@ -673,38 +654,20 @@ func (sender *CustomSender) Reply(msgs ...interface{}) (string, error) {
 			return "", nil
 		}
 		if sender.F.reply == nil { //未设置回复函数
-			var any *common.Function
-			var one *common.Function
-			for _, function := range Functions {
-				if function.Reply != nil && function.Reply.Platform == platform {
-					if len(function.Reply.BotsID) == 0 {
-						any = function
-					} else if Contains(function.Reply.BotsID, sender.F.botid) {
-						one = function
-					}
-				}
+			c := MsgChan{
+				Msg:  msg,
+				Chan: make(chan string),
 			}
-			if one == nil && any != nil {
-				one = any
+			if sender.F.destroid {
+				return "", errors.New("adapter destroid")
 			}
-			if one != nil {
-				return "", errors.New("legacy message plugin is disabled")
-			} else { //存储消息
-				c := MsgChan{
-					Msg:  msg,
-					Chan: make(chan string),
-				}
-				if sender.F.destroid {
-					return "", errors.New("adapter destroid")
-				}
-				sender.F.msgChan <- c
-				select {
-				case id := <-c.Chan:
-					return id, nil
-				case <-time.After(time.Second * 5):
-					close(c.Chan)
-					return "", errors.New("获取消息ID超时")
-				}
+			sender.F.msgChan <- c
+			select {
+			case id := <-c.Chan:
+				return id, nil
+			case <-time.After(time.Second * 5):
+				close(c.Chan)
+				return "", errors.New("获取消息ID超时")
 			}
 		} else {
 			//todo 阻塞延迟异常

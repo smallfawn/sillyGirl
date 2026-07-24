@@ -21,16 +21,27 @@ func TestEnsureNodePackageJSONRepairsInvalidDependencyFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readNodeDependencies returned error: %v", err)
 	}
-	if len(deps) != 3 {
+	if len(deps) != len(nodeSillygirlRuntimeDependencies)+1 {
 		t.Fatalf("unexpected dependencies: %#v", deps)
 	}
 	names := map[string]bool{}
 	for _, dep := range deps {
 		names[dep.Name] = true
 	}
-	for _, name := range []string{"ipp", "@grpc/grpc-js", "google-protobuf"} {
+	for name := range nodeSillygirlRuntimeDependencies {
 		if !names[name] {
 			t.Fatalf("missing dependency %s in %#v", name, deps)
+		}
+	}
+	if !names["ipp"] {
+		t.Fatalf("missing dependency ipp in %#v", deps)
+	}
+}
+
+func TestNodeRuntimeDependenciesIncludeExpress(t *testing.T) {
+	for _, name := range []string{"@grpc/grpc-js", "express", "google-protobuf"} {
+		if _, ok := nodeSillygirlRuntimeDependencies[name]; !ok {
+			t.Fatalf("missing runtime dependency %s", name)
 		}
 	}
 }

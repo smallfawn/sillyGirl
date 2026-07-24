@@ -3,10 +3,6 @@ package common
 type Function struct {
 	Rules          []string                 `json:"-"`
 	Params         [][]string               `json:"-"`
-	ImType         *Filter                  `json:"-"`
-	UserId         *Filter                  `json:"-"`
-	GroupId        *Filter                  `json:"-"`
-	FindAll        bool                     `json:"-"`
 	Admin          bool                     `json:"-"`
 	Handle         func(Sender) interface{} `json:"-"`
 	Cron           map[string]string        `json:"cron"`
@@ -19,7 +15,7 @@ type Function struct {
 	Title          string                   `json:"title"`
 	Type           string                   `json:"type"`   //脚本类型
 	Suffix         string                   `json:"suffix"` //脚本后缀
-	Description    string                   `json:"description"`
+	Description    string                   `json:"desc"`
 	Public         bool                     `json:"public"`
 	Icon           string                   `json:"icon"`
 	Version        string                   `json:"version"`
@@ -27,44 +23,28 @@ type Function struct {
 	LatestVersion  string                   `json:"latest_version,omitempty"`
 	UpdateContent  string                   `json:"update_content,omitempty"`
 	Author         string                   `json:"author"`
+	Class          string                   `json:"class"`
 	Status         int                      `json:"status"` //0未安装 1可更新 2已安装
 	Address        string                   `json:"-"`
 	CreateAt       string                   `json:"create_at"`
 	Module         bool                     `json:"module"`
-	// Web         bool                       `json:"web"`
-	Encrypt bool `json:"encrypt"`
-	OnStart bool `json:"on_start"`
+	OnStart        bool                     `json:"on_start"`
+	Web            bool                     `json:"web"`
 	PluginPublisher
 	Running      bool        `json:"running"`
-	Https        []*Http     `json:"-"`
-	Reply        *Reply      `json:"-"`
 	Downloads    int         `json:"downloads"`
 	HasForm      bool        `json:"has_form"`
 	Carry        bool        `json:"carry"`
 	Messages     interface{} `json:"messages"`
-	Classes      []string    `json:"classes"`
+	Classes      []string    `json:"-"`
 	Dependencies []string    `json:"dependencies,omitempty"`
 	Debug        bool        `json:"debug"`
 	Path         string      `json:"-"`
 	Reload       func()      `json:"-"`
-}
-type Filter struct {
-	BlackMode bool
-	Items     []string
 }
 
 type PluginPublisher struct {
 	Address      string `json:"address"`
 	Organization string `json:"organization"`
 	Identified   bool   `json:"identified"`
-}
-
-type Http struct { //GET /abc
-	Path   string
-	Method string
-}
-
-type Reply struct { //wx 123 1234
-	Platform string
-	BotsID   []string
 }

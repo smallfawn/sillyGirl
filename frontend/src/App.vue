@@ -58,7 +58,7 @@ import {
 } from 'lucide-vue-next';
 import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
 import type { CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
-import { asArray, splitTags, timestamp } from './utils';
+import { timestamp } from './utils';
 
 type PageKey =
   | 'welcome'
@@ -146,8 +146,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.0.3',
-    remote: info.remote || info.local || '0.0.3',
+    local: info.local || '0.0.4',
+    remote: info.remote || info.local || '0.0.4',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -759,30 +759,37 @@ async function loadCarrySelects(row?: CarryGroup) {
   );
   carry.selects = res.data || {};
 }
+async function changeCarryPlatform(platform: string) {
+  carry.form.platform = platform;
+  carry.form.bots_id = [];
+  await loadCarrySelects({ ...(carry.form as CarryGroup), platform });
+}
 async function openCarry(row?: CarryGroup) {
-  const data = row || { chat_id: '', enable: true, in: true, out: false };
+  const data = row || { chat_id: '', platform: '', remark: '', bots_id: [], scripts: [] };
   carry.editing = data;
   await loadCarrySelects(data);
   carry.form = {
     ...data,
-    includeText: asArray(data.include).join('\n'),
-    excludeText: asArray(data.exclude).join('\n'),
-    allowedText: asArray(data.allowed).join('\n'),
-    prohibitedText: asArray(data.prohibited).join('\n'),
+    bots_id: data.bots_id || [],
+    scripts: data.scripts || [],
   };
 }
 async function saveCarry() {
+  if (!carry.form.chat_id?.trim()) {
+    message.error('请输入群号');
+    return;
+  }
+  if (!carry.form.platform) {
+    message.error('请选择平台');
+    return;
+  }
   const payload = {
-    ...carry.form,
-    include: splitTags(carry.form.includeText || ''),
-    exclude: splitTags(carry.form.excludeText || ''),
-    allowed: splitTags(carry.form.allowedText || ''),
-    prohibited: splitTags(carry.form.prohibitedText || ''),
+    chat_id: carry.form.chat_id.trim(),
+    platform: carry.form.platform,
+    remark: carry.form.remark || '',
+    bots_id: carry.form.bots_id || [],
+    scripts: carry.form.scripts || [],
   };
-  delete payload.includeText;
-  delete payload.excludeText;
-  delete payload.allowedText;
-  delete payload.prohibitedText;
   await post('/api/carry/group', payload);
   carry.editing = null;
   message.success('已保存');
@@ -974,6 +981,33 @@ const plugins = reactive({
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
 });
+const pluginClassOptions = computed(() => {
+  const classes = (plugins.meta.class || {}) as Record<string, number>;
+  const names = Object.keys(classes).filter(Boolean);
+  if (!names.includes('全部')) {
+    names.unshift('全部');
+  }
+  return names
+    .sort((a, b) => {
+      if (a === '全部') return -1;
+      if (b === '全部') return 1;
+      return a.localeCompare(b, 'zh-Hans-CN');
+    })
+    .map((value) => ({
+      value,
+      label: classes[value] === undefined ? value : `${value} (${classes[value]})`,
+    }));
+});
+function filterPluginClassOption(input: string, option?: { label?: string; value?: string }) {
+  const keyword = String(input || '').toLowerCase();
+  return String(option?.label || option?.value || '').toLowerCase().includes(keyword);
+}
+function pluginClassTags(row: PluginInfo) {
+  return String(row.class || '')
+    .split(/[,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 async function openPluginSourceManager() {
   plugins.sourceModal = true;
   await Promise.all([loadPluginSources(), loadGithubProxy()]);
@@ -1777,11 +1811,9 @@ function recordOptions(record?: Record<string, string>) {
               </div>
               <Table row-key="chat_id" :data-source="carry.rows" :pagination="{ total: carry.total, pageSize: 20, onChange: loadCarry }">
                 <Table.Column title="#" data-index="id" :width="64" />
-                <Table.Column title="群号" data-index="chat_id" :width="160" />
-                <Table.Column title="群名" data-index="chat_name" :width="180" />
                 <Table.Column title="平台" data-index="platform" :width="100" />
-                <Table.Column title="方向" :width="120"><template #default="{ record }">{{ `${record.in ? '采集 ' : ''}${record.out ? '转发' : ''}` }}</template></Table.Column>
-                <Table.Column title="启用" data-index="enable" :width="80"><template #default="{ text }">{{ text ? '是' : '否' }}</template></Table.Column>
+                <Table.Column title="群号" data-index="chat_id" :width="160" />
+                <Table.Column title="备注" data-index="remark" />
                 <Table.Column title="操作" :width="150"><template #default="{ record }"><Button type="text" @click="openCarry(record)">编辑</Button><Popconfirm title="确认删除？" @confirm="removeCarry(record)"><Button type="text" danger><Trash2 :size="16" /></Button></Popconfirm></template></Table.Column>
               </Table>
             </section>
@@ -1911,7 +1943,14 @@ function recordOptions(record?: Record<string, string>) {
               <Tabs v-model:active-key="plugins.tab" :items="[{ key: 'all', label: `全部 ${plugins.meta.all ?? ''}` }, { key: 'tab1', label: `已安装 ${plugins.meta.tab1 ?? ''}` }, { key: 'tab2', label: `未安装 ${plugins.meta.tab2 ?? ''}` }, { key: 'tab3', label: `可更新 ${plugins.meta.tab3 ?? ''}` }]" />
               <div class="toolbar-left" style="margin-bottom: 12px">
                 <Input v-model:value="plugins.keyword" allow-clear style="width: 260px" placeholder="搜索插件或来源" @press-enter="loadPlugins()" />
-                <Select v-model:value="plugins.klass" style="width: 140px" :options="Object.keys(plugins.meta.classes || { 全部: 0 }).map((value) => ({ value, label: value }))" />
+                <Select
+                  v-model:value="plugins.klass"
+                  show-search
+                  style="width: 180px"
+                  placeholder="插件分类"
+                  :options="pluginClassOptions"
+                  :filter-option="filterPluginClassOption"
+                />
                 <Button type="primary" @click="loadPlugins()"><template #icon><Search :size="16" /></template>搜索</Button>
                 <Button type="primary" @click="openPluginSourceManager">
                   <template #icon><Settings :size="16" /></template>管理插件源
@@ -1926,12 +1965,13 @@ function recordOptions(record?: Record<string, string>) {
                         <Typography.Text strong>{{ record.title || record.id }}</Typography.Text>
                         <Tag v-if="record.status === 1" color="green">可更新</Tag>
                       </Space>
-                      <Typography.Text class="muted">{{ record.description || '无描述' }}</Typography.Text>
+                      <Typography.Text class="muted">{{ record.desc || '无描述' }}</Typography.Text>
                       <Typography.Text v-if="record.status === 1 && record.update_content" type="success">更新内容：{{ record.update_content }}</Typography.Text>
                       <Space wrap>
                         <Tag :color="pluginStatusColor(record)">{{ pluginStatusLabel(record) }}</Tag>
                         <Tag v-if="record.status === 1" color="green">新版本 {{ record.latest_version || record.version || '-' }} / 当前 {{ record.current_version || '-' }}</Tag>
                         <Tag v-else-if="record.version">{{ record.version }}</Tag>
+                        <Tag v-for="klass in pluginClassTags(record)" :key="klass" color="cyan">{{ klass }}</Tag>
                         <Tag v-if="record.author">{{ record.author }}</Tag>
                         <Tag v-if="record.organization" color="blue">{{ record.organization }}</Tag>
                         <Tag v-if="record.running" color="green">运行中</Tag>
@@ -2086,7 +2126,23 @@ function recordOptions(record?: Record<string, string>) {
       </Modal>
 
       <Modal :open="!!carry.editing" title="搬运群组" width="820px" @cancel="carry.editing = null" @ok="saveCarry">
-        <Form layout="vertical"><Form.Item label="群号"><Input v-model:value="carry.form.chat_id" /></Form.Item><Form.Item label="群名"><Input v-model:value="carry.form.chat_name" /></Form.Item><Form.Item label="平台"><Select v-model:value="carry.form.platform" :options="optionMap(carry.selects.platforms)" /></Form.Item><Form.Item label="工作机器人"><Select v-model:value="carry.form.bots_id" mode="multiple" :options="optionMap(carry.selects.bots_id)" /></Form.Item><Form.Item label="采集来源"><Select v-model:value="carry.form.from" mode="multiple" :options="recordOptions(carry.selects.group_names)" /></Form.Item><Form.Item label="处理脚本"><Select v-model:value="carry.form.scripts" mode="multiple" :options="recordOptions(carry.selects.scripts)" /></Form.Item><Form.Item label="包含词"><Input.TextArea v-model:value="carry.form.includeText" :rows="2" /></Form.Item><Form.Item label="排除词"><Input.TextArea v-model:value="carry.form.excludeText" :rows="2" /></Form.Item><Form.Item label="用户白名单"><Input.TextArea v-model:value="carry.form.allowedText" :rows="2" /></Form.Item><Form.Item label="用户黑名单"><Input.TextArea v-model:value="carry.form.prohibitedText" :rows="2" /></Form.Item><Form.Item label="备注"><Input.TextArea v-model:value="carry.form.remark" :rows="2" /></Form.Item><Form.Item label="采集"><Switch v-model:checked="carry.form.in" /></Form.Item><Form.Item label="转发"><Switch v-model:checked="carry.form.out" /></Form.Item><Form.Item label="启用"><Switch v-model:checked="carry.form.enable" /></Form.Item><Form.Item label="文本去重"><Switch v-model:checked="carry.form.deduplication" /></Form.Item></Form>
+        <Form layout="vertical">
+          <Form.Item label="平台" required>
+            <Select v-model:value="carry.form.platform" :options="optionMap(carry.selects.platforms)" @change="changeCarryPlatform" />
+          </Form.Item>
+          <Form.Item label="群号" required>
+            <Input v-model:value="carry.form.chat_id" />
+          </Form.Item>
+          <Form.Item label="备注">
+            <Input.TextArea v-model:value="carry.form.remark" :rows="2" />
+          </Form.Item>
+          <Form.Item label="工作机器人">
+            <Select v-model:value="carry.form.bots_id" mode="multiple" :options="optionMap(carry.selects.bots_id)" />
+          </Form.Item>
+          <Form.Item label="处理脚本">
+            <Select v-model:value="carry.form.scripts" mode="multiple" :options="recordOptions(carry.selects.scripts)" />
+          </Form.Item>
+        </Form>
       </Modal>
 
       <Modal :open="plugins.sourceModal" title="管理插件源" width="820px" :footer="null" @cancel="plugins.sourceModal = false">

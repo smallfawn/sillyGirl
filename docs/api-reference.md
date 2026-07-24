@@ -18,7 +18,6 @@
   - [Sender 接口](#sender-接口)
   - [Bucket 接口](#bucket-接口)
   - [Cron 接口](#cron-接口)
-  - [Request / Response 接口](#request--response-接口)
 
 ## REST API
 
@@ -395,7 +394,6 @@ print(f"Changed: {resp.changed}")
 ```js
 Bucket(name: string): Bucket
 Cron(): Cron
-Express(): Express
 sleep(ms: number): void
 md5(str: string): string
 uuid(): string
@@ -520,29 +518,4 @@ interface Cron {
   add(crontab: string, callback: Function): { id: number, error: string }
   remove(id: number): void
 }
-```
-
-### Request / Response 接口
-
-仅在 `@web true` 插件的 HTTP 回调中使用。
-
-#### Request
-
-```js
-req.url(): string
-req.method(): string
-req.header(key: string): string
-req.body(): any
-req.query(key: string): string
-req.path(): string
-req.param(key: string): string
-```
-
-#### Response
-
-```js
-res.send(text: string): void
-res.json(obj: object): void
-res.redirect(url: string): void
-res.status(code: number): void
 ```

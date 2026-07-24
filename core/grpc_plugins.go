@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
@@ -271,6 +270,9 @@ func AddNodePlugin(path, name, class string) error {
 		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_TOKEN="+grpcRuntimeMetadataToken())
 		if class == NODE {
 			cmd.Env = append(cmd.Env, "PLUGIN_CONFIG_JSON="+string(utils.JsonMarshal(getPluginUserConfig(uuid))))
+			if f.Web {
+				cmd.Env = append(cmd.Env, "SILLYGIRL_WEB=true")
+			}
 		}
 		// 获取标准输出和标准错误输出的管道
 		stdout, err := cmd.StdoutPipe()
@@ -593,15 +595,14 @@ declare let console: {
 	error(...args: any[]): void;
 	debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, utils, console };
+declare let express: any;
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, utils, console, express };
 `
 
 func defaultScript(title string) string {
-	create_at := time.Now().Format("2006-01-02 15:04:05")
 	return `/**
 * @title ` + title + `
-* @create_at ` + create_at + `
-* @description 🐒这个人很懒什么都没有留下
+* @desc 🐒这个人很懒什么都没有留下
 * @author ` + sillyGirl.GetString("author", "佚名") + `
 * @version v1.0.0
 */
@@ -615,6 +616,7 @@ const {
   sillyGirlCreateSchema,
   SillyGirlPluginConfig,
   form,
+  express,
   utils: { buildCQTag, image, video },
 } = require("sillygirl");
 `

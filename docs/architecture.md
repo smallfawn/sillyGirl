@@ -236,8 +236,7 @@ storage.Watch(bucket, "key", func(old, new, key string) *Final {
 1. **Admin 面板**：嵌入的 Vue 静态资源（`//go:embed admin/*`）
 2. **REST API**：`/api/plugins/download`、文件服务等
 3. **WebSocket**：`/api/web_chat` 长轮询实现实时聊天
-4. **插件 HTTP 路由**：插件通过 `@web` 或 `Express()` 注册的路由
-5. **动态端口**：支持运行时通过 Bucket 修改监听端口，平滑重启
+4. **动态端口**：支持运行时通过 Bucket 修改监听端口，平滑重启
 
 **NoRoute 处理逻辑**：
 
@@ -246,8 +245,6 @@ storage.Watch(bucket, "key", func(old, new, key string) *Final {
   → 匹配 /admin/* 静态资源
   → 匹配 GinApi 注册的固定路由
   → 匹配 WebSocket 升级
-  → 匹配插件 @web HTTP 路由
-  → 匹配动态 httpListens（Express 注册）
   → 返回 404
 ```
 

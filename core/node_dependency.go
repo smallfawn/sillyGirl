@@ -67,6 +67,7 @@ const defaultPnpmRegistry = "https://registry.npmmirror.com"
 
 var nodeSillygirlRuntimeDependencies = map[string]string{
 	"@grpc/grpc-js":   "^1.8.18",
+	"express":         "^4.21.2",
 	"google-protobuf": "^3.21.2",
 }
 

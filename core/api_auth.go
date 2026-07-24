@@ -233,9 +233,6 @@ func init() {
 				if f.OnStart {
 					name = name + " 💫"
 				}
-				if f.Encrypt {
-					name = name + " 🔒"
-				}
 				if f.Public {
 					name = name + " 👑"
 				}

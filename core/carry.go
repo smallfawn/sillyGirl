@@ -29,6 +29,27 @@ var CarryGroups = MakeBucket("CarryGroups")
 
 var carryCounter int64
 
+func carryGroupName(cg CarryGroup) string {
+	if cg.Remark != "" {
+		return cg.Remark
+	}
+	return cg.ID
+}
+
+func syncCarryGroupListen(cg CarryGroup) {
+	name := carryGroupName(cg)
+	if cg.ID != "" && cg.Enable {
+		AddListenOnGroup(cg.ID, fmt.Sprintf("已为搬运群(%s)开启监听模式", name), cg.Platform)
+		return
+	}
+	RemListenOnGroup(cg.ID, fmt.Sprintf("已为搬运群(%s)关闭监听模式", name))
+}
+
+func canUseAsCarryScript(function *common.Function) bool {
+	return function.UUID != "" && !function.Disable && !function.Module &&
+		(function.Carry || (len(function.Rules) == 0 && !function.OnStart))
+}
+
 type QMessage struct {
 	UserID    string        `json:"user_id"`
 	Content   string        `json:"content"`
@@ -45,16 +66,11 @@ func initCarry() {
 			Hidden:   true,
 			Priority: 9999,
 			Handle: func(s common.Sender) interface{} {
-				var bot_id = s.GetBotID()
-				var platform = s.GetImType()
-				var chat_id = s.GetChatID()
-				var user_id = s.GetUserID()
-				var content = s.GetContent()
-				var message_id = s.GetMessageID()
-				var from *CarryGroup //判断当前消息来自采集源
-				var cgs = cgs
-				var uuid = fmt.Sprintf("%d. ", atomic.AddInt64(&carryCounter, 1))
-				var ss = &Strings{}
+				botID := s.GetBotID()
+				platform := s.GetImType()
+				chatID := s.GetChatID()
+				localGroups := cgs
+				traceID := fmt.Sprintf("%d. ", atomic.AddInt64(&carryCounter, 1))
 				var event = s.Event()
 				if event != nil {
 					if event["type"] == "delete_message" {
@@ -71,191 +87,42 @@ func initCarry() {
 					s.Continue()
 					return nil
 				}
-				for i := range cgs {
-					if chat_id == cgs[i].ID && cgs[i].In && cgs[i].Enable {
-						from = &cgs[i]
-						break
-					}
-				}
-				if nil == from { //非采集群
+				if chatID == "" {
 					s.Continue()
 					return nil
 				}
-				//采集消息去重逻辑
-				q := NewQueue(chat_id, 50)
-				if from.Deduplication {
-					for _, qm := range q.GetValues() {
-						v := ss.HansSimilarity(qm.Content, content)
-						if v > 0.9 {
-							console.Debug("%s 忽略重复采集信息", uuid)
-							return nil
-						}
+				var group *CarryGroup
+				for i := range localGroups {
+					if localGroups[i].Enable && localGroups[i].ID == chatID && (localGroups[i].Platform == "" || localGroups[i].Platform == platform) {
+						group = &localGroups[i]
+						break
 					}
 				}
-				_ = q.Enqueue(&QMessage{
-					UserID:    user_id,
-					Content:   content,
-					MessageID: message_id,
-				})
-				bots_id := GetAdapterBotsID(platform)
-				if len(from.BotsID) == 0 && len(bots_id) != 0 {
-					from.BotsID = bots_id
-				}
-				//判断是否来自指定采集机器人
-				var from_right_bot bool
-				if len(from.BotsID) != 0 && from.BotsID[0] == bot_id {
-					from_right_bot = true
-				}
-				//检测指定机器人是否离线，离线则使用其他第一个机器人，否则忽略消息
-				if !from_right_bot {
-					if len(from.BotsID) != 0 {
-						if Contains(bots_id, bot_id) {
-							console.Debug("%s 忽略机器人(%s)消息非采集指定机器人(%s)消息", uuid, bot_id, from.BotsID[0])
-							return nil
-						}
-					}
-					if len(bots_id) != 0 && bots_id[0] != bot_id { //不是第一个机器人
-						console.Debug("%s 忽略机器人(%s)消息非其他第一个机器人(%s)的消息", uuid, bot_id, bots_id[0])
-						return nil
-					}
-				}
-				console.Debug("%s 当前采集群 %s", uuid, chat_id)
-				//预测采集白名单、黑名单
-				if len(from.Allowed) != 0 { //白名单
-					if !Contains(from.Allowed, user_id) {
-						console.Debug("%s 用户(%s)不在采集群白名单 %v", uuid, chat_id)
-						return nil
-					}
-				} else {
-					if Contains(from.Prohibited, user_id) {
-						console.Debug("%s 用户(%s)在采集群黑名单 %v", uuid, chat_id)
-						return nil
-					}
-				}
-				//预测采集包含、排除词
-				if len(from.Include) != 0 { //包含
-					if word := Include(content, from.Include); word == "" {
-						console.Debug("%s 消息中无采集包含词", uuid)
-						return nil
-					}
-				}
-				if len(from.Exclude) != 0 { //排除
-					if word := Include(content, from.Exclude); word != "" {
-						console.Debug("%s 消息中有采集排除词 %s", uuid, word)
-						return nil
-					}
-				}
-				var outs []CarryGroup //预测转发群
-				for i := range cgs {
-					if cgs[i].Enable && cgs[i].Out && cgs[i].ID != chat_id {
-						for j := range cgs[i].From {
-							if cgs[i].From[j] == chat_id {
-								if len(cgs[i].Allowed) != 0 { //白名单
-									if !Contains(cgs[i].Allowed, user_id) {
-										console.Debug("%s 用户(%s)不在转发群(%s)白名单 %v", uuid, user_id, cgs[i].ID)
-										continue
-									}
-								} else {
-									if Contains(cgs[i].Prohibited, user_id) {
-										console.Debug("%s 用户(%s)在转发群(%s)黑名单 %v", uuid, user_id, cgs[i].ID)
-										continue
-									}
-								}
-								if len(cgs[i].Include) != 0 { //包含
-									if word := Include(content, cgs[i].Include); word == "" {
-										console.Debug("%s 消息中无转发(s)包含词", uuid, cgs[i].ID)
-										continue
-									}
-								}
-								if len(cgs[i].Exclude) != 0 { //排除
-									if word := Include(content, cgs[i].Exclude); word != "" {
-										console.Debug("%s 消息中有转发(s)排除词 %s", uuid, cgs[i].ID, word)
-										continue
-									}
-								}
-								outs = append(outs, cgs[i])
-							}
-						}
-					}
-				}
-				num := len(outs)
-				console.Debug("%s 预测转发群数目 %v", uuid, num)
-				if num == 0 {
+				if group == nil {
+					s.Continue()
 					return nil
 				}
-				var scripts = []string{}
-				//执行采集脚本
-				fs := Functions
-				for j := range from.Scripts {
-					for i := range fs {
-						if fs[i].UUID == from.Scripts[j] && !Contains(scripts, fs[i].UUID) {
-							fs[i].Handle(s)
-							content = s.GetContent()
-							if content == "" {
-								return nil
-							}
-							scripts = append(scripts, fs[i].UUID)
+				if len(group.BotsID) != 0 && !Contains(group.BotsID, botID) {
+					console.Debug("%s 忽略机器人(%s)消息，搬运群(%s)限定工作机器人%v", traceID, botID, chatID, group.BotsID)
+					return nil
+				}
+				if len(group.Scripts) == 0 {
+					console.Debug("%s 搬运群(%s)未配置处理脚本", traceID, chatID)
+					s.Continue()
+					return nil
+				}
+				console.Debug("%s 搬运群(%s)执行处理脚本%v", traceID, chatID, group.Scripts)
+				executed := []string{}
+				for _, scriptID := range group.Scripts {
+					for _, function := range Functions {
+						if function.UUID == scriptID && canUseAsCarryScript(function) && !Contains(executed, function.UUID) {
+							function.Handle(s)
+							executed = append(executed, function.UUID)
+							break
 						}
 					}
 				}
-				//执行转发脚本
-				for i := range outs {
-					var scripts = scripts
-					var content = content
-					for j := range outs[i].Scripts {
-						for k := range fs {
-							if fs[k].UUID == outs[i].Scripts[j] && !Contains(scripts, fs[k].UUID) { //
-								fs[k].Handle(s)
-								content = s.GetContent()
-								// fmt.Println(content)
-								if content == "" {
-									goto HELL
-								}
-								scripts = append(scripts, fs[k].UUID)
-							}
-						}
-					}
-				HELL:
-					if content != "" { //选择机器人
-						platform := outs[i].Platform
-						chat_id := outs[i].ID
-						adapter, err := GetAdapter(platform, outs[i].BotsID...)
-						if adapter == nil {
-							console.Warn("%s (%s)转发群(%s)相关机器人%v都不在线", uuid, platform, chat_id, outs[i].BotsID)
-							continue
-						}
-						if err != nil {
-							console.Debug("%s 指定(%s)机器人都不在线，转发群(%s)已选择其他机器人(%s)推送", uuid, platform, chat_id, adapter.botid)
-						}
-						if adapter != nil {
-							//采集消息去重逻辑
-							q := NewQueue(chat_id, 50)
-							if outs[i].Deduplication {
-								for _, qm := range q.GetValues() {
-									v := ss.HansSimilarity(qm.Content, content)
-									if v > 0.9 {
-										console.Debug("%s 忽略重复转发信息", uuid)
-										continue
-									}
-								}
-							}
-							qm := &QMessage{
-								UserID:  user_id,
-								Content: content,
-								From:    s,
-								To:      adapter,
-							}
-							_ = q.Enqueue(qm)
-							v := adapter.Push(map[string]string{
-								CONETNT: content,
-								CHAT_ID: chat_id,
-							})
-							if v["error"] == "" {
-								qm.MessageID = v["message_id"]
-							}
-						}
-					}
-				}
+				s.Continue()
 				return nil
 			},
 		},
@@ -275,11 +142,7 @@ func initCarry() {
 					for i, cg := range tmp {
 						if cg.ID == ocg.ID {
 							tmp = append(tmp[:i], tmp[i+1:]...)
-							name := cg.ChatName
-							if name == "" {
-								name = cg.ID
-							}
-							RemListenOnGroup(cg.ID, fmt.Sprintf("已为采集群(%s)关闭监听模式", name))
+							syncCarryGroupListen(CarryGroup{ID: cg.ID, Remark: carryGroupName(cg)})
 							break
 						}
 					}
@@ -291,20 +154,7 @@ func initCarry() {
 					for i, cg := range tmp {
 						if cg.ID == ocg.ID {
 							tmp[i] = ncg
-							name := ncg.ChatName
-							if name == "" {
-								name = ncg.ID
-							}
-							if ncg.In {
-								if ncg.Enable {
-									AddListenOnGroup(ncg.ID, fmt.Sprintf("已为采集群(%s)开启监听模式", name), ncg.Platform)
-									AddNoReplyGroups(ncg.ID, fmt.Sprintf("已为采集群(%s)开启禁言模式", name), ncg.Platform)
-								} else {
-									RemListenOnGroup(ncg.ID, fmt.Sprintf("已为采集群(%s)关闭监听模式", name))
-								}
-							} else {
-								RemListenOnGroup(ncg.ID, fmt.Sprintf("已为采集群(%s)关闭监听模式", name))
-							}
+							syncCarryGroupListen(ncg)
 							break
 						}
 					}
@@ -315,14 +165,7 @@ func initCarry() {
 		} else { //创建
 			if ncg.ID != "" {
 				tmp = append(tmp, ncg)
-				if ncg.In && ncg.Enable {
-					name := ncg.ChatName
-					if name == "" {
-						name = ncg.ID
-					}
-					AddListenOnGroup(ncg.ID, fmt.Sprintf("已为采集群(%s)开启监听模式", name), ncg.Platform)
-					AddNoReplyGroups(ncg.ID, fmt.Sprintf("已为采集群(%s)开启禁言模式", name), ncg.Platform)
-				}
+				syncCarryGroupListen(ncg)
 			} else {
 				return nil
 			}
@@ -343,14 +186,7 @@ func setCgs() {
 		if err != nil {
 			return nil
 		}
-		if cg.In && cg.Enable {
-			name := cg.ChatName
-			if name == "" {
-				name = cg.ID
-			}
-			AddListenOnGroup(cg.ID, fmt.Sprintf("已为采集群(%s)开启监听模式", name), cg.Platform)
-			AddNoReplyGroups(cg.ID, fmt.Sprintf("已为采集群(%s)开启禁言模式", name), cg.Platform)
-		}
+		syncCarryGroupListen(cg)
 		cgs = append(cgs, cg)
 		return nil
 	})
@@ -467,24 +303,9 @@ func init() {
 		chat_id := ctx.Query("chat_id")
 		platform := ctx.Query("platform")
 		cgs := cgs
-		var names = map[string]string{}
 		var bots_id = []string{}
-		var users = []string{}
 		for _, cg := range cgs {
-			if cg.In {
-				if cg.ChatName != "" {
-					names[cg.ID] = cg.ChatName
-				} else {
-					if cg.Remark != "" {
-						names[cg.ID] = cg.Remark
-					} else {
-						names[cg.ID] = cg.ID
-					}
-				}
-			}
 			if cg.ID == chat_id {
-				users = append(users, cg.Allowed...)
-				users = append(users, cg.Prohibited...)
 				if platform == "" {
 					platform = cg.Platform
 				}
@@ -494,33 +315,16 @@ func init() {
 		var scripts = map[string]string{}
 		functions := Functions
 		for _, function := range functions {
-			if function.UUID != "" && ((len(function.Rules) == 0 && !function.OnStart && !function.Module && len(function.Https) == 0 && function.Reply == nil) || function.Carry) {
+			if canUseAsCarryScript(function) {
 				scripts[function.UUID] = function.Title + function.Suffix
 			}
 		}
-		var user_names = []NicklabeL{}
-		nickname.Foreach(func(b1, b2 []byte) error {
-			v := &Nickname{}
-			code := string(b1)
-			err := json.Unmarshal(b2, v)
-			if err == nil {
-				if Contains(users, code) {
-					user_names = append(user_names, NicklabeL{
-						Label: fmt.Sprintf("%s(%s)", v.Value, code),
-						Value: code,
-					})
-				}
-			}
-			return nil
-		})
 		ctx.JSON(200, map[string]interface{}{
 			"success": true,
 			"data": map[string]interface{}{
-				"user_names":  user_names,
-				"group_names": names,
-				"bots_id":     bots_id,
-				"platforms":   getPltsArray(),
-				"scripts":     scripts,
+				"bots_id":   bots_id,
+				"platforms": getPltsArray(),
+				"scripts":   scripts,
 			},
 		})
 	})
@@ -535,19 +339,42 @@ func init() {
 			})
 			return
 		}
-		v, ok := updateData["chat_id"]
-		if !ok {
+		chat_id := strings.TrimSpace(fmt.Sprint(updateData["chat_id"]))
+		if chat_id == "" {
 			ctx.JSON(200, map[string]interface{}{
 				"success":      false,
 				"errorMessage": "群号不能为空",
 			})
 			return
 		}
-		chat_id := v.(string)
+		platform := strings.TrimSpace(fmt.Sprint(updateData["platform"]))
+		if platform == "" {
+			ctx.JSON(200, map[string]interface{}{
+				"success":      false,
+				"errorMessage": "平台不能为空",
+			})
+			return
+		}
 		var cg = CarryGroup{
-			ID: chat_id,
+			ID:       chat_id,
+			Platform: platform,
+			In:       true,
+			Enable:   true,
 		}
 		CarryGroups.First(&cg)
+		cg.ID = chat_id
+		cg.Platform = platform
+		cg.In = true
+		cg.Enable = true
+		cg.Out = false
+		cg.From = nil
+		cg.Allowed = nil
+		cg.Prohibited = nil
+		cg.ChatName = ""
+		cg.Include = nil
+		cg.Exclude = nil
+		cg.Deduplication = false
+		cg.Deduplication2 = false
 		// if err != nil {
 		// 	ctx.JSON(200, map[string]interface{}{
 		// 		"success":      false,
@@ -557,57 +384,9 @@ func init() {
 		// }
 		for key, value := range updateData {
 			switch key {
-			case "in":
-				if in, ok := value.(bool); ok {
-					cg.In = in
-				}
-			case "out":
-				if out, ok := value.(bool); ok {
-					cg.Out = out
-				}
-			case "deduplication":
-				if deduplication, ok := value.(bool); ok {
-					cg.Deduplication = deduplication
-				}
-			case "deduplication2":
-				if deduplication, ok := value.(bool); ok {
-					cg.Deduplication2 = deduplication
-				}
-			case "from":
-				if from, ok := value.([]interface{}); ok {
-					cg.From = toStringSlice(from)
-				}
-			case "allowed":
-				if allowed, ok := value.([]interface{}); ok {
-					cg.Allowed = toStringSlice(allowed)
-				}
-			case "prohibited":
-				if prohibited, ok := value.([]interface{}); ok {
-					cg.Prohibited = toStringSlice(prohibited)
-				}
-			case "chat_name":
-				if chatName, ok := value.(string); ok {
-					cg.ChatName = chatName
-				}
 			case "remark":
 				if remark, ok := value.(string); ok {
 					cg.Remark = remark
-				}
-			case "platform":
-				if platform, ok := value.(string); ok {
-					cg.Platform = platform
-				}
-			case "enable":
-				if disable, ok := value.(bool); ok {
-					cg.Enable = disable
-				}
-			case "include":
-				if include, ok := value.([]interface{}); ok {
-					cg.Include = toStringSlice(include)
-				}
-			case "exclude":
-				if exclude, ok := value.([]interface{}); ok {
-					cg.Exclude = toStringSlice(exclude)
 				}
 			case "bots_id":
 				if botsID, ok := value.([]interface{}); ok {

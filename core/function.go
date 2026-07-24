@@ -596,43 +596,20 @@ func HandleMessage(sender common.Sender) {
 		if function.Disable || function.Module {
 			continue
 		}
-		imType := sender.GetImType()
-		if (imType != "cron" && imType != "carry" && black(function.ImType, imType)) || black(function.UserId, sender.GetUserID()) || black(function.GroupId, fmt.Sprint(sender.GetChatID())) {
-			continue
-		}
 		for i := range function.Rules {
-			var matched bool
-			if function.FindAll {
-				reg, err := regexp.Compile(function.Rules[i])
-				if err != nil {
-					console.Error("脚本%s正则错误，%v", function.Title, err)
-					continue
+			reg, err := regexp.Compile(function.Rules[i])
+			if err != nil {
+				console.Error("脚本%s正则错误，%v", function.Title, err)
+				continue
+			}
+			matched := false
+			if res := reg.FindStringSubmatch(content); len(res) > 0 {
+				if !function.Hidden {
+					logs.Info("匹配到规则：%s", function.Rules[i])
 				}
-				if res := reg.FindAllStringSubmatch(content, -1); len(res) > 0 {
-					tmp := [][]string{}
-					for i := range res {
-						tmp = append(tmp, res[i][1:])
-					}
-					if !function.Hidden {
-						logs.Info("匹配到规则：%s", function.Rules[i])
-					}
-					sender.SetAllMatch(tmp)
-					matched = true
-				}
-			} else {
-				reg, err := regexp.Compile(function.Rules[i])
-				if err != nil {
-					console.Error("脚本%s正则错误，%v", function.Title, err)
-					continue
-				}
-				if res := reg.FindStringSubmatch(content); len(res) > 0 {
-					if !function.Hidden {
-						logs.Info("匹配到规则：%s", function.Rules[i])
-					}
-					sender.SetMatch(res[1:])
-					sender.SetParams(function.Params[i])
-					matched = true
-				}
+				sender.SetMatch(res[1:])
+				sender.SetParams(function.Params[i])
+				matched = true
 			}
 			if matched {
 				if function.Admin && !a {
@@ -675,18 +652,4 @@ func HandleMessage(sender common.Sender) {
 			return
 		}
 	}
-}
-func black(filter *common.Filter, str string) bool {
-	if filter != nil {
-		if filter.BlackMode {
-			if utils.Contains(filter.Items, str) {
-				return true
-			}
-		} else {
-			if !utils.Contains(filter.Items, str) {
-				return true
-			}
-		}
-	}
-	return false
 }

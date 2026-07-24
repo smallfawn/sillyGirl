@@ -44,7 +44,7 @@ export type PluginInfo = {
   id: string;
   title: string;
   suffix?: string;
-  description?: string;
+  desc?: string;
   version?: string;
   author?: string;
   icon?: string;
@@ -59,7 +59,7 @@ export type PluginInfo = {
   module?: boolean;
   on_start?: boolean;
   create_at?: string;
-  classes?: string[];
+  class?: string;
   organization?: string;
   address?: string;
   messages?: unknown;
@@ -87,23 +87,12 @@ export type Master = {
 
 export type CarryGroup = {
   id?: number;
-  in?: boolean;
-  out?: boolean;
-  from?: string[];
-  allowed?: string[];
-  prohibited?: string[];
   chat_id: string;
-  chat_name?: string;
   remark?: string;
   platform?: string;
-  enable?: boolean;
-  include?: string[];
-  exclude?: string[];
   created_at?: number;
   bots_id?: string[];
   scripts?: string[];
-  deduplication?: boolean;
-  deduplication2?: boolean;
 };
 
 export type Task = {

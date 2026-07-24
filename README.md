@@ -61,20 +61,41 @@ docker compose logs -f
 s.reply("Hello World!");
 ```
 
-常用元数据：
+元数据必填规则：
 
-| 字段 | 说明 |
-|------|------|
-| `title` | 插件标题，显示在管理面板和插件市场 |
-| `rule` | 消息匹配规则，可写多条 |
-| `priority` | 匹配优先级，数字越大越优先 |
-| `version` | 插件版本，例如 `v1.0.0` |
-| `author` | 作者 |
-| `description` | 插件说明 |
-| `public` | 是否公开到插件市场 |
-| `disable` | 是否禁用 |
-| `admin` | 是否仅管理员可触发 |
-| `platform` | 限制平台，例如 `qq`、`telegram`、`web` |
+| 使用场景 | 必填参数 | 说明 |
+|------|------|------|
+| 普通消息插件 | `@title`、`@rule` | `@rule` 用来匹配消息，不写规则就不会被普通消息触发 |
+| 搬运处理脚本 | `@title`、`@carry true` | 搬运页的“处理脚本”建议选择带 `@carry true` 的插件 |
+| 启动脚本 | `@title`、`@on_start true` | 程序启动时执行一次 |
+| Web 服务脚本 | `@title`、`@web true` | 程序启动时常驻运行，脚本自己用 Express 监听端口 |
+| 脚本定时任务 | `@title`、`@cron 表达式` | 写了 `@cron` 的脚本会直接显示在 Admin 面板「定时任务」 |
+| 纯模块/工具脚本 | `@title`、`@module true` | 只作为模块或工具文件，不参与普通消息匹配 |
+
+元数据参数说明：
+
+| 参数 | 是否必填 | 说明 |
+|------|------|------|
+| `@title 名称` | 建议必填 | 插件标题，显示在管理面板和插件市场；别名：`@name`、`@show` |
+| `@rule 规则` | 普通消息插件必填 | 消息匹配规则，可写多条；支持 `raw ^正则$` 和占位参数 `[名称]` |
+| `@priority 数字` | 非必填 | 匹配优先级，数字越大越优先，默认 `0` |
+| `@admin true/false` | 非必填 | 是否仅管理员可触发，默认 `false` |
+| `@version 版本号` | 非必填 | 插件版本，默认 `v1.0.0` |
+| `@author 作者` | 非必填 | 作者名 |
+| `@desc 描述` | 非必填 | 插件说明，显示在后台或插件市场 |
+| `@icon URL` | 非必填 | 插件图标 URL |
+| `@public true/false` | 非必填 | 是否允许公开到插件市场，默认 `false` |
+| `@origin 来源` | 非必填 | 插件来源标记，默认 `自定义` |
+| `@class 标签` | 非必填 | 插件分类标签，可写多个 |
+| `@module true/false` | 非必填 | 是否作为模块插件；为 `true` 时不参与普通消息匹配 |
+| `@carry true/false` | 搬运脚本必填 | 是否可作为搬运处理脚本，默认 `false` |
+| `@cron 表达式` | 脚本定时任务必填 | 声明脚本定时任务，例如 `@cron 0 * * * *`；只支持直接写 Cron 表达式 |
+| `@on_start true/false` | 启动脚本必填 | 是否在程序启动时执行一次 |
+| `@web true/false` | Web 服务脚本必填 | 是否作为 Web 常驻脚本启动；端口和路由由脚本内 Express 自己处理 |
+
+注意：当前脚本注释不会解析 `@disable`。禁用插件请在 Admin 面板操作。
+
+如果脚本已经写了 `@cron`，它会自动展示到「定时任务」列表；如果在「定时任务」里选择 `node 插件名.js` 创建任务，系统会把 Cron 表达式写回该脚本头部注释，而不是额外创建一份重复任务。
 
 规则支持占位捕获：
 
@@ -116,6 +137,25 @@ const schema = sillyGirlCreateSchema.object({
 const ConfigDB = new SillyGirlPluginConfig(schema);
 ConfigDB.get();
 s.reply("当前地址：" + ConfigDB.userConfig.host);
+```
+
+Web 服务脚本：
+
+```js
+/**
+ * @title Web 示例
+ * @web true
+ * @class 工具
+ */
+
+const { express } = require("sillygirl");
+
+const app = express();
+app.use(express.json());
+app.get("/health", (req, res) => {
+  res.json({ status: true, message: "ok" });
+});
+app.listen(3001, () => console.log("web plugin listening on 3001"));
 ```
 
 持久化存储：
@@ -249,18 +289,6 @@ task.remove(ret.id);
 
 定时执行推荐在 Admin 面板「定时任务」里配置。
 
-### Express
-
-```js
-const app = Express();
-
-app.get("/hello", (req, res) => {
-  res.send("Hello World!");
-});
-```
-
-Web 插件需要声明 `@web true`。
-
 ## 功能说明
 
 | 功能 | 说明 |
@@ -272,6 +300,7 @@ Web 插件需要声明 `@web true`。
 | 依赖管理 | 使用 pnpm 管理 NodeJS 插件共享依赖，安装到 `/data/plugins/package.json` 和 `/data/plugins/node_modules` |
 | NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
+| 搬运 | 可按平台和群号把消息交给指定插件脚本处理，业务过滤和转发由脚本自行实现 |
 | 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new QingLong({ id })` 调用 |
 | smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new SmallCat({ id })` 调用 |
 | 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new DaiDai({ id })` 调用 |
