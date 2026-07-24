@@ -129,7 +129,7 @@ const nodeRuntimePreloadScript = `
   SchemaNode.prototype.setWidget = function (value) { this.schema["ui:widget"] = value; return this; };
   SchemaNode.prototype.toJSON = function () { return this.schema; };
 
-  const SillyGirlCreateSchema = {
+  const sillyGirlCreateSchema = {
     string: function () { return new SchemaNode("string"); },
     number: function () { return new SchemaNode("number"); },
     integer: function () { return new SchemaNode("integer"); },
@@ -181,7 +181,7 @@ const nodeRuntimePreloadScript = `
     }
   }
 
-  function Form(schema) {
+  function form(schema) {
     return new SillyGirlPluginConfig(schema);
   }
 
@@ -367,16 +367,16 @@ const nodeRuntimePreloadScript = `
   sg.QingLong = sg.QingLong || QingLong;
   sg.SmallCat = sg.SmallCat || SmallCat;
   sg.DaiDai = sg.DaiDai || DaiDai;
-  sg.SillyGirlCreateSchema = sg.SillyGirlCreateSchema || SillyGirlCreateSchema;
+  sg.sillyGirlCreateSchema = sg.sillyGirlCreateSchema || sillyGirlCreateSchema;
   sg.SillyGirlPluginConfig = sg.SillyGirlPluginConfig || SillyGirlPluginConfig;
-  sg.Form = sg.Form || Form;
+  sg.form = sg.form || form;
   sg.pluginConfigDefaults = sg.pluginConfigDefaults || collectSchemaDefaults;
   globalThis.QingLong = sg.QingLong;
   globalThis.SmallCat = sg.SmallCat;
   globalThis.DaiDai = sg.DaiDai;
-  globalThis.SillyGirlCreateSchema = sg.SillyGirlCreateSchema;
+  globalThis.sillyGirlCreateSchema = sg.sillyGirlCreateSchema;
   globalThis.SillyGirlPluginConfig = sg.SillyGirlPluginConfig;
-  globalThis.Form = sg.Form;
+  globalThis.form = sg.form;
   globalThis.pluginConfigDefaults = sg.pluginConfigDefaults;
 })();
 `

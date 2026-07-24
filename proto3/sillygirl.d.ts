@@ -94,7 +94,7 @@ declare class SchemaNode implements SillyGirlSchemaNode {
     setWidget(value: string): this;
     toJSON(): Record<string, any>;
 }
-declare const SillyGirlCreateSchema: {
+declare const sillyGirlCreateSchema: {
     string: () => SchemaNode;
     number: () => SchemaNode;
     integer: () => SchemaNode;
@@ -118,7 +118,7 @@ declare class SillyGirlPluginConfig {
         error: string;
     }>;
 }
-declare function Form(schema: any): SillyGirlPluginConfig;
+declare function form(schema: any): SillyGirlPluginConfig;
 declare class QingLong {
     id: number;
     uuid: string;
@@ -259,4 +259,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlCreateSchema, SillyGirlPluginConfig, Form, pluginConfigDefaults, sender, sleep, utils, console, };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, utils, console, };

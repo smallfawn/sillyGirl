@@ -33,8 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.SillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
-exports.Form = Form;
+exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.sillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
+exports.form = form;
 exports.pluginConfigDefaults = pluginConfigDefaults;
 exports.sleep = sleep;
 const srpc_1 = require("./srpc");
@@ -600,7 +600,7 @@ class SchemaNode {
     setWidget(value) { this.schema["ui:widget"] = value; return this; }
     toJSON() { return this.schema; }
 }
-const SillyGirlCreateSchema = {
+const sillyGirlCreateSchema = {
     string: () => new SchemaNode("string"),
     number: () => new SchemaNode("number"),
     integer: () => new SchemaNode("integer"),
@@ -614,7 +614,7 @@ const SillyGirlCreateSchema = {
         return new SchemaNode("object", { properties });
     },
 };
-exports.SillyGirlCreateSchema = SillyGirlCreateSchema;
+exports.sillyGirlCreateSchema = sillyGirlCreateSchema;
 class SillyGirlPluginConfig {
     uuid = plugin_id;
     jsonSchema;
@@ -662,7 +662,7 @@ class SillyGirlPluginConfig {
     }
 }
 exports.SillyGirlPluginConfig = SillyGirlPluginConfig;
-function Form(schema) {
+function form(schema) {
     return new SillyGirlPluginConfig(schema);
 }
 async function readRuntimePanels(key) {
@@ -1029,6 +1029,8 @@ exports.DaiDai = DaiDai;
 globalThis.QingLong = QingLong;
 globalThis.SmallCat = SmallCat;
 globalThis.DaiDai = DaiDai;
+globalThis.sillyGirlCreateSchema = sillyGirlCreateSchema;
+globalThis.form = form;
 class Adapter {
     platform;
     bot_id;

@@ -104,11 +104,11 @@ s.continue();        // 继续匹配后续插件
 插件配置表单：
 
 ```js
-const schema = SillyGirlCreateSchema.object({
-  host: SillyGirlCreateSchema.string()
+const schema = sillyGirlCreateSchema.object({
+  host: sillyGirlCreateSchema.string()
     .setTitle("服务地址")
     .setDefault("http://127.0.0.1:9090"),
-  enabled: SillyGirlCreateSchema.boolean()
+  enabled: sillyGirlCreateSchema.boolean()
     .setTitle("启用")
     .setDefault(false),
 });
@@ -121,7 +121,7 @@ s.reply("当前地址：" + ConfigDB.userConfig.host);
 持久化存储：
 
 ```js
-const db = Bucket("my-plugin");
+const db = new Bucket("my-plugin");
 db.set("count", 1);
 db.get("count", 0);
 db.delete("count");
@@ -268,7 +268,7 @@ Web 插件需要声明 `@web true`。
 | 管理面板 | Vue 管理后台，支持脚本、插件市场、配置、存储、任务等管理 |
 | 脚本插件 | 支持 JS 代码高亮、格式化、文件管理和在线编辑 |
 | 插件市场 | 支持管理插件源，从 GitHub 仓库 `plugins/` 目录导入插件 |
-| 插件配置 | 支持 `SillyGirlCreateSchema` / `SillyGirlPluginConfig` 声明式配置表单 |
+| 插件配置 | 支持 `sillyGirlCreateSchema` / `new SillyGirlPluginConfig(schema)` / `form(schema)` 声明式配置表单 |
 | 依赖管理 | 使用 pnpm 管理 NodeJS 插件共享依赖，安装到 `/data/plugins/package.json` 和 `/data/plugins/node_modules` |
 | NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |

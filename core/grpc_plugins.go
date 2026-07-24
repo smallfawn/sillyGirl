@@ -522,7 +522,7 @@ interface SillyGirlSchemaNode {
 	setWidget(value: string): SillyGirlSchemaNode;
 	toJSON(): Record<string, any>;
 }
-declare const SillyGirlCreateSchema: {
+declare const sillyGirlCreateSchema: {
 	string(): SillyGirlSchemaNode;
 	number(): SillyGirlSchemaNode;
 	integer(): SillyGirlSchemaNode;
@@ -541,7 +541,7 @@ declare class SillyGirlPluginConfig {
 	set(values?: Record<string, any>): Promise<{ error: string }>;
 	Set(values?: Record<string, any>): Promise<{ error: string }>;
 }
-declare function Form(schema: any): SillyGirlPluginConfig;
+declare function form(schema: any): SillyGirlPluginConfig;
 declare function pluginConfigDefaults(schema: any): any;
 interface StorageModifier {
 	echo?: string;
@@ -593,7 +593,7 @@ declare let console: {
 	error(...args: any[]): void;
 	debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlCreateSchema, SillyGirlPluginConfig, Form, pluginConfigDefaults, sender, sleep, utils, console };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, utils, console };
 `
 
 func defaultScript(title string) string {
@@ -612,9 +612,9 @@ const {
   QingLong,
   SmallCat,
   DaiDai,
-  SillyGirlCreateSchema,
+  sillyGirlCreateSchema,
   SillyGirlPluginConfig,
-  Form,
+  form,
   utils: { buildCQTag, image, video },
 } = require("sillygirl");
 `

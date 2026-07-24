@@ -227,7 +227,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		}
 	}
 	if !hasForm {
-		hasForm = strings.Contains(script, "Form(") || strings.Contains(script, "SillyGirlPluginConfig") || strings.Contains(script, "SillyGirlCreateSchema")
+		hasForm = strings.Contains(script, "form(") || strings.Contains(script, "Form(") || strings.Contains(script, "SillyGirlPluginConfig") || strings.Contains(script, "sillyGirlCreateSchema") || strings.Contains(script, "SillyGirlCreateSchema")
 	}
 	return &common.Function{
 		Rules:       rules,

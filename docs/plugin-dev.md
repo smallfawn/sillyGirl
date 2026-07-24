@@ -189,10 +189,10 @@ bucket.len();        // 获取键数量（number）
 
 **作用域说明**：每个 Bucket 是独立的命名空间，不同插件建议使用不同的 Bucket 名称，避免键冲突。
 
-### SillyGirlCreateSchema / SillyGirlPluginConfig
+### sillyGirlCreateSchema / SillyGirlPluginConfig
 
-SillyGirl 支持声明式插件配置。插件可以用 `SillyGirlCreateSchema` 构造 JSON Schema，再用
-`new SillyGirlPluginConfig(schema)` 绑定当前插件配置。后台会在「插件配置」页面展示已注册的配置表单。
+SillyGirl 支持声明式插件配置。插件可以用 `sillyGirlCreateSchema` 构造 JSON Schema，再用
+`new SillyGirlPluginConfig(schema)` 或 `form(schema)` 绑定当前插件配置。后台会在「插件配置」页面展示已注册的配置表单。
 
 ```js
 /**
@@ -200,19 +200,19 @@ SillyGirl 支持声明式插件配置。插件可以用 `SillyGirlCreateSchema` 
  * @rule raw ^配置测试$
  */
 
-const schema = SillyGirlCreateSchema.object({
-  host: SillyGirlCreateSchema.string()
+const schema = sillyGirlCreateSchema.object({
+  host: sillyGirlCreateSchema.string()
     .setTitle("服务地址")
     .setDescription("例如 http://127.0.0.1:9090")
     .setDefault("http://127.0.0.1:9090"),
-  open: SillyGirlCreateSchema.boolean()
+  open: sillyGirlCreateSchema.boolean()
     .setTitle("启用开关")
     .setDefault(false),
-  delTime: SillyGirlCreateSchema.number()
+  delTime: sillyGirlCreateSchema.number()
     .setTitle("撤回时间")
     .setDescription("0 表示不撤回")
     .setDefault(0),
-  mode: SillyGirlCreateSchema.string()
+  mode: sillyGirlCreateSchema.string()
     .setTitle("模式")
     .setEnum(["normal", "fast"])
     .setEnumNames(["普通", "快速"]),
@@ -253,7 +253,7 @@ ConfigDB.set()        // 保存 ConfigDB.userConfig
 ConfigDB.set(obj)     // 保存指定配置对象
 ```
 
-注意：配置 schema 会在插件执行到 `new SillyGirlPluginConfig(schema)` 或 `Form(schema)` 时注册。新插件首次安装后，
+注意：配置 schema 会在插件执行到 `new SillyGirlPluginConfig(schema)` 或 `form(schema)` 时注册。新插件首次安装后，
 如果后台「插件配置」里还看不到它，先触发一次插件规则或把插件声明为 `@on_start true`。
 
 ### QingLong 内联客户端

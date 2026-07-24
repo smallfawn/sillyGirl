@@ -146,8 +146,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.0.2',
-    remote: info.remote || info.local || '0.0.2',
+    local: info.local || '0.0.3',
+    remote: info.remote || info.local || '0.0.3',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -522,11 +522,17 @@ onBeforeUnmount(() => {
 const storageState = reactive({
   keys: 'sillyGirl',
   newBucketName: '',
+  createBucketOpen: false,
+  entryOpen: false,
+  entryBucket: 'sillyGirl',
+  entryKey: '',
+  entryValue: '',
   rows: [] as any[],
   buckets: [] as Array<{ value: string; label: string }>,
   loading: false,
   loadingBuckets: false,
   creatingBucket: false,
+  savingEntry: false,
   deletingBucket: false,
 });
 const protectedStorageBuckets = new Set(['plugins', 'sillyGirl', 'auths']);
@@ -566,6 +572,11 @@ async function selectStorageBucket(bucket?: string) {
   storageState.keys = bucket;
   await loadStorage();
 }
+async function openCreateStorageBucket() {
+  storageState.newBucketName = '';
+  storageState.createBucketOpen = true;
+  if (!storageState.buckets.length) await loadStorageBuckets();
+}
 async function createStorageBucket() {
   const bucket = storageState.newBucketName.trim();
   if (!bucket) {
@@ -577,11 +588,46 @@ async function createStorageBucket() {
     await post('/api/storage/bucket', { bucket });
     message.success('存储桶已创建');
     storageState.newBucketName = '';
+    storageState.createBucketOpen = false;
     storageState.keys = bucket;
     await loadStorageBuckets();
     await loadStorage();
   } finally {
     storageState.creatingBucket = false;
+  }
+}
+async function openStorageEntry() {
+  if (!storageState.buckets.length) await loadStorageBuckets();
+  storageState.entryBucket = selectedStorageBucket.value || storageState.buckets[0]?.value || 'sillyGirl';
+  storageState.entryKey = '';
+  storageState.entryValue = '';
+  storageState.entryOpen = true;
+}
+async function createStorageEntry() {
+  const bucket = storageState.entryBucket.trim();
+  const key = storageState.entryKey.trim();
+  if (!bucket) {
+    message.error('请选择存储桶');
+    return;
+  }
+  if (!key) {
+    message.error('请输入 Key');
+    return;
+  }
+  if (storageState.entryValue === '') {
+    message.error('请输入 Value');
+    return;
+  }
+  storageState.savingEntry = true;
+  try {
+    await saveStorage({ [`${bucket}.${key}`]: storageState.entryValue });
+    message.success('Key/Value 已添加');
+    storageState.entryOpen = false;
+    storageState.keys = bucket;
+    await loadStorageBuckets();
+    await loadStorage();
+  } finally {
+    storageState.savingEntry = false;
   }
 }
 async function removeStorageBucket() {
@@ -1637,12 +1683,12 @@ function recordOptions(record?: Record<string, string>) {
                 <Input v-model:value="storageState.keys" style="width: 360px" placeholder="bucket 或 bucket.key，多个用逗号分隔" />
                 <Button type="primary" @click="loadStorage"><template #icon><Search :size="16" /></template>查询</Button>
                 <Button @click="loadStorage"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-                <Space.Compact>
-                  <Input v-model:value="storageState.newBucketName" style="width: 180px" placeholder="新存储桶名称" @press-enter="createStorageBucket" />
-                  <Button :loading="storageState.creatingBucket" @click="createStorageBucket">
-                    <template #icon><Plus :size="16" /></template>新建桶
-                  </Button>
-                </Space.Compact>
+                <Button :loading="storageState.creatingBucket" @click="openCreateStorageBucket">
+                  <template #icon><Plus :size="16" /></template>新建桶
+                </Button>
+                <Button type="primary" @click="openStorageEntry">
+                  <template #icon><Plus :size="16" /></template>添加 Key/Value
+                </Button>
                 <Popconfirm
                   :title="`确认删除存储桶 ${selectedStorageBucket || storageState.keys}？`"
                   description="删除后该桶内所有键值都会被移除，无法恢复。"
@@ -1960,7 +2006,7 @@ function recordOptions(record?: Record<string, string>) {
                     </template>
                   </Form>
                 </div>
-                <a-empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件需运行一次并调用 new SillyGirlPluginConfig(schema) 或 Form(schema) 注册。'" />
+                <a-empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件需运行一次并调用 new SillyGirlPluginConfig(schema) 或 form(schema) 注册。'" />
               </Spin>
             </section>
 
@@ -2157,6 +2203,48 @@ function recordOptions(record?: Record<string, string>) {
           <Button @click="testDaidaiPanel()" :loading="daidai.testing">
             <template #icon><RefreshCw :size="16" /></template>检测连接
           </Button>
+        </Form>
+      </Modal>
+
+      <Modal
+        v-model:open="storageState.createBucketOpen"
+        title="新建存储桶"
+        ok-text="确认创建"
+        cancel-text="取消"
+        :confirm-loading="storageState.creatingBucket"
+        @ok="createStorageBucket"
+      >
+        <Form layout="vertical">
+          <Form.Item label="存储桶名称" required extra="不能包含点号、逗号或空白字符。">
+            <Input v-model:value="storageState.newBucketName" placeholder="例如：myPlugin" @press-enter="createStorageBucket" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        v-model:open="storageState.entryOpen"
+        title="添加 Key/Value"
+        ok-text="确认添加"
+        cancel-text="取消"
+        :confirm-loading="storageState.savingEntry"
+        @ok="createStorageEntry"
+      >
+        <Form layout="vertical">
+          <Form.Item label="存储桶" required>
+            <Select
+              v-model:value="storageState.entryBucket"
+              show-search
+              :loading="storageState.loadingBuckets"
+              :options="storageState.buckets"
+              placeholder="选择存储桶"
+            />
+          </Form.Item>
+          <Form.Item label="Key" required>
+            <Input v-model:value="storageState.entryKey" placeholder="例如：token" @press-enter="createStorageEntry" />
+          </Form.Item>
+          <Form.Item label="Value" required>
+            <Input.TextArea v-model:value="storageState.entryValue" :auto-size="{ minRows: 4, maxRows: 10 }" placeholder="输入要保存的值" />
+          </Form.Item>
         </Form>
       </Modal>
 
