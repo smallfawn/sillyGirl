@@ -104,19 +104,38 @@ const nodeRuntimePreloadScript = `
       construct: function () { return dummy; },
     });
     const sg = {
+      Adapter: dummy,
+      Bucket: dummy,
+      QingLong: dummy,
+      SmallCat: dummy,
+      DaiDai: dummy,
       sillyGirlCreateSchema,
       SillyGirlPluginConfig,
       form,
       pluginConfigDefaults: collectSchemaDefaults,
+      sender: dummy,
       restart: async function () { return {}; },
       update: async function () { return {}; },
+      utils: {
+        buildCQTag: function () { return ""; },
+        parseCQText: function () { return []; },
+        image: function (url) { return "[CQ:image,url=" + String(url || "") + "]"; },
+        video: function (url) { return "[CQ:video,url=" + String(url || "") + "]"; },
+      },
     };
+    globalThis.Adapter = sg.Adapter;
+    globalThis.Bucket = sg.Bucket;
+    globalThis.QingLong = sg.QingLong;
+    globalThis.SmallCat = sg.SmallCat;
+    globalThis.DaiDai = sg.DaiDai;
     globalThis.sillyGirlCreateSchema = sillyGirlCreateSchema;
     globalThis.SillyGirlPluginConfig = SillyGirlPluginConfig;
     globalThis.form = form;
     globalThis.pluginConfigDefaults = collectSchemaDefaults;
+    globalThis.sender = sg.sender;
     globalThis.restart = sg.restart;
     globalThis.update = sg.update;
+    globalThis.utils = sg.utils;
     const Module = require("module");
     const originalLoad = Module._load;
     Module._load = function (request, parent, isMain) {
