@@ -817,6 +817,9 @@ func parseGithubNodePluginAddress(address string) (*githubPluginSource, string, 
 }
 
 func installGithubNodePlugin(address string) error {
+	pluginLock.Lock()
+	defer pluginLock.Unlock()
+
 	source, pluginPath, rawURL, err := parseGithubNodePluginAddress(address)
 	if err != nil {
 		return err
@@ -857,7 +860,7 @@ func installGithubNodePlugin(address string) error {
 	if err := ensureNodePackageJSON(target, "sillygirl-plugins"); err != nil {
 		return err
 	}
-	if err := AddNodePlugin(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, NODE); err != nil {
+	if err := addNodePluginLocked(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, NODE); err != nil {
 		return err
 	}
 	console.Log("已安装 NodeJS 插件 %s", pluginName)

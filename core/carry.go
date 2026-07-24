@@ -46,8 +46,7 @@ func syncCarryGroupListen(cg CarryGroup) {
 }
 
 func canUseAsCarryScript(function *common.Function) bool {
-	return function.UUID != "" && !function.Disable && !function.Module &&
-		(function.Carry || (len(function.Rules) == 0 && !function.OnStart))
+	return function.UUID != "" && function.Type == NODE && function.Carry && !function.Disable && !function.Module && !function.OnStart && !function.Web
 }
 
 type QMessage struct {

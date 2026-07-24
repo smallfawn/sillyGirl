@@ -168,7 +168,7 @@ func GetAdapterBotsID(botplt string) []string {
 	var bots_id = []string{}
 	for i := range Bots {
 		// fmt.Println("==", botplt == i[0], botplt, i[0])
-		if botplt == i[0] {
+		if botplt == "" || botplt == i[0] {
 			bots_id = append(bots_id, i[1])
 		}
 	}

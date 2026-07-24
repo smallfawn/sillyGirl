@@ -66,7 +66,7 @@ s.reply("Hello World!");
 | 使用场景 | 必填参数 | 说明 |
 |------|------|------|
 | 普通消息插件 | `@title`、`@rule` | `@rule` 用来匹配消息，不写规则就不会被普通消息触发 |
-| 搬运处理脚本 | `@title`、`@carry true` | 搬运页的“处理脚本”建议选择带 `@carry true` 的插件 |
+| 搬运处理脚本 | `@title`、`@carry` | 搬运页的“处理脚本”只展示带 `@carry` 或 `@carry true` 的插件 |
 | 启动脚本 | `@title`、`@on_start true` | 程序启动时执行一次 |
 | Web 服务脚本 | `@title`、`@web true` | 程序启动时常驻运行，脚本自己用 Express 监听端口 |
 | 脚本定时任务 | `@title`、`@cron 表达式` | 写了 `@cron` 的脚本会直接显示在 Admin 面板「定时任务」 |
@@ -88,7 +88,7 @@ s.reply("Hello World!");
 | `@origin 来源` | 非必填 | 插件来源标记，默认 `自定义` |
 | `@class 标签` | 非必填 | 插件分类标签，可写多个 |
 | `@module true/false` | 非必填 | 是否作为模块插件；为 `true` 时不参与普通消息匹配 |
-| `@carry true/false` | 搬运脚本必填 | 是否可作为搬运处理脚本，默认 `false` |
+| `@carry` 或 `@carry true/false` | 搬运脚本必填 | 是否可作为搬运处理脚本；写 `@carry` 等同于 `@carry true`，默认 `false` |
 | `@cron 表达式` | 脚本定时任务必填 | 声明脚本定时任务，例如 `@cron 0 * * * *`；只支持直接写 Cron 表达式 |
 | `@on_start true/false` | 启动脚本必填 | 是否在程序启动时执行一次 |
 | `@web true/false` | Web 服务脚本必填 | 是否作为 Web 常驻脚本启动；端口和路由由脚本内 Express 自己处理 |

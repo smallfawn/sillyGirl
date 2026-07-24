@@ -31,7 +31,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var classes = []string{}
 	ks := map[string]bool{}
 	ress := regexp.MustCompile(
-		`\*\s?@([\d\w+-]+)\s+([^\n]+?)\n`,
+		`\*\s?@([\d\w+-]+)(?:\s+([^\n]+?))?\n`,
 	).FindAllStringSubmatch(script, -1)
 	for _, res := range ress {
 		switch res[1] {
@@ -123,7 +123,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		case "module":
 			module = strings.TrimSpace(res[2]) == "true"
 		case "carry":
-			carry = strings.TrimSpace(res[2]) == "true"
+			carry = strings.TrimSpace(res[2]) != "false"
 		case "on_start":
 			onStart = strings.TrimSpace(res[2]) == "true"
 		case "web":

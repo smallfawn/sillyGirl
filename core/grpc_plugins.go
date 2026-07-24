@@ -161,13 +161,17 @@ func isNameUuid(uuid string) bool {
 }
 
 func AddNodePlugin(path, name, class string) error {
+	pluginLock.Lock()
+	defer pluginLock.Unlock()
 
+	return addNodePluginLocked(path, name, class)
+}
+
+func addNodePluginLocked(path, name, class string) error {
 	if name == "" {
 		return nil
 	}
 	uuid := nameUuid(name)
-	pluginLock.Lock()
-	defer pluginLock.Unlock()
 	//移除
 	var rf *common.Function
 	for i := range Functions {

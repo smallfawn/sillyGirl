@@ -80,8 +80,6 @@ func initPlugins() {
 				Error: errors.New("旧内嵌 JS 插件数据已不支持，请使用 /data/plugins/*.js 的 NodeJS 插件"),
 			}
 		}
-		pluginLock.Lock()
-		defer pluginLock.Unlock()
 		if new == "install" {
 			var marketPlugin *common.Function
 			for _, p := range plugin_list {
@@ -111,6 +109,8 @@ func initPlugins() {
 				Message: fmt.Sprintf("已安装 %s", marketPlugin.Title),
 			}
 		}
+		pluginLock.Lock()
+		defer pluginLock.Unlock()
 		if new == "uninstall" {
 			new = ""
 			fin = &storage.Final{
