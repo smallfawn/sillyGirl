@@ -23,9 +23,10 @@
 # 创建应用目录
 mkdir -p /opt/sillygirl && cd /opt/sillygirl
 
-# 下载最新版本（以 Linux amd64 为例）
-wget https://github.com/smallfawn/sillyGirl/releases/latest/download/sillyGirl_linux_amd64
-mv sillyGirl_linux_amd64 sillyGirl
+# 下载正式版本（以 Linux amd64 为例）
+wget https://github.com/smallfawn/sillyGirl/releases/download/v0.0.1/sillyGirl_v0.0.1_linux_amd64.tar.gz
+tar -xzf sillyGirl_v0.0.1_linux_amd64.tar.gz
+mv sillyGirl_v0.0.1_linux_amd64 sillyGirl
 chmod +x sillyGirl
 
 # 测试运行

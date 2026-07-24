@@ -237,15 +237,12 @@ func init() {
 }
 
 func overviewVersionInfo() map[string]interface{} {
-	local := compiled_at
-	if strings.TrimSpace(local) == "" {
-		local = "dev"
-	}
+	latest, source := latestAppVersion()
 	return map[string]interface{}{
-		"local":      local,
-		"remote":     strings.TrimSpace(firstNonEmpty(sillyGirl.GetString("remote_version"), sillyGirl.GetString("latest_version"))),
-		"source":     "reserved",
-		"repository": "https://github.com/smallfawn/sillyGirl",
+		"local":      currentAppVersion(),
+		"remote":     latest,
+		"source":     source,
+		"repository": appRepository,
 	}
 }
 

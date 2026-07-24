@@ -1,3 +1,3 @@
 package core
 
-var compiled_at = ""
+var compiled_at = "0.0.1"

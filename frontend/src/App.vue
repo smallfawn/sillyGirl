@@ -146,8 +146,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || 'dev',
-    remote: info.remote || '待发布',
+    local: info.local || '0.0.1',
+    remote: info.remote || info.local || '0.0.1',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -1442,8 +1442,8 @@ function recordOptions(record?: Record<string, string>) {
             <section v-if="page === 'welcome'" class="panel">
               <Typography.Title :level="3" style="margin-top: 0">{{ user?.name || '傻妞' }}</Typography.Title>
               <Space wrap style="margin-bottom: 14px">
-                <Tag color="blue">本地版本 {{ overviewVersion.local }}</Tag>
-                <Tag :color="overviewVersion.remote === '待发布' ? 'default' : 'green'">远程版本 {{ overviewVersion.remote }}</Tag>
+                <Tag color="blue">当前版本 {{ overviewVersion.local }}</Tag>
+                <Tag color="green">最新版本 {{ overviewVersion.remote }}</Tag>
                 <Typography.Link :href="overviewVersion.repository" target="_blank">GitHub</Typography.Link>
               </Space>
               <a-row :gutter="[12, 12]">
