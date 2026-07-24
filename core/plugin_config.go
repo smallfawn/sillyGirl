@@ -19,6 +19,7 @@ type PluginConfigRecord struct {
 	File       string                 `json:"file"`
 	Schema     map[string]interface{} `json:"schema"`
 	UserConfig map[string]interface{} `json:"user_config"`
+	Registered bool                   `json:"registered"`
 }
 
 func init() {
@@ -72,12 +73,30 @@ func init() {
 func getPluginConfigRecords() []*PluginConfigRecord {
 	records := []*PluginConfigRecord{}
 	nodePluginNames := nodePluginNameIndexByUUID()
+	seen := map[string]bool{}
 	pluginConfigSchemas.Foreach(func(k, _ []byte) error {
-		if record := getPluginConfigRecordWithIndex(string(k), nodePluginNames); record != nil {
+		uuid := string(k)
+		if record := getPluginConfigRecordWithIndex(uuid, nodePluginNames); record != nil {
 			records = append(records, record)
+			seen[record.UUID] = true
 		}
 		return nil
 	})
+	for _, f := range Functions {
+		if !f.HasForm || f.UUID == "" || seen[f.UUID] {
+			continue
+		}
+		records = append(records, &PluginConfigRecord{
+			UUID:       f.UUID,
+			Title:      getPluginTitle(f.UUID),
+			Plugin:     getPluginConfigPluginName(f.UUID, nodePluginNames),
+			File:       getPluginConfigFileName(f.UUID, nodePluginNames),
+			Schema:     map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+			UserConfig: getPluginUserConfig(f.UUID),
+			Registered: false,
+		})
+		seen[f.UUID] = true
+	}
 	return records
 }
 
@@ -110,6 +129,7 @@ func getPluginConfigRecordWithIndex(uuid string, nodePluginNames map[string]stri
 		File:       getPluginConfigFileName(uuid, nodePluginNames),
 		Schema:     schema,
 		UserConfig: getPluginUserConfig(uuid),
+		Registered: true,
 	}
 }
 

@@ -33,14 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.sillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
+exports.express = exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.sillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
 exports.form = form;
 exports.pluginConfigDefaults = pluginConfigDefaults;
 exports.sleep = sleep;
-Object.defineProperty(exports, "express", { enumerable: true, get: function () { return require("express"); } });
+exports.restart = restart;
+exports.update = update;
 const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
+const { execFile } = require("child_process");
+const path = require("path");
 grpc_1.setLogVerbosity(grpc_1.logVerbosity.NONE);
 let client = new srpc_1.srpc.SillyGirlServiceClient(process.env?.SILLYGIRL_GRPC_ADDR || "127.0.0.1:50051", grpc_1.credentials.createInsecure());
 let senders = [];
@@ -48,6 +51,15 @@ let plugin_id = process.env?.PLUGIN_ID ?? "";
 const metadata = new grpc_1.Metadata();
 metadata.add("RUNTIME_ID", process.env?.RUNTIME_ID ?? "");
 metadata.add("sillygirl-runtime-token", process.env?.SILLYGIRL_GRPC_TOKEN ?? "");
+const express = new Proxy(function () { }, {
+    apply(_target, thisArg, args) {
+        return require("express").apply(thisArg, args);
+    },
+    get(_target, prop) {
+        return require("express")[prop];
+    },
+});
+exports.express = express;
 class Sender {
     uuid;
     destoried = false;
@@ -1165,6 +1177,142 @@ let sender = new Sender(process.env?.SENDER_ID ?? "");
 exports.sender = sender;
 async function sleep(ms = 1000) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function formatRuntimeDate(date) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return [
+        date.getFullYear(),
+        "-",
+        pad(date.getMonth() + 1),
+        "-",
+        pad(date.getDate()),
+        " ",
+        pad(date.getHours()),
+        ":",
+        pad(date.getMinutes()),
+        ":",
+        pad(date.getSeconds()),
+    ].join("");
+}
+function restartStamp() {
+    const now = new Date();
+    return `${formatRuntimeDate(now)}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+}
+async function restart() {
+    return new Bucket("sillyGirl").set("started_at", restartStamp());
+}
+async function update(options = {}) {
+    const timeout = clampNumber(options.timeout || 120, 10, 600);
+    const repo = await resolveSillyGirlRepo(options.appDir, timeout);
+    const remote = String(options.gitRemote || "origin").trim() || "origin";
+    const before = (await git(repo, ["rev-parse", "--short", "HEAD"], timeout)).stdout.trim();
+    await git(repo, ["fetch", remote, "--prune"], timeout);
+    const pullArgs = await pullCommand(repo, remote, options.gitBranch, timeout);
+    const pulled = await git(repo, pullArgs, timeout);
+    const after = (await git(repo, ["rev-parse", "--short", "HEAD"], timeout)).stdout.trim();
+    const restarted = Boolean(options.restart);
+    if (restarted)
+        await restart();
+    return {
+        repo,
+        before,
+        after,
+        changed: before !== after,
+        output: compactRuntimeOutput(pulled.stdout || pulled.stderr),
+        restarted,
+    };
+}
+async function pullCommand(repo, remote, configuredBranch, timeout) {
+    const branch = String(configuredBranch || "").trim() || (await currentBranch(repo, timeout)) || "main";
+    if (configuredBranch)
+        return ["pull", "--ff-only", remote, branch];
+    try {
+        const upstream = await git(repo, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], timeout);
+        if (upstream.stdout.trim())
+            return ["pull", "--ff-only"];
+    }
+    catch (_) { }
+    return ["pull", "--ff-only", remote, branch];
+}
+async function currentBranch(repo, timeout) {
+    try {
+        const result = await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], timeout);
+        const branch = result.stdout.trim();
+        return branch && branch !== "HEAD" ? branch : "";
+    }
+    catch (_) {
+        return "";
+    }
+}
+async function resolveSillyGirlRepo(configured, timeout) {
+    const candidates = [];
+    addRepoCandidate(candidates, configured);
+    addRepoCandidate(candidates, process.env?.SILLYGIRL_APP_DIR);
+    addRepoCandidate(candidates, process.env?.SILLYGIRL_HOME);
+    addRepoCandidate(candidates, process.env?.APP_HOME);
+    addRepoCandidate(candidates, process.cwd());
+    addRepoCandidate(candidates, path.resolve(process.cwd(), ".."));
+    addRepoCandidate(candidates, path.resolve(process.cwd(), "../.."));
+    addRepoCandidate(candidates, "/app");
+    addRepoCandidate(candidates, "/data/sillyGirl");
+    for (const candidate of candidates) {
+        try {
+            const result = await git(candidate, ["rev-parse", "--show-toplevel"], timeout);
+            const repo = result.stdout.trim();
+            if (repo && await isSillyGirlRepo(repo, timeout))
+                return repo;
+        }
+        catch (_) { }
+    }
+    throw new Error("未找到可更新的 SillyGirl Git 仓库；Docker/Release 部署请使用镜像或 Release 包更新");
+}
+async function isSillyGirlRepo(repo, timeout) {
+    try {
+        const result = await git(repo, ["config", "--get", "remote.origin.url"], timeout);
+        const remote = result.stdout.trim().toLowerCase();
+        return remote.includes("sillygirl") && !remote.includes("sillygirl_plugins");
+    }
+    catch (_) {
+        return false;
+    }
+}
+function addRepoCandidate(list, value) {
+    value = String(value || "").trim();
+    if (!value)
+        return;
+    const normalized = path.resolve(value);
+    if (!list.includes(normalized))
+        list.push(normalized);
+}
+function git(cwd, args, timeoutSeconds) {
+    return new Promise((resolve, reject) => {
+        execFile("git", args, {
+            cwd,
+            timeout: Math.max(10, Number(timeoutSeconds || 120)) * 1000,
+            windowsHide: true,
+            maxBuffer: 1024 * 1024,
+        }, (error, stdout, stderr) => {
+            if (error) {
+                error.stdout = stdout;
+                error.stderr = stderr;
+                reject(error);
+                return;
+            }
+            resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+        });
+    });
+}
+function clampNumber(value, min, max) {
+    value = Number(value || max);
+    if (!Number.isFinite(value))
+        return min;
+    return Math.max(min, Math.min(max, Math.floor(value)));
+}
+function compactRuntimeOutput(value) {
+    const text = String(value || "").trim();
+    if (!text)
+        return "";
+    return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(-8).join("\n").slice(0, 1000);
 }
 class Console {
     error = (message, ...optionalParams) => { };

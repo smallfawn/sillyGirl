@@ -97,11 +97,9 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 
 		case "admin":
 			admin = strings.TrimSpace(res[2]) == "true"
-		// case "disable":
-		// 	disable = strings.TrimSpace(res[2]) == "true"
 		case "priority":
 			priority = utils.Int(strings.TrimSpace(res[2]))
-		case "title", "name", "show":
+		case "title":
 			title = strings.TrimSpace(res[2])
 		case "public":
 			public = strings.TrimSpace(res[2]) == "true"

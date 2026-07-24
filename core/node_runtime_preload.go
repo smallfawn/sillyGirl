@@ -21,6 +21,115 @@ func ensureNodeRuntimePreload() (string, error) {
 
 const nodeRuntimePreloadScript = `
 (function () {
+  if (process.env.SILLYGIRL_CONFIG_REGISTER_ONLY === "true") {
+    function normalizeSchema(value) {
+      if (value && value.__schemaNode && value.schema) return value.schema;
+      if (value && typeof value.toJSON === "function") return value.toJSON();
+      if (Array.isArray(value)) return value.map((item) => normalizeSchema(item));
+      if (value && typeof value === "object") {
+        const result = {};
+        for (const key of Object.keys(value)) {
+          if (key.startsWith("_") || key === "__schemaNode") continue;
+          result[key] = normalizeSchema(value[key]);
+        }
+        return result;
+      }
+      return value;
+    }
+    function collectSchemaDefaults(schema) {
+      schema = normalizeSchema(schema) || {};
+      if (Object.prototype.hasOwnProperty.call(schema, "default")) return schema.default;
+      if (schema.type === "object" || schema.properties) {
+        const values = {};
+        for (const key of Object.keys(schema.properties || {})) {
+          const value = collectSchemaDefaults(schema.properties[key]);
+          if (value !== undefined) values[key] = value;
+        }
+        return values;
+      }
+      if (schema.type === "array") return [];
+      return undefined;
+    }
+    function SchemaNode(type, extra) {
+      this.__schemaNode = true;
+      this.schema = Object.assign({ type: type }, extra || {});
+    }
+    SchemaNode.prototype.setTitle = function (value) { this.schema.title = value; return this; };
+    SchemaNode.prototype.setDescription = function (value) { this.schema.description = value; return this; };
+    SchemaNode.prototype.setDefault = function (value) { this.schema.default = value; return this; };
+    SchemaNode.prototype.setEnum = function (value) { this.schema.enum = value; return this; };
+    SchemaNode.prototype.setEnumNames = function (value) { this.schema.enumNames = value; return this; };
+    SchemaNode.prototype.setRequired = function (value) { this.schema.required = value; return this; };
+    SchemaNode.prototype.setFormat = function (value) { this.schema.format = value; return this; };
+    SchemaNode.prototype.setMin = function (value) { this.schema.minimum = value; return this; };
+    SchemaNode.prototype.setMax = function (value) { this.schema.maximum = value; return this; };
+    SchemaNode.prototype.setMinLength = function (value) { this.schema.minLength = value; return this; };
+    SchemaNode.prototype.setMaxLength = function (value) { this.schema.maxLength = value; return this; };
+    SchemaNode.prototype.setPattern = function (value) { this.schema.pattern = value; return this; };
+    SchemaNode.prototype.setWidget = function (value) { this.schema["ui:widget"] = value; return this; };
+    SchemaNode.prototype.toJSON = function () { return this.schema; };
+    const sillyGirlCreateSchema = {
+      string: function () { return new SchemaNode("string"); },
+      number: function () { return new SchemaNode("number"); },
+      integer: function () { return new SchemaNode("integer"); },
+      boolean: function () { return new SchemaNode("boolean"); },
+      array: function (item) { return new SchemaNode("array", { items: normalizeSchema(item) || {} }); },
+      object: function (props) {
+        const properties = {};
+        for (const key of Object.keys(props || {})) properties[key] = normalizeSchema(props[key]);
+        return new SchemaNode("object", { properties });
+      },
+    };
+    class SillyGirlPluginConfig {
+      constructor(schema) {
+        this.uuid = process.env.PLUGIN_ID || "";
+        this.jsonSchema = normalizeSchema(schema) || {};
+        if (!this.jsonSchema.type) this.jsonSchema.type = "object";
+        try {
+          const fs = require("fs");
+          const target = process.env.SILLYGIRL_CONFIG_SCHEMA_FILE || "";
+          if (target) fs.writeFileSync(target, JSON.stringify(this.jsonSchema));
+          else console.log("__SILLYGIRL_CONFIG_SCHEMA__" + JSON.stringify(this.jsonSchema));
+          process.exit(0);
+        } catch (err) {
+          console.error("SillyGirlPluginConfig schema export failed:", err && err.message ? err.message : err);
+          process.exit(1);
+        }
+      }
+    }
+    function form(schema) { return new SillyGirlPluginConfig(schema); }
+    const dummy = new Proxy(function () {}, {
+      get: function () { return dummy; },
+      apply: function () { return dummy; },
+      construct: function () { return dummy; },
+    });
+    const sg = {
+      sillyGirlCreateSchema,
+      SillyGirlPluginConfig,
+      form,
+      pluginConfigDefaults: collectSchemaDefaults,
+      restart: async function () { return {}; },
+      update: async function () { return {}; },
+    };
+    globalThis.sillyGirlCreateSchema = sillyGirlCreateSchema;
+    globalThis.SillyGirlPluginConfig = SillyGirlPluginConfig;
+    globalThis.form = form;
+    globalThis.pluginConfigDefaults = collectSchemaDefaults;
+    globalThis.restart = sg.restart;
+    globalThis.update = sg.update;
+    const Module = require("module");
+    const originalLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === "sillygirl") return sg;
+      try {
+        return originalLoad.apply(this, arguments);
+      } catch (err) {
+        if (err && err.code === "MODULE_NOT_FOUND") return dummy;
+        throw err;
+      }
+    };
+    return;
+  }
   let sg;
   try {
     sg = require(require("path").join(process.cwd(), "node_modules", "sillygirl"));
@@ -407,6 +516,8 @@ const nodeRuntimePreloadScript = `
   globalThis.SillyGirlPluginConfig = sg.SillyGirlPluginConfig;
   globalThis.form = sg.form;
   globalThis.pluginConfigDefaults = sg.pluginConfigDefaults;
+  globalThis.restart = sg.restart;
+  globalThis.update = sg.update;
   Object.defineProperty(globalThis, "express", {
     enumerable: true,
     configurable: true,

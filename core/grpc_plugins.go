@@ -224,6 +224,11 @@ func addNodePluginLocked(path, name, class string) error {
 		f.Suffix = ".py"
 	}
 	f.Path = path
+	if class == NODE && f.HasForm {
+		if err := registerNodePluginConfigSchema(path, uuid); err != nil {
+			console.Warn("插件配置自动注册失败 %s: %v", name, err)
+		}
+	}
 	f.Handle = func(s common.Sender) interface{} {
 		console := &Console{UUID: uuid}
 		s.SetPluginID(uuid)
@@ -584,6 +589,23 @@ declare class Adapter {
 }
 declare let sender: Sender;
 declare function sleep(ms?: number): Promise<unknown>;
+interface UpdateOptions {
+	appDir?: string;
+	gitRemote?: string;
+	gitBranch?: string;
+	timeout?: number;
+	restart?: boolean;
+}
+interface UpdateResult {
+	repo: string;
+	before: string;
+	after: string;
+	changed: boolean;
+	output: string;
+	restarted: boolean;
+}
+declare function restart(): Promise<{ message?: string; changed?: boolean }>;
+declare function update(options?: UpdateOptions): Promise<UpdateResult>;
 interface CQItem {
 	type: string;
 	params: Record<string, string>;
@@ -604,7 +626,7 @@ declare let console: {
 	debug(...args: any[]): void;
 };
 declare let express: any;
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, utils, console, express };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, restart, update, utils, console, express };
 `
 
 func defaultScript(title string) string {
@@ -624,6 +646,8 @@ const {
   sillyGirlCreateSchema,
   SillyGirlPluginConfig,
   form,
+  restart,
+  update,
   express,
   utils: { buildCQTag, image, video },
 } = require("sillygirl");

@@ -6,6 +6,7 @@ import { javascript } from '@codemirror/lang-javascript';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { basicSetup } from 'codemirror';
 import {
+  Alert,
   App as AntApp,
   Button,
   Card,
@@ -146,8 +147,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.0.6',
-    remote: info.remote || info.local || '0.0.6',
+    local: info.local || '0.0.7',
+    remote: info.remote || info.local || '0.0.7',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -1097,7 +1098,7 @@ async function installPlugin(row: PluginInfo) {
     }
     const firstMessage = Object.values(res.messages || {}).find(Boolean);
     message.success(firstMessage || (row.status === 1 ? '已更新' : '已安装'));
-    await Promise.all([loadPlugins(), loadUser()]);
+    await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '插件安装失败');
   } finally {
@@ -2009,13 +2010,20 @@ function recordOptions(record?: Record<string, string>) {
                   <Button @click="loadPluginConfigs"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
                 </div>
                 <div class="toolbar-right">
-                  <Button type="primary" :disabled="!pluginConfigs.selected" @click="savePluginConfig"><template #icon><Save :size="16" /></template>保存配置</Button>
+                  <Button type="primary" :disabled="!pluginConfigs.selected || pluginConfigs.selected.registered === false" @click="savePluginConfig"><template #icon><Save :size="16" /></template>保存配置</Button>
                 </div>
               </div>
               <Spin :spinning="pluginConfigs.loading">
                 <div v-if="pluginConfigs.selected" class="config-form">
                   <Typography.Title :level="4" style="margin-top: 0">{{ pluginConfigs.selected.plugin || pluginConfigs.selected.title }}</Typography.Title>
                   <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
+                  <Alert
+                    v-if="pluginConfigs.selected.registered === false"
+                    type="warning"
+                    show-icon
+                    style="margin-top: 16px"
+                    message="该插件检测到配置代码，但安装时没有成功导出配置表单。请确认 new SillyGirlPluginConfig(schema) 或 form(schema) 在脚本顶层执行，且脚本初始化没有报错。"
+                  />
                   <Form layout="vertical" style="margin-top: 16px">
                     <template v-for="field in schemaFields" :key="field.key">
                       <Form.Item :label="field.prop.title || field.key" :extra="field.prop.description">
@@ -2055,7 +2063,7 @@ function recordOptions(record?: Record<string, string>) {
                     </template>
                   </Form>
                 </div>
-                <a-empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件需运行一次并调用 new SillyGirlPluginConfig(schema) 或 form(schema) 注册。'" />
+                <a-empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件安装后会自动注册顶层声明的 SillyGirlPluginConfig/form 配置。'" />
               </Spin>
             </section>
 

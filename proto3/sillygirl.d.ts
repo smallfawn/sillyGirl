@@ -1,3 +1,4 @@
+declare const express: () => void;
 declare class Sender {
     private uuid;
     private destoried;
@@ -247,6 +248,26 @@ declare class Adapter {
 }
 declare let sender: Sender;
 declare function sleep(ms?: number): Promise<unknown>;
+interface UpdateOptions {
+    appDir?: string;
+    gitRemote?: string;
+    gitBranch?: string;
+    timeout?: number;
+    restart?: boolean;
+}
+interface UpdateResult {
+    repo: string;
+    before: string;
+    after: string;
+    changed: boolean;
+    output: string;
+    restarted: boolean;
+}
+declare function restart(): Promise<{
+    message?: string;
+    changed?: boolean;
+}>;
+declare function update(options?: UpdateOptions): Promise<UpdateResult>;
 interface CQItem {
     type: string;
     params: Record<string, string>;
@@ -266,4 +287,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, utils, console, };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, restart, update, utils, console, express, };
