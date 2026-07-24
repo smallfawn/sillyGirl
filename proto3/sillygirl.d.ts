@@ -95,6 +95,13 @@ declare class smallcat {
         displayName?: string;
     }): Promise<any>;
     userList(): Promise<any>;
+    getCode(options: {
+        openid?: string;
+        appid?: string;
+        ref?: string;
+        app_id?: string;
+        target_appid?: string;
+    }): Promise<any>;
 }
 declare class daidai {
     id: number;

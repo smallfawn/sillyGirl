@@ -11,9 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dop251/goja"
 	"github.com/smallfawn/sillyGirl/core/common"
-	"github.com/smallfawn/sillyGirl/core/logs"
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
@@ -57,12 +55,10 @@ type Factory struct {
 	lm         chan bool
 	nm         int64
 	isAdmin    func(string) bool
-	vm         *goja.Runtime
 	ctx        context.Context
 	cancel     context.CancelFunc
 	destroid   bool ////已关闭
 	errorTimes int
-	Res        *Response
 	umod       bool //类似订阅号一对一被动消息模式
 	gmsgChan   sync.Map
 	sync.RWMutex
@@ -397,91 +393,6 @@ func (f *Factory) SetActionHandler(function func(map[string]interface{}) string)
 
 // }
 
-func GetReplyMessage(vm *goja.Runtime, plt string, bots_id []string) *goja.Promise {
-	promise, resolve, reject := vm.NewPromise()
-	adapters, err := GetAdapters(plt, bots_id...)
-	if err != nil {
-		go func() {
-			time.Sleep(time.Second)
-			reject(Error(vm, err))
-		}()
-		return promise
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	for i := range adapters {
-		go func(i int) {
-			select {
-			case <-ctx.Done():
-				logs.Debug("消息获取中断")
-			case <-adapters[i].ctx.Done():
-				cancel()
-				logs.Debug("%s adapter %s destroied", adapters[i].botplt, adapters[i].botid)
-				reject("adapter destroied")
-			case mc := <-adapters[i].msgChan:
-				cancel()
-				var msg = map[string]interface{}{}
-				for k, v := range mc.Msg {
-					msg[k] = v
-				}
-				obj := adapters[i].vm.NewObject()
-				for k, v := range mc.Msg {
-					obj.Set(k, v)
-				}
-				obj.Set("bot_id", adapters[i].botid)
-				// msg["bot_id"] = adapters[i].botid
-				// msg["setMessageId"] = func(id string) {
-				// 	select {
-				// 	case <-mc.Chan:
-				// 	case <-time.After(time.Millisecond):
-				// 		mc.Chan <- id
-				// 	}
-				// }
-				// resolve(msg)
-				resolve(vm.NewProxy(obj, &goja.ProxyTrapConfig{
-					Set: func(target *goja.Object, property string, value, receiver goja.Value) (success bool) {
-						if property == "message_id" {
-							select {
-							case <-mc.Chan:
-								return false
-							case <-time.After(time.Millisecond):
-							}
-							mc.Chan <- fmt.Sprint(value.Export())
-						}
-						return true
-					},
-				}))
-			}
-		}(i)
-	}
-	return promise
-}
-
-func (f *Factory) GetReplyMessage() interface{} {
-	select {
-	case <-f.ctx.Done():
-		logs.Debug("%s adapter %s destroied", f.botplt, f.botid)
-		panic(Error(f.vm, "adapter destroied"))
-	case mc := <-f.msgChan:
-		obj := f.vm.NewObject()
-		for k, v := range mc.Msg {
-			obj.Set(k, v)
-		}
-		return f.vm.NewProxy(obj, &goja.ProxyTrapConfig{
-			Set: func(target *goja.Object, property string, value, receiver goja.Value) (success bool) {
-				if property == "message_id" {
-					select {
-					case <-mc.Chan:
-						return false
-					case <-time.After(time.Millisecond):
-					}
-					mc.Chan <- fmt.Sprint(value.Export())
-				}
-				return true
-			},
-		})
-	}
-}
-
 func (f *Factory) GetUserMessages(user_id string, timeout int) []map[string]interface{} {
 	if timeout == 0 {
 		timeout = 2000
@@ -518,34 +429,21 @@ HELL:
 	return msgs
 }
 
-func (f *Factory) GetMessages(timeout int) []interface{} {
+func (f *Factory) GetMessages(timeout int) []map[string]interface{} {
 	if timeout == 0 {
 		timeout = 2000
 	}
-	msgs := []interface{}{}
+	msgs := []map[string]interface{}{}
 	for {
 		select {
 		case <-f.ctx.Done():
-			logs.Debug("%s adapter %s destroied", f.botplt, f.botid)
-			panic(Error(f.vm, "adapter destroied"))
+			return msgs
 		case mc := <-f.msgChan:
-			obj := f.vm.NewObject()
+			msg := map[string]interface{}{}
 			for k, v := range mc.Msg {
-				obj.Set(k, v)
+				msg[k] = v
 			}
-			msgs = append(msgs, f.vm.NewProxy(obj, &goja.ProxyTrapConfig{
-				Set: func(target *goja.Object, property string, value, receiver goja.Value) (success bool) {
-					if property == "message_id" {
-						select {
-						case <-mc.Chan:
-							return false
-						case <-time.After(time.Millisecond):
-						}
-						mc.Chan <- fmt.Sprint(value.Export())
-					}
-					return true
-				},
-			}))
+			msgs = append(msgs, msg)
 			timeout = 1
 		case <-time.After(time.Millisecond * time.Duration(timeout)):
 			goto HELL
@@ -595,15 +493,7 @@ func (f *Factory) Sender2(options map[string]string) *CustomSender {
 }
 
 func (f *Factory) Sender(options map[string]string) interface{} {
-	return &SenderJsIplm{
-		Message:    f.Sender2(options),
-		Vm:         f.vm,
-		Private:    "private",
-		Group:      "group",
-		Routine:    "routine",
-		Persistent: "persistent",
-		UUID:       f.uuid,
-	}
+	return f.Sender2(options)
 }
 
 func (f *Factory) Receive(props map[string]interface{}) *CustomSender {
@@ -714,30 +604,7 @@ func (sender *CustomSender) Action(options map[string]interface{}) (interface{},
 		one = any
 	}
 	if one != nil {
-		one.Handle(&CustomSender{
-			F: &Factory{
-				botplt: "action",
-			},
-		}, func(vm *goja.Runtime) {
-			obj := vm.NewObject()
-			for k, v := range options {
-				obj.Set(k, v)
-			}
-			proxy := vm.NewProxy(obj, &goja.ProxyTrapConfig{
-				Set: func(target *goja.Object, property string, value, receiver goja.Value) (success bool) {
-					if property == "result" {
-						result = value
-					}
-					if property == "error" {
-						err = errors.New(value.String())
-					}
-					return true
-				},
-			})
-			vm.Set("action", proxy)
-			vm.Set("adapter", sender.F)
-		})
-
+		err = errors.New("legacy action plugin is disabled")
 	}
 	return result, err
 }
@@ -821,27 +688,7 @@ func (sender *CustomSender) Reply(msgs ...interface{}) (string, error) {
 				one = any
 			}
 			if one != nil {
-				message_id := ""
-				one.Handle(&CustomSender{
-					F: &Factory{
-						botplt: "message",
-					},
-				}, func(vm *goja.Runtime) {
-					obj := vm.NewObject()
-					for k, v := range msg {
-						obj.Set(k, v)
-					}
-					proxy := vm.NewProxy(obj, &goja.ProxyTrapConfig{
-						Set: func(target *goja.Object, property string, value, receiver goja.Value) (success bool) {
-							message_id = fmt.Sprint(value.Export())
-							return true
-						},
-					})
-					vm.Set("msg", proxy)
-					vm.Set("message", proxy)
-					vm.Set("adapter", sender.F)
-				})
-				return message_id, nil
+				return "", errors.New("legacy message plugin is disabled")
 			} else { //存储消息
 				c := MsgChan{
 					Msg:  msg,

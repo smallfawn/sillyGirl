@@ -222,7 +222,7 @@ func init() {
 					if f.Reload != nil {
 						defer f.Reload() //脚本重载
 					} else {
-						defer plugins.Set(uuid, "reload") //goja重载
+						defer plugins.Set(uuid, "reload")
 					}
 					break
 				}

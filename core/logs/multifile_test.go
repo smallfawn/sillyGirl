@@ -16,7 +16,9 @@ package logs
 
 import (
 	"bufio"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,7 +26,9 @@ import (
 
 func TestFiles_1(t *testing.T) {
 	log := NewLogger(10000)
-	log.SetLogger("multifile", `{"filename":"test.log","separate":["emergency", "alert", "critical", "error", "warning", "notice", "info", "debug"]}`)
+	filename := filepath.ToSlash(filepath.Join(t.TempDir(), "test.log"))
+	log.SetLogger("multifile", fmt.Sprintf(`{"filename":%q,"separate":["emergency", "alert", "critical", "error", "warning", "notice", "info", "debug"]}`, filename))
+	defer log.Close()
 	log.Debug("debug")
 	log.Informational("info")
 	log.Notice("notice")
@@ -33,10 +37,11 @@ func TestFiles_1(t *testing.T) {
 	log.Alert("alert")
 	log.Critical("critical")
 	log.Emergency("emergency")
+	log.Flush()
 	fns := []string{""}
 	fns = append(fns, levelNames[0:]...)
-	name := "test"
-	suffix := ".log"
+	suffix := filepath.Ext(filename)
+	name := strings.TrimSuffix(filename, suffix)
 	for _, fn := range fns {
 
 		file := name + suffix
@@ -47,6 +52,7 @@ func TestFiles_1(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer f.Close()
 		b := bufio.NewReader(f)
 		lineNum := 0
 		lastLine := ""
@@ -72,6 +78,5 @@ func TestFiles_1(t *testing.T) {
 				t.Fatal(file + " " + lastLine + " not contains the log msg " + fn)
 			}
 		}
-		os.Remove(file)
 	}
 }

@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"io/ioutil"
 	"regexp"
 	"sort"
@@ -10,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dop251/goja"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 	"github.com/smallfawn/sillyGirl/utils"
@@ -221,26 +219,11 @@ var REPLY = MakeBucket("reply")
 func parseReply2(str string) string {
 	re := regexp.MustCompile(`\$\{\s*([^{}]+)\s*\}`)
 	return re.ReplaceAllStringFunc(str, func(match string) string {
-		script := match[2 : len(match)-1]
-		script = regexp.MustCompile(`(\w+)\.(\w+)`).ReplaceAllStringFunc(script, func(match string) string {
-			parts := strings.Split(match, ".")
-			return fmt.Sprintf(`Bucket("%s")["%s"]`, parts[0], parts[1])
-		})
-		vm := goja.New()
-		vm.Set("Bucket", func(name string) interface{} {
-			return JsBucket(vm, name, "", false)
-		})
-		v, err := vm.RunString(script)
-		if err == nil {
-			return v.String()
+		expr := strings.TrimSpace(match[2 : len(match)-1])
+		if value, ok := parseReplyBucketExpression(expr, nil); ok {
+			return value
 		}
 		return match
-		// b_k := strings.Split(bk, ".")
-		// if len(b_k) != 3 {
-		// 	return fmt.Sprintf("${%s}", bk)
-		// }
-		// return MakeBucket(b_k[1]).GetString(b_k[2])
-		// return ""
 	})
 }
 
@@ -249,33 +232,38 @@ func parseReply3(str string, f func(string, string)) string {
 	ks := map[string]bool{}
 	re := regexp.MustCompile(`\$\{\s*([^{}]+)\s*\}`)
 	return re.ReplaceAllStringFunc(str, func(match string) string {
-		script := match[2 : len(match)-1]
-		script = regexp.MustCompile(`(\w+)\.(\w+)`).ReplaceAllStringFunc(script, func(match string) string {
-			parts := strings.Split(match, ".")
-			k := fmt.Sprintf(`%s.%s`, parts[0], parts[1])
-			if _, ok := ks[k]; !ok {
-				ks[k] = true
-				f(parts[0], parts[1])
+		expr := strings.TrimSpace(match[2 : len(match)-1])
+		if value, ok := parseReplyBucketExpression(expr, func(bucket, key string) {
+			id := bucket + "." + key
+			if !ks[id] {
+				ks[id] = true
+				f(bucket, key)
 			}
-			return fmt.Sprintf(`Bucket("%s")["%s"]`, parts[0], parts[1])
-		})
-		vm := goja.New()
-		// vm.Set("Bucket", func(name string) interface{} {
-		// 	return JsBucket(vm, name, "", false)
-		// })
-		vm.Set("Bucket", func(name string) interface{} {
-			return JsBucket2(vm, name, "", false)
-		})
-		v, err := vm.RunString(script)
-		if err == nil {
-			return v.String()
+		}); ok {
+			return value
 		}
 		return match
-		// b_k := strings.Split(bk, ".")
-		// if len(b_k) != 3 {
-		// 	return fmt.Sprintf("${%s}", bk)
-		// }
-		// return MakeBucket(b_k[1]).GetString(b_k[2])
-		// return ""
 	})
+}
+
+func parseReplyBucketExpression(expr string, watch func(string, string)) (string, bool) {
+	parts := strings.SplitN(expr, "??", 2)
+	ref := strings.TrimSpace(parts[0])
+	defaultValue := ""
+	if len(parts) == 2 {
+		defaultValue = strings.TrimSpace(parts[1])
+		defaultValue = strings.Trim(defaultValue, `"'`)
+	}
+	match := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$`).FindStringSubmatch(ref)
+	if len(match) != 3 {
+		return "", false
+	}
+	if watch != nil {
+		watch(match[1], match[2])
+	}
+	value := MakeBucket(match[1]).GetString(match[2])
+	if value == "" {
+		value = defaultValue
+	}
+	return value, true
 }

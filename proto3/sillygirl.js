@@ -735,6 +735,14 @@ class smallcat {
     userList() {
         return this.request("GET", "/api/accounts");
     }
+    getCode(options) {
+        const body = Object.assign({}, options || {});
+        if (!body.openid && body.ref)
+            body.openid = body.ref;
+        if (!body.appid)
+            body.appid = body.app_id || body.target_appid;
+        return this.request("POST", "/wx/code", body);
+    }
 }
 exports.smallcat = smallcat;
 class daidai {

@@ -1,15 +1,12 @@
 package core
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/dop251/goja"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
-	"github.com/smallfawn/sillyGirl/core/storage"
 )
 
 var pluginConfigSchemas = MakeBucket("plugin_config_schemas")
@@ -22,12 +19,6 @@ type PluginConfigRecord struct {
 	File       string                 `json:"file"`
 	Schema     map[string]interface{} `json:"schema"`
 	UserConfig map[string]interface{} `json:"user_config"`
-}
-
-type SillyGirlPluginConfig struct {
-	UUID       string                 `json:"-"`
-	JsonSchema map[string]interface{} `json:"jsonSchema"`
-	UserConfig map[string]interface{} `json:"userConfig"`
 }
 
 func init() {
@@ -192,10 +183,17 @@ func nodePluginNameIndexByUUID() map[string]string {
 		return index
 	}
 	for _, file := range files {
-		if !file.IsDir() || strings.HasPrefix(file.Name(), ".") {
+		if strings.HasPrefix(file.Name(), ".") {
 			continue
 		}
-		index[nameUuid(file.Name())] = file.Name()
+		if file.IsDir() {
+			index[nameUuid(file.Name())] = file.Name()
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(file.Name()), ".js") && file.Name() != "demo.main.js" {
+			name := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+			index[nameUuid(name)] = name
+		}
 	}
 	return index
 }
@@ -211,222 +209,4 @@ func getPluginUserConfig(uuid string) map[string]interface{} {
 	}
 	json.Unmarshal([]byte(data), &config)
 	return config
-}
-
-func registerPluginConfig(uuid string, schema map[string]interface{}) {
-	if uuid == "" || len(schema) == 0 {
-		return
-	}
-	SetBucketKeyValue(pluginConfigSchemas, uuid, schema)
-}
-
-func makeSillyGirlPluginConfig(vm *goja.Runtime, uuid string, schemaValue goja.Value) *SillyGirlPluginConfig {
-	schema := exportSchemaValue(vm, schemaValue)
-	if _, ok := schema["type"]; !ok {
-		schema["type"] = "object"
-	}
-	cfg := &SillyGirlPluginConfig{
-		UUID:       uuid,
-		JsonSchema: schema,
-		UserConfig: getPluginUserConfig(uuid),
-	}
-	registerPluginConfig(uuid, schema)
-	return cfg
-}
-
-func (cfg *SillyGirlPluginConfig) Get() map[string]interface{} {
-	cfg.UserConfig = getPluginUserConfig(cfg.UUID)
-	return cfg.UserConfig
-}
-
-func (cfg *SillyGirlPluginConfig) Set(values ...map[string]interface{}) map[string]interface{} {
-	if len(values) != 0 && values[0] != nil {
-		cfg.UserConfig = values[0]
-	}
-	SetBucketKeyValue(pluginConfigValues, cfg.UUID, cfg.UserConfig)
-	return map[string]interface{}{
-		"error": "",
-	}
-}
-
-func exportSchemaValue(vm *goja.Runtime, value goja.Value) map[string]interface{} {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
-		return map[string]interface{}{}
-	}
-	if obj := value.ToObject(vm); obj != nil {
-		if fn, ok := goja.AssertFunction(obj.Get("toJSON")); ok {
-			if v, err := fn(obj); err == nil {
-				if schema, ok := normalizeSchema(v.Export()).(map[string]interface{}); ok {
-					return schema
-				}
-				return map[string]interface{}{}
-			}
-		}
-		if schema := obj.Get("schema"); schema != nil && !goja.IsUndefined(schema) {
-			if schema, ok := normalizeSchema(schema.Export()).(map[string]interface{}); ok {
-				return schema
-			}
-			return map[string]interface{}{}
-		}
-	}
-	if schema, ok := normalizeSchema(value.Export()).(map[string]interface{}); ok {
-		return schema
-	}
-	return map[string]interface{}{}
-}
-
-func normalizeSchema(value interface{}) interface{} {
-	switch v := value.(type) {
-	case map[string]interface{}:
-		if schema, ok := v["schema"]; ok {
-			return normalizeSchema(schema)
-		}
-		rt := map[string]interface{}{}
-		for key, item := range v {
-			if strings.HasPrefix(key, "_") || key == "__schemaNode" {
-				continue
-			}
-			rt[key] = normalizeSchema(item)
-		}
-		return rt
-	case map[interface{}]interface{}:
-		rt := map[string]interface{}{}
-		for key, item := range v {
-			rt[fmt.Sprint(key)] = normalizeSchema(item)
-		}
-		return rt
-	case []interface{}:
-		rt := make([]interface{}, 0, len(v))
-		for _, item := range v {
-			rt = append(rt, normalizeSchema(item))
-		}
-		return rt
-	default:
-		return v
-	}
-}
-
-func installSillyGirlSchemaRuntime(vm *goja.Runtime, uuid string) {
-	vm.Set("SillyGirlPluginConfig", func(call goja.ConstructorCall) *goja.Object {
-		arg := goja.Undefined()
-		if len(call.Arguments) != 0 {
-			arg = call.Arguments[0]
-		}
-		cfg := makeSillyGirlPluginConfig(vm, uuid, arg)
-		return vm.ToValue(cfg).ToObject(vm)
-	})
-	vm.Set("Form", func(schema goja.Value) *SillyGirlPluginConfig {
-		return makeSillyGirlPluginConfig(vm, uuid, schema)
-	})
-	_, err := vm.RunString(`
-(function () {
-  function normalize(value) {
-    if (value && value.__schemaNode && value.schema) return value.schema;
-    if (value && typeof value.toJSON === 'function') return value.toJSON();
-    return value;
-  }
-  function Node(type, extra) {
-    this.__schemaNode = true;
-    this.schema = Object.assign({ type: type }, extra || {});
-  }
-  Node.prototype.setTitle = function (value) { this.schema.title = value; return this; };
-  Node.prototype.setDescription = function (value) { this.schema.description = value; return this; };
-  Node.prototype.setDefault = function (value) { this.schema.default = value; return this; };
-  Node.prototype.setEnum = function (value) { this.schema.enum = value; return this; };
-  Node.prototype.setEnumNames = function (value) { this.schema.enumNames = value; return this; };
-  Node.prototype.setRequired = function (value) { this.schema.required = value; return this; };
-  Node.prototype.setFormat = function (value) { this.schema.format = value; return this; };
-  Node.prototype.setMin = function (value) { this.schema.minimum = value; return this; };
-  Node.prototype.setMax = function (value) { this.schema.maximum = value; return this; };
-  Node.prototype.setMinLength = function (value) { this.schema.minLength = value; return this; };
-  Node.prototype.setMaxLength = function (value) { this.schema.maxLength = value; return this; };
-  Node.prototype.setPattern = function (value) { this.schema.pattern = value; return this; };
-  Node.prototype.setWidget = function (value) { this.schema['ui:widget'] = value; return this; };
-  Node.prototype.toJSON = function () { return this.schema; };
-  globalThis.SillyGirlCreateSchema = {
-    string: function () { return new Node('string'); },
-    number: function () { return new Node('number'); },
-    integer: function () { return new Node('integer'); },
-    boolean: function () { return new Node('boolean'); },
-    array: function (item) { return new Node('array', { items: normalize(item) || {} }); },
-    object: function (props) {
-      var properties = {};
-      Object.keys(props || {}).forEach(function (key) { properties[key] = normalize(props[key]); });
-      return new Node('object', { properties: properties });
-    }
-  };
-})();
-`)
-	if err != nil {
-		console.Error("SillyGirlCreateSchema 初始化失败: %v", err)
-	}
-}
-
-func pluginConfigWatch(uuid string, handle func()) {
-	storage.Watch(pluginConfigValues, uuid, func(_, _, _ string) *storage.Final {
-		if handle != nil {
-			handle()
-		}
-		return nil
-	}, uuid)
-}
-
-func savePluginConfigFromJS(uuid string, value interface{}) map[string]interface{} {
-	config, ok := normalizeSchema(value).(map[string]interface{})
-	if !ok {
-		return map[string]interface{}{"error": "配置必须是对象"}
-	}
-	SetBucketKeyValue(pluginConfigValues, uuid, config)
-	return map[string]interface{}{"error": ""}
-}
-
-func readPluginConfigFromJS(uuid string) map[string]interface{} {
-	return getPluginUserConfig(uuid)
-}
-
-func installPluginConfigHelpers(vm *goja.Runtime, uuid string) {
-	vm.Set("readPluginConfig", func() map[string]interface{} {
-		return readPluginConfigFromJS(uuid)
-	})
-	vm.Set("savePluginConfig", func(value interface{}) map[string]interface{} {
-		return savePluginConfigFromJS(uuid, value)
-	})
-	vm.Set("watchPluginConfig", func(handle func()) {
-		pluginConfigWatch(uuid, handle)
-	})
-	vm.Set("pluginConfigDefaults", func(schemaValue goja.Value) map[string]interface{} {
-		return collectSchemaDefaults(exportSchemaValue(vm, schemaValue))
-	})
-}
-
-func collectSchemaDefaults(schema map[string]interface{}) map[string]interface{} {
-	values := map[string]interface{}{}
-	props, ok := schema["properties"].(map[string]interface{})
-	if !ok {
-		return values
-	}
-	for key, raw := range props {
-		prop, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if v, ok := prop["default"]; ok {
-			values[key] = v
-			continue
-		}
-		if prop["type"] == "object" {
-			values[key] = collectSchemaDefaults(prop)
-		}
-	}
-	return values
-}
-
-func pluginConfigSetDefault(uuid string, schema map[string]interface{}) {
-	if pluginConfigValues.GetString(uuid) != "" {
-		return
-	}
-	values := collectSchemaDefaults(schema)
-	if len(values) != 0 {
-		SetBucketKeyValue(pluginConfigValues, uuid, values)
-	}
 }

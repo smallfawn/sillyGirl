@@ -48,7 +48,7 @@ docker compose logs -f
 
 ## 插件编写
 
-插件是普通 JavaScript 文件，通过头部注释声明名称、规则、版本等元数据。脚本插件可以在 Admin 面板「脚本插件」里编辑，也可以放到 `plugins/插件名/main.js` 使用 NodeJS 运行。
+插件是普通 JavaScript 文件，通过头部注释声明名称、规则、版本等元数据。脚本插件可以在 Admin 面板「脚本插件」里编辑，也可以放到 `plugins/插件名.js` 使用 NodeJS 运行。容器内对应路径是 `/data/plugins/插件名.js`。
 
 ```js
 /**
@@ -179,6 +179,7 @@ const sc = new smallcat({ id: 1 });
 | `checkQr(uuid)` | 检查二维码状态 |
 | `addUser(options)` | 添加用户，参数 `{ code, type, displayName? }` |
 | `userList()` | 获取用户列表 |
+| `getCode(options)` | 获取小程序 code，参数 `{ openid, appid }`，返回 smallcat API 原始 JSON |
 | `request(method, path, body, query)` | 调用其他 smallcat API |
 
 示例：
@@ -193,6 +194,12 @@ if (!qr.status) {
 
 const checked = sc.checkQr(qr.data.uuid);
 s.reply("扫码状态：" + checked.data.state);
+
+const code = sc.getCode({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+s.reply(JSON.stringify(code));
 ```
 
 smallcat 返回值保持原始 API 响应，不额外改写。
@@ -262,8 +269,8 @@ Web 插件需要声明 `@web true`。
 | 脚本插件 | 支持 JS 代码高亮、格式化、文件管理和在线编辑 |
 | 插件市场 | 支持管理插件源，从 GitHub 仓库 `plugins/` 目录导入插件 |
 | 插件配置 | 支持 `SillyGirlCreateSchema` / `SillyGirlPluginConfig` 声明式配置表单 |
-| 依赖管理 | 使用 pnpm 管理 NodeJS 插件依赖，支持安装和卸载 |
-| NodeJS 运行 | `plugins/插件名/main.js` 走 NodeJS 运行时 |
+| 依赖管理 | 使用 pnpm 管理 NodeJS 插件共享依赖，安装到 `/data/plugins/package.json` 和 `/data/plugins/node_modules` |
+| NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
 | 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new qinglong({ id })` 调用 |
 | smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new smallcat({ id })` 调用 |

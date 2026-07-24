@@ -469,22 +469,46 @@ type githubRepoResponse struct {
 }
 
 type githubPublicFileIndexEntry struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Title          string   `json:"title"`
-	Author         string   `json:"author"`
-	Version        string   `json:"version"`
-	Description    string   `json:"description"`
-	Classification string   `json:"classification"`
-	Rule           string   `json:"rule"`
-	Public         bool     `json:"public"`
-	Admin          bool     `json:"admin"`
-	Disable        bool     `json:"disable"`
-	Path           string   `json:"path"`
-	Raw            string   `json:"raw"`
-	Type           string   `json:"type"`
-	Origin         string   `json:"origin"`
-	Dependencies   []string `json:"dependencies"`
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	Title          string               `json:"title"`
+	Author         string               `json:"author"`
+	Version        string               `json:"version"`
+	Description    string               `json:"description"`
+	Classification string               `json:"classification"`
+	Rule           string               `json:"rule"`
+	Public         bool                 `json:"public"`
+	Admin          bool                 `json:"admin"`
+	Disable        bool                 `json:"disable"`
+	Path           string               `json:"path"`
+	Raw            string               `json:"raw"`
+	Type           string               `json:"type"`
+	Origin         string               `json:"origin"`
+	Dependencies   githubDependencyList `json:"dependencies"`
+}
+
+type githubDependencyList []string
+
+func (list *githubDependencyList) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*list = nil
+		return nil
+	}
+	values := []string{}
+	if err := json.Unmarshal(data, &values); err == nil {
+		*list = values
+		return nil
+	}
+	manifest := map[string]string{}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return err
+	}
+	for name := range manifest {
+		values = append(values, name)
+	}
+	sort.Strings(values)
+	*list = values
+	return nil
 }
 
 func parseGithubPluginSource(address string) (*githubPluginSource, error) {
@@ -671,7 +695,7 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 			rawURL = githubRawURL(source.Owner, source.Repo, source.Branch, pluginPath)
 		}
 		pluginAddress := makeGithubNodePluginAddress(source, pluginPath, rawURL)
-		dependencies := normalizeDependencyNames(record.Dependencies)
+		dependencies := normalizeDependencyNames([]string(record.Dependencies))
 		if len(dependencies) == 0 && rawURL != "" {
 			if data, err := httpGetBytes(rawURL, 20*time.Second); err == nil {
 				dependencies = parseNodeRequires(string(data))
@@ -796,16 +820,14 @@ func installGithubNodePlugin(address string) error {
 	}
 
 	pluginName := strings.TrimSuffix(path.Base(pluginPath), path.Ext(pluginPath))
-	target := filepath.Join(nodePluginsRoot(), pluginName)
-	target, err = checkedNodePluginDir(target)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(target); err != nil {
-		return err
-	}
+	target := nodePluginsRoot()
 	if err := os.MkdirAll(target, 0755); err != nil {
 		return err
+	}
+	if info, err := os.Stat(filepath.Join(target, pluginName)); err == nil && info.IsDir() {
+		if err := os.RemoveAll(filepath.Join(target, pluginName)); err != nil {
+			return err
+		}
 	}
 	downloadURL := rawURL
 	if downloadURL == "" {
@@ -815,7 +837,11 @@ func installGithubNodePlugin(address string) error {
 	if err != nil {
 		return err
 	}
-	mainFile := filepath.Join(target, filepath.Base(pluginPath))
+	fileName := filepath.Base(pluginPath)
+	if strings.EqualFold(fileName, "main.js") || strings.EqualFold(fileName, "demo.main.js") {
+		fileName = pluginName + ".js"
+	}
+	mainFile := filepath.Join(target, fileName)
 	if err := ensureChildPath(target, mainFile); err != nil {
 		return err
 	}
@@ -825,7 +851,7 @@ func installGithubNodePlugin(address string) error {
 	if err := ensureNodeSillygirlModule(target); err != nil {
 		return err
 	}
-	if err := ensureNodePackageJSON(target, pluginName); err != nil {
+	if err := ensureNodePackageJSON(target, "sillygirl-plugins"); err != nil {
 		return err
 	}
 	if err := AddNodePlugin(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, NODE); err != nil {

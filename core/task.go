@@ -78,7 +78,7 @@ func RegistTasks(pt *Tasks) {
 									}
 								}
 							}
-							function.Handle(sender, nil)
+							function.Handle(sender)
 							break
 						}
 					}
@@ -440,7 +440,7 @@ func runNodeTaskCommand(command string) bool {
 	sender.SetFsps(&common.FakerSenderParams{Content: command})
 	sender.SetMatch([]string{})
 	sender.SetParams([]string{})
-	f.Handle(sender, nil)
+	f.Handle(sender)
 	return true
 }
 

@@ -15,8 +15,10 @@
 package logs
 
 import (
+	"fmt"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,17 +54,23 @@ func TestReconnect(t *testing.T) {
 	// Setup connection listener
 	newConns := make(chan net.Conn)
 	connNum := 2
-	ln, err := net.Listen("tcp", ":6002")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Log("Error listening:", err.Error())
 		os.Exit(1)
 	}
 	go connTCPListener(t, connNum, ln, newConns)
+	addr := ln.Addr().String()
+	if strings.HasPrefix(addr, "[::]") {
+		_, port, _ := net.SplitHostPort(addr)
+		addr = net.JoinHostPort("127.0.0.1", port)
+	}
 
 	// Setup logger
 	log := NewLogger(1000)
+	defer log.Close()
 	log.SetPrefix("test")
-	log.SetLogger(AdapterConn, `{"net":"tcp","reconnect":true,"level":6,"addr":":6002"}`)
+	log.SetLogger(AdapterConn, fmt.Sprintf(`{"net":"tcp","reconnect":true,"level":6,"addr":%q}`, addr))
 	log.Informational("informational 1")
 
 	// Refuse first connection
@@ -76,7 +84,7 @@ func TestReconnect(t *testing.T) {
 	select {
 	case second := <-newConns:
 		second.Close()
-	default:
+	case <-time.After(time.Second):
 		t.Error("Did not reconnect")
 	}
 }

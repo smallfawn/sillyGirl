@@ -1111,21 +1111,13 @@ async function installNodeDependency() {
   });
 }
 async function installNodeDependencyPackage(pkg: string, after?: () => void) {
-  if (!nodeDeps.plugins.length) {
-    message.error('暂无 NodeJS 脚本插件');
-    return;
-  }
   if (!pkg) {
     message.error('请输入依赖名称');
     return;
   }
-  if (nodeDeps.plugins.length !== 1) {
-    message.error('当前存在多个插件，请在表格对应依赖行点击安装');
-    return;
-  }
   nodeDeps.saving = true;
   try {
-    await post('/api/node/dependency', { plugin: nodeDeps.plugins[0].name, package: pkg, dev: nodeDeps.dev });
+    await post('/api/node/dependency', { plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
     after?.();
     message.success('依赖已安装');
     await loadNodeDependencies();
@@ -1136,13 +1128,9 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
   }
 }
 async function installNodeDependencyRow(row: NodeDependencyRow) {
-  if (!row.plugin) {
-    message.error('缺少插件信息');
-    return;
-  }
   nodeDeps.saving = true;
   try {
-    await post('/api/node/dependency', { plugin: row.plugin, package: row.name, dev: row.dev });
+    await post('/api/node/dependency', { plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
     message.success('依赖已安装');
     await loadNodeDependencies();
   } catch (error) {
@@ -1155,7 +1143,7 @@ async function removeNodeDependency(row: NodeDependencyRow) {
   const key = `${row.plugin}.${row.name}`;
   nodeDeps.removing[key] = true;
   try {
-    await del('/api/node/dependency', { plugin: row.plugin, package: row.name });
+    await del('/api/node/dependency', { plugin: row.plugin || '__shared__', package: row.name });
     message.success('依赖已卸载');
     await loadNodeDependencies();
   } catch (error) {
@@ -1565,7 +1553,7 @@ function recordOptions(record?: Record<string, string>) {
                   </div>
                   <div ref="scriptEditorHost" class="code-editor script-code-editor" />
                   <div class="script-editor-status">
-                    <span>{{ isNodeScript() ? 'NodeJS' : 'Goja' }}</span>
+                    <span>{{ isNodeScript() ? 'NodeJS' : '旧脚本' }}</span>
                     <span>{{ scriptState.content.split('\n').length }} 行</span>
                     <span>{{ scriptState.content.length }} 字符</span>
                   </div>
@@ -1576,7 +1564,7 @@ function recordOptions(record?: Record<string, string>) {
             <section v-if="page === 'dependencies'" class="panel">
               <div class="toolbar">
                 <div class="toolbar-left">
-                  <Typography.Text class="muted">共 {{ nodeDeps.plugins.length }} 个 NodeJS 脚本插件</Typography.Text>
+                  <Typography.Text class="muted">共 {{ nodeDeps.plugins.length }} 个 NodeJS 脚本插件，依赖共享到 /data/plugins/node_modules</Typography.Text>
                   <Typography.Text v-if="nodeDeps.pnpm.message" type="danger">{{ nodeDeps.pnpm.message }}</Typography.Text>
                 </div>
                 <div class="toolbar-right">
@@ -1591,7 +1579,7 @@ function recordOptions(record?: Record<string, string>) {
                   @press-enter="installNodeDependency"
                 />
                 <Switch v-model:checked="nodeDeps.dev" checked-children="Dev" un-checked-children="Prod" />
-                <Button type="primary" :disabled="!nodeDeps.pnpm.available || nodeDeps.plugins.length !== 1" :loading="nodeDeps.saving" @click="installNodeDependency">
+                <Button type="primary" :disabled="!nodeDeps.pnpm.available" :loading="nodeDeps.saving" @click="installNodeDependency">
                   <template #icon><Download :size="16" /></template>安装依赖
                 </Button>
                 <Space.Compact>
@@ -2033,7 +2021,7 @@ function recordOptions(record?: Record<string, string>) {
         @ok="createScript"
       >
         <Form layout="vertical">
-          <Form.Item label="脚本文件名" required extra="只支持当前插件目录下的 .js 文件；不填写后缀会自动补全 .js。">
+          <Form.Item label="脚本文件名" required extra="会创建为 /data/plugins/文件名.js；不填写后缀会自动补全 .js。">
             <Input v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign.js" @press-enter="createScript" />
           </Form.Item>
         </Form>

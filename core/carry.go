@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dop251/goja"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 	"github.com/smallfawn/sillyGirl/core/common"
@@ -45,7 +44,7 @@ func initCarry() {
 			Rules:    []string{`raw [\s\S]*`},
 			Hidden:   true,
 			Priority: 9999,
-			Handle: func(s common.Sender, _ func(vm *goja.Runtime)) interface{} {
+			Handle: func(s common.Sender) interface{} {
 				var bot_id = s.GetBotID()
 				var platform = s.GetImType()
 				var chat_id = s.GetChatID()
@@ -190,7 +189,7 @@ func initCarry() {
 				for j := range from.Scripts {
 					for i := range fs {
 						if fs[i].UUID == from.Scripts[j] && !Contains(scripts, fs[i].UUID) {
-							fs[i].Handle(s, nil)
+							fs[i].Handle(s)
 							content = s.GetContent()
 							if content == "" {
 								return nil
@@ -206,7 +205,7 @@ func initCarry() {
 					for j := range outs[i].Scripts {
 						for k := range fs {
 							if fs[k].UUID == outs[i].Scripts[j] && !Contains(scripts, fs[k].UUID) { //
-								fs[k].Handle(s, nil)
+								fs[k].Handle(s)
 								content = s.GetContent()
 								// fmt.Println(content)
 								if content == "" {

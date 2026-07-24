@@ -1,6 +1,6 @@
 # 插件开发指南
 
-SillyGirl 的插件系统基于 [Goja](https://github.com/dop251/goja) JavaScript 引擎，完整支持 ECMAScript 5.1。插件以 `.js` 文件形式存在，通过顶部注释声明元数据，由框架自动加载、匹配和执行。
+SillyGirl 的插件系统基于外部 NodeJS 运行时。插件以 `.js` 文件形式放在 `/data/plugins`，通过顶部注释声明元数据，由框架自动加载、匹配，并通过 gRPC 与 Go 主程序通信。
 
 ## 目录
 
@@ -25,6 +25,19 @@ SillyGirl 的插件系统基于 [Goja](https://github.com/dop251/goja) JavaScrip
 ## 插件结构
 
 一个最小插件由注释元数据和执行代码组成：
+
+NodeJS 脚本插件默认使用扁平文件结构，容器内路径为：
+
+```text
+/data/plugins/
+  smallcat.js
+  package.json
+  pnpm-lock.yaml
+  node_modules/
+```
+
+依赖是插件目录共享的，所有 NodeJS 插件共用 `/data/plugins/package.json` 和 `/data/plugins/node_modules`。旧版
+`/data/plugins/插件名/main.js` 仍会兼容加载，但新建和插件市场安装都会写入 `/data/plugins/插件名.js`。
 
 ```js
 /**
@@ -346,6 +359,7 @@ sc.address  // smallcat 地址
 | `checkQr(uuid)` | `GET /api/qr/status?uuid=...` | 二维码 UUID | 原始 API 响应 |
 | `addUser(options)` | `POST /api/accounts/add` | `{ code, type, displayName? }` | 原始 API 响应 |
 | `userList()` | `GET /api/accounts` | 无 | 原始 API 响应 |
+| `getCode(options)` | `POST /wx/code` | `{ openid, appid }`，也兼容 `{ ref, app_id }` | 原始 API 响应 |
 | `request(method, path, body, query)` | 任意 smallcat API | 自定义方法、路径、请求体、查询参数 | 原始 API 响应 |
 
 smallcat 运行时不会改写 API 返回。脚本收到的就是 smallcat 原始 JSON，一般结构为：
@@ -385,6 +399,12 @@ if (checked.data.state === "confirmed" && checked.data.wxCode) {
 
 const users = sc.userList();
 console.log(users.status, users.message, users.data && users.data.items);
+
+const code = sc.getCode({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+console.log(code.status, code.message, code.data);
 ```
 
 注意：

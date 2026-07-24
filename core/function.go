@@ -382,7 +382,7 @@ func AddCommand(cmds []*common.Function) {
 					F: &Factory{
 						botplt: "*",
 					},
-				}, nil)
+				})
 			}(cmds[j])
 		}
 		fmtRule(cmds[j])
@@ -399,7 +399,7 @@ func AddCommand(cmds []*common.Function) {
 							F: &Factory{
 								botplt: plt,
 							},
-						}, nil)
+						})
 					})
 					if err == nil {
 						cmds[j].CronIds = append(cmds[j].CronIds, int(cronId))
@@ -638,7 +638,7 @@ func HandleMessage(sender common.Sender) {
 				if function.Admin && !a {
 					return
 				}
-				rt := function.Handle(sender, nil)
+				rt := function.Handle(sender)
 				if rt != nil {
 					sender.Reply(rt)
 				}

@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 
-	"github.com/dop251/goja"
 	"github.com/smallfawn/sillyGirl/core/common"
 	"github.com/smallfawn/sillyGirl/utils"
 )
@@ -25,7 +24,7 @@ func init() {
 			// 	BlackMode: true,
 			// 	Items:     []string{"pgm"},
 			// },
-			Handle: func(s common.Sender, _ func(vm *goja.Runtime)) interface{} {
+			Handle: func(s common.Sender) interface{} {
 				address := s.Get(0)
 				organization := s.Get(1)
 				// machine_id := s.Get(1)

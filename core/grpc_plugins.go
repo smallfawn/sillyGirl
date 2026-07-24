@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dop251/goja"
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 	cron "github.com/robfig/cron/v3"
@@ -31,20 +30,25 @@ func initNodePlugins() {
 	root := strings.ReplaceAll(nodePluginsRoot(), "\\", "/")
 	plugins := []string{root}
 	os.Mkdir(root, 0755)
+	_ = ensureNodeSillygirlModule(root)
 	// fmt.Println("root", root)
 	files, _ := ioutil.ReadDir(root)
 	for _, file := range files {
-		if !file.IsDir() {
+		if shouldIgnoreNodePluginEntry(file.Name()) {
 			continue
 		}
-		name := file.Name()
-		path := root + "/" + name
+		path := root + "/" + file.Name()
+		if !file.IsDir() {
+			if class, ok := CheckMainIndex(file.Name()); ok && class == NODE {
+				AddNodePlugin(path, nodePluginNameFromPath(path), class)
+			}
+			continue
+		}
 		plugins = append(plugins, path)
-		_ = ensureNodeSillygirlModule(path)
 		index, class := FindMainIndex(path)
 
 		if index != "" {
-			AddNodePlugin(index, name, class)
+			AddNodePlugin(index, nodePluginNameFromPath(index), class)
 		}
 	}
 	watcher, err := fsnotify.NewWatcher()
@@ -77,9 +81,16 @@ func initNodePlugins() {
 			var class = ""
 			switch len(files) {
 			case 1:
-				plugin_dir = true
-				// fmt.Println("目录事件")
-				plugin_name = files[0]
+				if shouldIgnoreNodePluginEntry(files[0]) {
+					continue
+				}
+				if class, plugin_index = CheckMainIndex(files[0]); plugin_index {
+					plugin_name = strings.TrimSuffix(files[0], filepath.Ext(files[0]))
+				} else {
+					plugin_dir = true
+					// fmt.Println("目录事件")
+					plugin_name = files[0]
+				}
 			case 2:
 				class, plugin_index = CheckMainIndex(files[1])
 				// if files[1] == "main.js" {
@@ -99,43 +110,18 @@ func initNodePlugins() {
 					info, err := os.Stat(event.Name)
 					// fmt.Println(err)
 					if err == nil && info.IsDir() {
-						index, class := FindMainIndex(event.Name)
-						switch class {
-						case NODE:
-							AddNodePlugin(index, plugin_name, class)
-						case PYTHON:
-						case "":
-							// time.Sleep(time.Millisecond * 100) //如果没有
-							// if info, err := os.Stat(event.Name + "/demo.main.js"); err == nil && !info.IsDir() {
-
-							// }
+						if shouldIgnoreNodePluginEntry(filepath.Base(event.Name)) {
+							continue
 						}
-						// event_name := event.Name + "/main.js"
-						// if info, err := os.Stat(event_name); err == nil && !info.IsDir() {
-						// 	AddNodePlugin(event_name, plugin_name)
-						// } else {
-						// 	time.Sleep(time.Millisecond * 100)
-						// 	if info, err := os.Stat(event_name); err == nil && !info.IsDir() {
-						// 		AddNodePlugin(event_name, plugin_name)
-						// 	}
-						// }
+						index, class := FindMainIndex(event.Name)
+						if class == NODE {
+							AddNodePlugin(index, nodePluginNameFromPath(index), class)
+						}
 						watcher.Add(event.Name)
 						// fmt.Println("增加插件目录", event.Name)
 					} else {
 						// fmt.Println("非插件目录", event.Name)
 					}
-					tf := event.Name + "/node_modules/sillygirl.d.ts"
-					ti := event.Name + "/demo.main.js"
-					if _, err := os.Stat(tf); err != nil {
-						_ = ensureNodeSillygirlModule(event.Name)
-					}
-					go func() {
-						time.Sleep(time.Second)
-						if _, err := os.Stat(ti); err != nil {
-							os.Mkdir(event.Name+"/node_modules", 0700)
-							os.WriteFile(ti, []byte(defaultScript(plugin_name)), 0700)
-						}
-					}()
 				} else if plugin_index {
 					// fmt.Println("增加插件", event.Name)
 					// RemNodePlugin(plugin_name)
@@ -199,7 +185,6 @@ func AddNodePlugin(path, name, class string) error {
 			CancelPluginCrons(uuid)
 			CancelPluginWebs(uuid)
 			CancelPluginlistening(uuid)
-			CancelHttpListen(uuid)
 			remStatic(uuid)
 			storage.DisableHandle(uuid)
 			break
@@ -236,19 +221,21 @@ func AddNodePlugin(path, name, class string) error {
 		f.Suffix = ".py"
 	}
 	f.Path = path
-	f.Handle = func(s common.Sender, _ func(vm *goja.Runtime)) interface{} {
+	f.Handle = func(s common.Sender) interface{} {
 		console := &Console{UUID: uuid}
 		s.SetPluginID(uuid)
 		plt := s.GetImType()
 		bin := ""
 		var cmd *exec.Cmd
+		workDir := filepath.Dir(path)
 		switch class {
 		case NODE:
-			if err := ensureNodeSillygirlModule(filepath.Dir(path)); err != nil {
+			workDir = nodePluginWorkDir(path)
+			if err := ensureNodeSillygirlModule(workDir); err != nil {
 				console.Error("NodeJS sillygirl 模块初始化失败：%v", err)
 				return nil
 			}
-			if err := ensureNodeRuntimeDependencies(filepath.Dir(path)); err != nil {
+			if err := ensureNodeRuntimeDependencies(workDir); err != nil {
 				console.Error("NodeJS sillygirl 运行时依赖安装失败：%v", err)
 				return nil
 			}
@@ -270,7 +257,7 @@ func AddNodePlugin(path, name, class string) error {
 			cmd.Env = append(cmd.Env, "PYTHONPATH=/home/user/Code/sillyGirl/proto3")
 		}
 
-		cmd.Dir = filepath.Dir(path)
+		cmd.Dir = workDir
 		RUNTIME_ID := utils.GenUUID()
 		cmd.Env = append(os.Environ(), cmd.Env...)
 		if class == NODE {
@@ -486,6 +473,7 @@ declare class smallcat {
 	checkQr(uuid: string): Promise<any>;
 	addUser(options: { code: string; type: number | string; displayName?: string }): Promise<any>;
 	userList(): Promise<any>;
+	getCode(options: { openid?: string; appid?: string; ref?: string; app_id?: string; target_appid?: string }): Promise<any>;
 }
 declare class daidai {
 	id: number;
@@ -634,6 +622,14 @@ const (
 )
 
 func FindMainIndex(home string) (string, string) {
+	if info, err := os.Stat(home); err == nil && !info.IsDir() {
+		switch {
+		case strings.EqualFold(filepath.Ext(home), ".js") && filepath.Base(home) != "demo.main.js":
+			return strings.ReplaceAll(home, "\\", "/"), NODE
+		case strings.EqualFold(filepath.Ext(home), ".py"):
+			return strings.ReplaceAll(home, "\\", "/"), PYTHON
+		}
+	}
 	if info, err := os.Stat(home + "/main.js"); err == nil && !info.IsDir() {
 		return home + "/main.js", NODE
 	}
