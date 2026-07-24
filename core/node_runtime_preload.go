@@ -185,7 +185,7 @@ const nodeRuntimePreloadScript = `
     return new SillyGirlPluginConfig(schema);
   }
 
-  class qinglong {
+  class QingLong {
     constructor(options) {
       this.id = 0;
       this.uuid = "";
@@ -240,7 +240,7 @@ const nodeRuntimePreloadScript = `
     async systemNotify(title, content) { const r = await this.request("PUT", "/system/notify", { title, content }); return r.data ?? r; }
   }
 
-  class smallcat {
+  class SmallCat {
     constructor(options) {
       this.id = 0;
       this.uuid = "";
@@ -280,7 +280,7 @@ const nodeRuntimePreloadScript = `
     }
   }
 
-  class daidai {
+  class DaiDai {
     constructor(options) {
       this.id = 0;
       this.uuid = "";
@@ -364,16 +364,16 @@ const nodeRuntimePreloadScript = `
     async systemNotify(title, content) { return this.request("POST", "/notifications/send", { title, content }); }
   }
 
-  sg.qinglong = sg.qinglong || qinglong;
-  sg.smallcat = sg.smallcat || smallcat;
-  sg.daidai = sg.daidai || daidai;
+  sg.QingLong = sg.QingLong || QingLong;
+  sg.SmallCat = sg.SmallCat || SmallCat;
+  sg.DaiDai = sg.DaiDai || DaiDai;
   sg.SillyGirlCreateSchema = sg.SillyGirlCreateSchema || SillyGirlCreateSchema;
   sg.SillyGirlPluginConfig = sg.SillyGirlPluginConfig || SillyGirlPluginConfig;
   sg.Form = sg.Form || Form;
   sg.pluginConfigDefaults = sg.pluginConfigDefaults || collectSchemaDefaults;
-  globalThis.qinglong = sg.qinglong;
-  globalThis.smallcat = sg.smallcat;
-  globalThis.daidai = sg.daidai;
+  globalThis.QingLong = sg.QingLong;
+  globalThis.SmallCat = sg.SmallCat;
+  globalThis.DaiDai = sg.DaiDai;
   globalThis.SillyGirlCreateSchema = sg.SillyGirlCreateSchema;
   globalThis.SillyGirlPluginConfig = sg.SillyGirlPluginConfig;
   globalThis.Form = sg.Form;

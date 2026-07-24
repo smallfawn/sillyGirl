@@ -56,36 +56,106 @@ declare class Bucket {
     watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
     getName(): Promise<string>;
 }
-declare class qinglong {
+interface SillyGirlSchemaNode {
+    __schemaNode: boolean;
+    schema: Record<string, any>;
+    setTitle(value: string): SillyGirlSchemaNode;
+    setDescription(value: string): SillyGirlSchemaNode;
+    setDefault(value: any): SillyGirlSchemaNode;
+    setEnum(value: any[]): SillyGirlSchemaNode;
+    setEnumNames(value: string[]): SillyGirlSchemaNode;
+    setRequired(value: string[] | boolean): SillyGirlSchemaNode;
+    setFormat(value: string): SillyGirlSchemaNode;
+    setMin(value: number): SillyGirlSchemaNode;
+    setMax(value: number): SillyGirlSchemaNode;
+    setMinLength(value: number): SillyGirlSchemaNode;
+    setMaxLength(value: number): SillyGirlSchemaNode;
+    setPattern(value: string): SillyGirlSchemaNode;
+    setWidget(value: string): SillyGirlSchemaNode;
+    toJSON(): Record<string, any>;
+}
+declare function pluginConfigDefaults(schema: any): any;
+declare class SchemaNode implements SillyGirlSchemaNode {
+    __schemaNode: boolean;
+    schema: Record<string, any>;
+    constructor(type: string, extra?: Record<string, any>);
+    setTitle(value: string): this;
+    setDescription(value: string): this;
+    setDefault(value: any): this;
+    setEnum(value: any[]): this;
+    setEnumNames(value: string[]): this;
+    setRequired(value: string[] | boolean): this;
+    setFormat(value: string): this;
+    setMin(value: number): this;
+    setMax(value: number): this;
+    setMinLength(value: number): this;
+    setMaxLength(value: number): this;
+    setPattern(value: string): this;
+    setWidget(value: string): this;
+    toJSON(): Record<string, any>;
+}
+declare const SillyGirlCreateSchema: {
+    string: () => SchemaNode;
+    number: () => SchemaNode;
+    integer: () => SchemaNode;
+    boolean: () => SchemaNode;
+    array: (item?: any) => SchemaNode;
+    object: (props?: Record<string, any>) => SchemaNode;
+};
+declare class SillyGirlPluginConfig {
+    uuid: string;
+    jsonSchema: Record<string, any>;
+    userConfig: Record<string, any>;
+    ready: Promise<Record<string, any>>;
+    constructor(schema: any);
+    init(): Promise<Record<string, any>>;
+    get(): Promise<Record<string, any>>;
+    Get(): Promise<Record<string, any>>;
+    set(values?: Record<string, any>): Promise<{
+        error: string;
+    }>;
+    Set(values?: Record<string, any>): Promise<{
+        error: string;
+    }>;
+}
+declare function Form(schema: any): SillyGirlPluginConfig;
+declare class QingLong {
     id: number;
     uuid: string;
     name: string;
     address: string;
+    private panel;
+    private token;
+    private expiration;
+    private ready;
     constructor(options: {
         id: number | string;
     });
+    private init;
+    private ensureToken;
     request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
     getEnvs(options?: Record<string, any> | string): Promise<any>;
     getEnvById(id: number | string): Promise<any>;
     createEnv(env: any): Promise<any>;
     updateEnv(env: any): Promise<any>;
     deleteEnvs(ids: any): Promise<any>;
-    moveEnv(id: number | string, fromIndex: number, toIndex: number): Promise<any>;
-    moveEnv(id: number | string, body: Record<string, any>): Promise<any>;
+    moveEnv(id: number | string, arg1: any, arg2?: any): Promise<any>;
     disableEnvs(ids: any): Promise<any>;
     enableEnvs(ids: any): Promise<any>;
-    updateEnvNames(ids: any, name: string): Promise<any>;
-    updateEnvNames(body: Record<string, any>): Promise<any>;
+    updateEnvNames(arg1: any, arg2?: any): Promise<any>;
     systemNotify(title: string, content: string): Promise<any>;
 }
-declare class smallcat {
+declare class SmallCat {
     id: number;
     uuid: string;
     name: string;
     address: string;
+    private panel;
+    private ready;
     constructor(options: {
         id: number | string;
     });
+    private init;
     request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
     createQr(type: any): Promise<any>;
     checkQr(uuid: string): Promise<any>;
@@ -103,14 +173,20 @@ declare class smallcat {
         target_appid?: string;
     }): Promise<any>;
 }
-declare class daidai {
+declare class DaiDai {
     id: number;
     uuid: string;
     name: string;
     address: string;
+    private panel;
+    private token;
+    private expiration;
+    private ready;
     constructor(options: {
         id: number | string;
     });
+    private init;
+    private ensureToken;
     request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
     getEnvs(options?: Record<string, any> | string): Promise<any>;
     getEnvById(id: number | string): Promise<any>;
@@ -133,44 +209,6 @@ declare class daidai {
     disableTask(id: number | string): Promise<any>;
     systemNotify(title: string, content: string): Promise<any>;
 }
-interface SillyGirlSchemaNode {
-    schema: Record<string, any>;
-    setTitle(value: string): SillyGirlSchemaNode;
-    setDescription(value: string): SillyGirlSchemaNode;
-    setDefault(value: any): SillyGirlSchemaNode;
-    setEnum(value: any[]): SillyGirlSchemaNode;
-    setEnumNames(value: string[]): SillyGirlSchemaNode;
-    setRequired(value: string[] | boolean): SillyGirlSchemaNode;
-    setFormat(value: string): SillyGirlSchemaNode;
-    setMin(value: number): SillyGirlSchemaNode;
-    setMax(value: number): SillyGirlSchemaNode;
-    setMinLength(value: number): SillyGirlSchemaNode;
-    setMaxLength(value: number): SillyGirlSchemaNode;
-    setPattern(value: string): SillyGirlSchemaNode;
-    setWidget(value: string): SillyGirlSchemaNode;
-    toJSON(): Record<string, any>;
-}
-declare const SillyGirlCreateSchema: {
-    string(): SillyGirlSchemaNode;
-    number(): SillyGirlSchemaNode;
-    integer(): SillyGirlSchemaNode;
-    boolean(): SillyGirlSchemaNode;
-    array(item?: any): SillyGirlSchemaNode;
-    object(props?: Record<string, any>): SillyGirlSchemaNode;
-};
-declare class SillyGirlPluginConfig {
-    uuid: string;
-    jsonSchema: Record<string, any>;
-    userConfig: Record<string, any>;
-    ready: Promise<Record<string, any>>;
-    constructor(schema: any);
-    get(): Promise<Record<string, any>>;
-    Get(): Promise<Record<string, any>>;
-    set(values?: Record<string, any>): Promise<{ error: string }>;
-    Set(values?: Record<string, any>): Promise<{ error: string }>;
-}
-declare function Form(schema: any): SillyGirlPluginConfig;
-declare function pluginConfigDefaults(schema: any): any;
 interface StorageModifier {
     echo?: string;
     now?: any;
@@ -221,4 +259,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, qinglong, smallcat, daidai, SillyGirlCreateSchema, SillyGirlPluginConfig, Form, pluginConfigDefaults, sender, sleep, utils, console };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlCreateSchema, SillyGirlPluginConfig, Form, pluginConfigDefaults, sender, sleep, utils, console, };

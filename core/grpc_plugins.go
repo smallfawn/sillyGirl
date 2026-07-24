@@ -444,7 +444,7 @@ declare class Bucket {
 	watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
 	getName(): Promise<string>;
 }
-declare class qinglong {
+declare class QingLong {
 	id: number;
 	uuid: string;
 	name: string;
@@ -464,7 +464,7 @@ declare class qinglong {
 	updateEnvNames(body: Record<string, any>): Promise<any>;
 	systemNotify(title: string, content: string): Promise<any>;
 }
-declare class smallcat {
+declare class SmallCat {
 	id: number;
 	uuid: string;
 	name: string;
@@ -477,7 +477,7 @@ declare class smallcat {
 	userList(): Promise<any>;
 	getCode(options: { openid?: string; appid?: string; ref?: string; app_id?: string; target_appid?: string }): Promise<any>;
 }
-declare class daidai {
+declare class DaiDai {
 	id: number;
 	uuid: string;
 	name: string;
@@ -593,7 +593,7 @@ declare let console: {
 	error(...args: any[]): void;
 	debug(...args: any[]): void;
 };
-export { Adapter, Bucket, qinglong, smallcat, daidai, SillyGirlCreateSchema, SillyGirlPluginConfig, Form, pluginConfigDefaults, sender, sleep, utils, console };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlCreateSchema, SillyGirlPluginConfig, Form, pluginConfigDefaults, sender, sleep, utils, console };
 `
 
 func defaultScript(title string) string {
@@ -609,9 +609,12 @@ func defaultScript(title string) string {
 const {
   sender: s,
   Bucket,
-  qinglong,
-  smallcat,
-  daidai,
+  QingLong,
+  SmallCat,
+  DaiDai,
+  SillyGirlCreateSchema,
+  SillyGirlPluginConfig,
+  Form,
   utils: { buildCQTag, image, video },
 } = require("sillygirl");
 `

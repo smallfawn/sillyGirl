@@ -130,12 +130,12 @@ db.keys();
 
 ## 内联函数说明
 
-### qinglong
+### QingLong
 
 先在 Admin 面板「青龙容器」中添加青龙地址、`client_id`、`client_secret`。脚本里按页面编号创建实例：
 
 ```js
-const ql = new qinglong({ id: 1 });
+const ql = new QingLong({ id: 1 });
 ```
 
 常用方法：
@@ -155,19 +155,19 @@ const ql = new qinglong({ id: 1 });
 示例：
 
 ```js
-const ql = new qinglong({ id: 1 });
+const ql = new QingLong({ id: 1 });
 const envs = ql.getEnvs({ searchValue: "JD_COOKIE" });
 s.reply("匹配到 " + envs.length + " 个变量");
 ```
 
-注意：`new qinglong({ id: 1 })` 只接受对象参数，不支持 `new qinglong(1)`。
+注意：`new QingLong({ id: 1 })` 只接受对象参数，不支持 `new QingLong(1)`。
 
-### smallcat
+### SmallCat
 
 先在 Admin 面板「smallcat」中添加地址和 `api_auth`。脚本里按页面编号创建实例：
 
 ```js
-const sc = new smallcat({ id: 1 });
+const sc = new SmallCat({ id: 1 });
 ```
 
 常用方法：
@@ -185,7 +185,7 @@ const sc = new smallcat({ id: 1 });
 示例：
 
 ```js
-const sc = new smallcat({ id: 1 });
+const sc = new SmallCat({ id: 1 });
 const qr = sc.createQr(1);
 if (!qr.status) {
   s.reply("生成二维码失败：" + qr.message);
@@ -204,12 +204,12 @@ s.reply(JSON.stringify(code));
 
 smallcat 返回值保持原始 API 响应，不额外改写。
 
-### daidai
+### DaiDai
 
 先在 Admin 面板「呆呆面板」中添加地址、`app_key`、`app_secret`。脚本里按页面编号创建实例：
 
 ```js
-const dd = new daidai({ id: 1 });
+const dd = new DaiDai({ id: 1 });
 ```
 
 常用方法：
@@ -229,12 +229,12 @@ const dd = new daidai({ id: 1 });
 示例：
 
 ```js
-const dd = new daidai({ id: 1 });
+const dd = new DaiDai({ id: 1 });
 const envs = dd.getEnvs({ keyword: "JD_COOKIE" });
 s.reply("呆呆面板变量数量：" + envs.length);
 ```
 
-注意：`new daidai({ id: 1 })` 只接受对象参数，不支持 `new daidai(1)`。
+注意：`new DaiDai({ id: 1 })` 只接受对象参数，不支持 `new DaiDai(1)`。
 
 ### Cron
 
@@ -272,9 +272,9 @@ Web 插件需要声明 `@web true`。
 | 依赖管理 | 使用 pnpm 管理 NodeJS 插件共享依赖，安装到 `/data/plugins/package.json` 和 `/data/plugins/node_modules` |
 | NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
-| 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new qinglong({ id })` 调用 |
-| smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new smallcat({ id })` 调用 |
-| 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new daidai({ id })` 调用 |
+| 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new QingLong({ id })` 调用 |
+| smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new SmallCat({ id })` 调用 |
+| 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new DaiDai({ id })` 调用 |
 | 适配器 | 内置 QQ、Telegram Bot、Web 适配器，并提供 Pagermaid 桥接脚本 |
 | 定时任务 | 支持 Cron 表达式和脚本触发 |
 | Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub 镜像 |

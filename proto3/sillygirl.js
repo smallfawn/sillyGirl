@@ -15,15 +15,28 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.console = exports.utils = exports.sleep = exports.sender = exports.daidai = exports.smallcat = exports.qinglong = exports.Bucket = exports.Adapter = void 0;
+exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.SillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
+exports.Form = Form;
+exports.pluginConfigDefaults = pluginConfigDefaults;
+exports.sleep = sleep;
 const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
@@ -395,7 +408,7 @@ class Bucket {
     }
     async get(key, defaultValue = undefined) {
         return new Promise((resolve, reject) => {
-            client.BucketGet(new srpc_1.srpc.BucketKeyRequest({ name: this.name, key }), (err, resp) => {
+            client.BucketGet(new srpc_1.srpc.BucketKeyRequest({ name: this.name, key }), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
                 }
@@ -411,7 +424,7 @@ class Bucket {
                 name: this.name,
                 key,
                 value: this.reverseTransform(value),
-            }), (err, resp) => {
+            }), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
                 }
@@ -426,7 +439,7 @@ class Bucket {
     }
     async getAll() {
         return new Promise((resolve, reject) => {
-            client.BucketGetAll(new srpc_1.srpc.BucketRequest({ name: this.name }), (err, resp) => {
+            client.BucketGetAll(new srpc_1.srpc.BucketRequest({ name: this.name }), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
                 }
@@ -448,7 +461,7 @@ class Bucket {
     }
     async deleteAll() {
         return new Promise((resolve, reject) => {
-            client.BucketDelete(new srpc_1.srpc.BucketRequest({ name: this.name }), (err, resp) => {
+            client.BucketDelete(new srpc_1.srpc.BucketRequest({ name: this.name }), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
                 }
@@ -460,7 +473,7 @@ class Bucket {
     }
     async keys() {
         return new Promise((resolve, reject) => {
-            client.BucketKeys(new srpc_1.srpc.BucketRequest({ name: this.name }), (err, resp) => {
+            client.BucketKeys(new srpc_1.srpc.BucketRequest({ name: this.name }), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
                 }
@@ -472,7 +485,7 @@ class Bucket {
     }
     async len() {
         return new Promise((resolve, reject) => {
-            client.BucketLen(new srpc_1.srpc.BucketRequest({ name: this.name }), (err, resp) => {
+            client.BucketLen(new srpc_1.srpc.BucketRequest({ name: this.name }), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
                 }
@@ -484,7 +497,7 @@ class Bucket {
     }
     async buckets() {
         return new Promise((resolve, reject) => {
-            client.BucketBuckets(new srpc_1.srpc.Empty(), (err, resp) => {
+            client.BucketBuckets(new srpc_1.srpc.Empty(), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
                 }
@@ -495,7 +508,7 @@ class Bucket {
         });
     }
     watch(key, handle) {
-        const call = client.BucketWatch();
+        const call = client.BucketWatch(metadata);
         call.on("data", async (response) => {
             let fin = handle(this.transform(response.old), this.transform(response.now), response.key);
             try {
@@ -531,6 +544,127 @@ class Bucket {
     }
 }
 exports.Bucket = Bucket;
+function normalizeSchema(value) {
+    if (value && value.__schemaNode && value.schema)
+        return value.schema;
+    if (value && typeof value.toJSON === "function")
+        return value.toJSON();
+    if (Array.isArray(value))
+        return value.map((item) => normalizeSchema(item));
+    if (value && typeof value === "object") {
+        const result = {};
+        for (const key of Object.keys(value)) {
+            if (key.startsWith("_") || key === "__schemaNode")
+                continue;
+            result[key] = normalizeSchema(value[key]);
+        }
+        return result;
+    }
+    return value;
+}
+function pluginConfigDefaults(schema) {
+    schema = normalizeSchema(schema) || {};
+    if (Object.prototype.hasOwnProperty.call(schema, "default"))
+        return schema.default;
+    if (schema.type === "object" || schema.properties) {
+        const values = {};
+        for (const key of Object.keys(schema.properties || {})) {
+            const value = pluginConfigDefaults(schema.properties[key]);
+            if (value !== undefined)
+                values[key] = value;
+        }
+        return values;
+    }
+    if (schema.type === "array")
+        return [];
+    return undefined;
+}
+class SchemaNode {
+    __schemaNode = true;
+    schema;
+    constructor(type, extra = {}) {
+        this.schema = Object.assign({ type }, extra);
+    }
+    setTitle(value) { this.schema.title = value; return this; }
+    setDescription(value) { this.schema.description = value; return this; }
+    setDefault(value) { this.schema.default = value; return this; }
+    setEnum(value) { this.schema.enum = value; return this; }
+    setEnumNames(value) { this.schema.enumNames = value; return this; }
+    setRequired(value) { this.schema.required = value; return this; }
+    setFormat(value) { this.schema.format = value; return this; }
+    setMin(value) { this.schema.minimum = value; return this; }
+    setMax(value) { this.schema.maximum = value; return this; }
+    setMinLength(value) { this.schema.minLength = value; return this; }
+    setMaxLength(value) { this.schema.maxLength = value; return this; }
+    setPattern(value) { this.schema.pattern = value; return this; }
+    setWidget(value) { this.schema["ui:widget"] = value; return this; }
+    toJSON() { return this.schema; }
+}
+const SillyGirlCreateSchema = {
+    string: () => new SchemaNode("string"),
+    number: () => new SchemaNode("number"),
+    integer: () => new SchemaNode("integer"),
+    boolean: () => new SchemaNode("boolean"),
+    array: (item) => new SchemaNode("array", { items: normalizeSchema(item) || {} }),
+    object: (props) => {
+        const properties = {};
+        for (const key of Object.keys(props || {})) {
+            properties[key] = normalizeSchema(props?.[key]);
+        }
+        return new SchemaNode("object", { properties });
+    },
+};
+exports.SillyGirlCreateSchema = SillyGirlCreateSchema;
+class SillyGirlPluginConfig {
+    uuid = plugin_id;
+    jsonSchema;
+    userConfig = {};
+    ready;
+    constructor(schema) {
+        this.jsonSchema = normalizeSchema(schema) || {};
+        if (!this.jsonSchema.type)
+            this.jsonSchema.type = "object";
+        if (process.env.PLUGIN_CONFIG_JSON) {
+            try {
+                const value = JSON.parse(process.env.PLUGIN_CONFIG_JSON);
+                if (value && typeof value === "object" && !Array.isArray(value)) {
+                    this.userConfig = value;
+                }
+            }
+            catch (_) { }
+        }
+        this.ready = this.init();
+    }
+    async init() {
+        if (!this.uuid)
+            return this.userConfig;
+        await new Bucket("plugin_config_schemas").set(this.uuid, this.jsonSchema);
+        this.userConfig = await new Bucket("plugin_config_values").get(this.uuid, {});
+        return this.userConfig;
+    }
+    async get() {
+        await this.ready;
+        this.userConfig = await new Bucket("plugin_config_values").get(this.uuid, {});
+        return this.userConfig;
+    }
+    async Get() {
+        return this.get();
+    }
+    async set(values) {
+        await this.ready;
+        if (values && typeof values === "object")
+            this.userConfig = values;
+        await new Bucket("plugin_config_values").set(this.uuid, this.userConfig || {});
+        return { error: "" };
+    }
+    async Set(values) {
+        return this.set(values);
+    }
+}
+exports.SillyGirlPluginConfig = SillyGirlPluginConfig;
+function Form(schema) {
+    return new SillyGirlPluginConfig(schema);
+}
 async function readRuntimePanels(key) {
     const raw = await new Bucket("sillyGirl").get(key, []);
     if (Array.isArray(raw))
@@ -541,7 +675,7 @@ async function readRuntimePanels(key) {
             const panels = JSON.parse(text);
             return Array.isArray(panels) ? panels : [];
         }
-        catch (e) {
+        catch {
             return [];
         }
     }
@@ -562,7 +696,7 @@ function normalizeRuntimePath(path, prefix) {
     }
     return path;
 }
-function queryString(query) {
+function queryString(query = {}) {
     const values = new URLSearchParams();
     for (const key of Object.keys(query || {})) {
         if (query[key] !== undefined && query[key] !== null) {
@@ -586,7 +720,7 @@ function normalizeIDs(ids) {
     }
     return [ids];
 }
-class qinglong {
+class QingLong {
     id = 0;
     uuid = "";
     name = "";
@@ -629,19 +763,20 @@ class qinglong {
     }
     async request(method, path, body, query) {
         await this.ensureToken();
+        const headers = { Authorization: `Bearer ${this.token}` };
+        if (body !== undefined && body !== null)
+            headers["Content-Type"] = "application/json";
         const response = await fetch(`${this.address}${normalizeRuntimePath(path, "/open")}${queryString(query || {})}`, {
             method: String(method || "GET").toUpperCase(),
-            headers: Object.assign({ Authorization: `Bearer ${this.token}` }, body === undefined || body === null ? {} : { "Content-Type": "application/json" }),
+            headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
         });
         const text = await response.text();
         const result = text ? JSON.parse(text) : {};
-        if (!response.ok) {
+        if (!response.ok)
             throw new Error(result.message || `青龙接口 HTTP ${response.status}`);
-        }
-        if (result.code !== undefined && result.code !== 200) {
+        if (result.code !== undefined && result.code !== 200)
             throw new Error(result.message || "青龙接口请求失败");
-        }
         return result;
     }
     async getEnvs(options) {
@@ -688,8 +823,8 @@ class qinglong {
         return result.data ?? result;
     }
 }
-exports.qinglong = qinglong;
-class smallcat {
+exports.QingLong = QingLong;
+class SmallCat {
     id = 0;
     uuid = "";
     name = "";
@@ -713,9 +848,12 @@ class smallcat {
     }
     async request(method, path, body, query) {
         await this.ready;
+        const headers = { auth: String(this.panel.api_auth || "") };
+        if (body !== undefined && body !== null)
+            headers["Content-Type"] = "application/json";
         const response = await fetch(`${this.address}${normalizeRuntimePath(path, "")}${queryString(query || {})}`, {
             method: String(method || "GET").toUpperCase(),
-            headers: Object.assign({ auth: this.panel.api_auth || "" }, body === undefined || body === null ? {} : { "Content-Type": "application/json" }),
+            headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
         });
         const text = await response.text();
@@ -745,8 +883,8 @@ class smallcat {
         return this.request("POST", "/wx/code", body);
     }
 }
-exports.smallcat = smallcat;
-class daidai {
+exports.SmallCat = SmallCat;
+class DaiDai {
     id = 0;
     uuid = "";
     name = "";
@@ -790,19 +928,20 @@ class daidai {
     }
     async request(method, path, body, query) {
         await this.ensureToken();
+        const headers = { Authorization: `Bearer ${this.token}` };
+        if (body !== undefined && body !== null)
+            headers["Content-Type"] = "application/json";
         const response = await fetch(`${this.address}${normalizeRuntimePath(path, "/api")}${queryString(query || {})}`, {
             method: String(method || "GET").toUpperCase(),
-            headers: Object.assign({ Authorization: `Bearer ${this.token}` }, body === undefined || body === null ? {} : { "Content-Type": "application/json" }),
+            headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
         });
         const text = await response.text();
         const result = text ? JSON.parse(text) : {};
-        if (!response.ok) {
+        if (!response.ok)
             throw new Error(result.message || result.error || `呆呆面板接口 HTTP ${response.status}`);
-        }
-        if (result.success === false) {
+        if (result.success === false)
             throw new Error(result.message || result.error || "呆呆面板接口请求失败");
-        }
         return result;
     }
     async getEnvs(options) {
@@ -886,10 +1025,10 @@ class daidai {
         return this.request("POST", "/notifications/send", { title, content });
     }
 }
-exports.daidai = daidai;
-globalThis.qinglong = qinglong;
-globalThis.smallcat = smallcat;
-globalThis.daidai = daidai;
+exports.DaiDai = DaiDai;
+globalThis.QingLong = QingLong;
+globalThis.SmallCat = SmallCat;
+globalThis.DaiDai = DaiDai;
 class Adapter {
     platform;
     bot_id;
@@ -999,7 +1138,6 @@ exports.sender = sender;
 async function sleep(ms = 1000) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
-exports.sleep = sleep;
 class Console {
     error = (message, ...optionalParams) => { };
     info = (message, ...optionalParams) => { };
