@@ -266,7 +266,15 @@ const nodeRuntimePreloadScript = `
         body: body == null ? undefined : JSON.stringify(body),
       });
       const text = await resp.text();
-      return text ? JSON.parse(text) : {};
+      if (!String(text || "").trim()) return {};
+      try { return JSON.parse(text); } catch (err) {
+        const start = text.indexOf("{");
+        const end = text.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+          try { return JSON.parse(text.slice(start, end + 1)); } catch (_) {}
+        }
+        throw new Error("smallcat 接口返回非 JSON：" + String(text || "").slice(0, 120));
+      }
     }
     createQr(type) { return this.request("POST", "/api/qr/start", type && typeof type === "object" ? type : { type }); }
     checkQr(uuid) { return this.request("GET", "/api/qr/status", undefined, { uuid }); }
@@ -274,9 +282,11 @@ const nodeRuntimePreloadScript = `
     userList() { return this.request("GET", "/api/accounts"); }
     getCode(options) {
       const body = Object.assign({}, options || {});
-      if (!body.openid && body.ref) body.openid = body.ref;
-      if (!body.appid) body.appid = body.app_id || body.target_appid;
       return this.request("POST", "/wx/code", body);
+    }
+    getUserInfo(options) {
+      const body = Object.assign({}, options || {});
+      return this.request("POST", "/wx/getuserinfo", body);
     }
   }
 

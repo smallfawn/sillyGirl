@@ -220,6 +220,7 @@ const sc = new SmallCat({ id: 1 });
 | `addUser(options)` | 添加用户，参数 `{ code, type, displayName? }` |
 | `userList()` | 获取用户列表 |
 | `getCode(options)` | 获取小程序 code，参数 `{ openid, appid }`，返回 smallcat API 原始 JSON |
+| `getUserInfo(options)` | 获取小程序用户信息，参数 `{ openid, appid }`，返回 smallcat API 原始 JSON |
 | `request(method, path, body, query)` | 调用其他 smallcat API |
 
 示例：
@@ -240,6 +241,12 @@ const code = sc.getCode({
   appid: "wx1234567890abcdef",
 });
 s.reply(JSON.stringify(code));
+
+const userInfo = sc.getUserInfo({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+s.reply(JSON.stringify(userInfo));
 ```
 
 smallcat 返回值保持原始 API 响应，不额外改写。

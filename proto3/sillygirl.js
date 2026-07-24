@@ -858,9 +858,22 @@ class SmallCat {
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
         });
         const text = await response.text();
-        if (!text)
+        if (!String(text || "").trim())
             return {};
-        return JSON.parse(text);
+        try {
+            return JSON.parse(text);
+        }
+        catch (err) {
+            const start = text.indexOf("{");
+            const end = text.lastIndexOf("}");
+            if (start >= 0 && end > start) {
+                try {
+                    return JSON.parse(text.slice(start, end + 1));
+                }
+                catch (_) { }
+            }
+            throw new Error("smallcat 接口返回非 JSON：" + String(text || "").slice(0, 120));
+        }
     }
     createQr(type) {
         const body = typeof type === "object" && type !== null ? type : { type };
@@ -877,11 +890,11 @@ class SmallCat {
     }
     getCode(options) {
         const body = Object.assign({}, options || {});
-        if (!body.openid && body.ref)
-            body.openid = body.ref;
-        if (!body.appid)
-            body.appid = body.app_id || body.target_appid;
         return this.request("POST", "/wx/code", body);
+    }
+    getUserInfo(options) {
+        const body = Object.assign({}, options || {});
+        return this.request("POST", "/wx/getuserinfo", body);
     }
 }
 exports.SmallCat = SmallCat;

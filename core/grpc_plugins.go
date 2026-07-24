@@ -481,7 +481,8 @@ declare class SmallCat {
 	checkQr(uuid: string): Promise<any>;
 	addUser(options: { code: string; type: number | string; displayName?: string }): Promise<any>;
 	userList(): Promise<any>;
-	getCode(options: { openid?: string; appid?: string; ref?: string; app_id?: string; target_appid?: string }): Promise<any>;
+	getCode(options: { openid: string; appid: string }): Promise<any>;
+	getUserInfo(options: { openid: string; appid: string }): Promise<any>;
 }
 declare class DaiDai {
 	id: number;

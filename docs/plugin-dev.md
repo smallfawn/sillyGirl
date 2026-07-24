@@ -415,7 +415,8 @@ sc.address  // smallcat 地址
 | `checkQr(uuid)` | `GET /api/qr/status?uuid=...` | 二维码 UUID | 原始 API 响应 |
 | `addUser(options)` | `POST /api/accounts/add` | `{ code, type, displayName? }` | 原始 API 响应 |
 | `userList()` | `GET /api/accounts` | 无 | 原始 API 响应 |
-| `getCode(options)` | `POST /wx/code` | `{ openid, appid }`，也兼容 `{ ref, app_id }` | 原始 API 响应 |
+| `getCode(options)` | `POST /wx/code` | `{ openid, appid }` | 原始 API 响应 |
+| `getUserInfo(options)` | `POST /wx/getuserinfo` | `{ openid, appid }` | 原始 API 响应 |
 | `request(method, path, body, query)` | 任意 smallcat API | 自定义方法、路径、请求体、查询参数 | 原始 API 响应 |
 
 smallcat 运行时不会改写 API 返回。脚本收到的就是 smallcat 原始 JSON，一般结构为：
@@ -461,6 +462,12 @@ const code = sc.getCode({
   appid: "wx1234567890abcdef",
 });
 console.log(code.status, code.message, code.data);
+
+const userInfo = sc.getUserInfo({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+console.log(userInfo.status, userInfo.message, userInfo.data);
 ```
 
 注意：

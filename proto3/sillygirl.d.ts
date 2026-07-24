@@ -166,11 +166,12 @@ declare class SmallCat {
     }): Promise<any>;
     userList(): Promise<any>;
     getCode(options: {
-        openid?: string;
-        appid?: string;
-        ref?: string;
-        app_id?: string;
-        target_appid?: string;
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    getUserInfo(options: {
+        openid: string;
+        appid: string;
     }): Promise<any>;
 }
 declare class DaiDai {
