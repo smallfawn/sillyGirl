@@ -267,6 +267,8 @@ func AddNodePlugin(path, name, class string) error {
 		}
 		cmd.Env = append(cmd.Env, "RUNTIME_ID="+RUNTIME_ID)
 		cmd.Env = append(cmd.Env, "PLUGIN_ID="+uuid)
+		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_ADDR="+grpcClientAddress())
+		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_TOKEN="+grpcRuntimeMetadataToken())
 		if class == NODE {
 			cmd.Env = append(cmd.Env, "PLUGIN_CONFIG_JSON="+string(utils.JsonMarshal(getPluginUserConfig(uuid))))
 		}

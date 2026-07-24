@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY frontend ./frontend
 RUN mkdir -p core/admin && cd frontend && npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.22-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.5-bookworm AS builder
 ARG VERSION=dev
 ARG TARGETOS
 ARG TARGETARCH

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -15,20 +17,32 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/smallfawn/sillyGirl/core/storage"
 	"github.com/smallfawn/sillyGirl/utils"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var authBucket = MakeBucket("auths")
 var auths = []*Auth{}
 var password = ""
 var setupLock sync.Mutex
+var loginAttemptLock sync.Mutex
+var loginAttempts = map[string]*loginAttemptState{}
 
 const adminJWTExpireSeconds = 86400
+const adminPasswordHashCost = bcrypt.DefaultCost
+const loginAttemptWindow = 15 * time.Minute
+const maxLoginAttempts = 5
 
 type adminJWTClaims struct {
 	Sub string `json:"sub"`
 	JTI string `json:"jti"`
 	Iat int64  `json:"iat"`
 	Exp int64  `json:"exp"`
+}
+
+type loginAttemptState struct {
+	Count     int
+	FirstSeen time.Time
+	LockedTil time.Time
 }
 
 func init() {
@@ -56,12 +70,26 @@ func init() {
 	// console.Info("可视化面板临时账号密码：%s %s", name, password)
 	// }
 	storage.Watch(sillyGirl, "password", func(old, new, key string) *storage.Final {
+		new = strings.TrimSpace(new)
 		if new == "" {
+			password = ""
 			return &storage.Final{
 				Now: new,
 			}
 		}
-		password, _ = EncryptByAes([]byte(new))
+		if isAdminPasswordHash(new) {
+			password = new
+			return &storage.Final{
+				Now: new,
+			}
+		}
+		hashed, err := hashAdminPassword(new)
+		if err != nil {
+			return &storage.Final{
+				Error: err,
+			}
+		}
+		password = hashed
 		return &storage.Final{
 			Now: password,
 		}
@@ -129,6 +157,7 @@ func init() {
 			Username string `json:"username"`
 		}{}
 		json.NewDecoder(ctx.Request.Body).Decode(&auth)
+		auth.Username = strings.TrimSpace(auth.Username)
 		if strings.TrimSpace(password) == "" {
 			ctx.JSON(200, map[string]interface{}{
 				"success":          true,
@@ -139,8 +168,18 @@ func init() {
 			})
 			return
 		}
-		epassword, _ := EncryptByAes([]byte(auth.Password))
-		if (auth.Password == password || epassword == password) && auth.Username == name {
+		if loginAttemptBlocked(ctx, auth.Username) {
+			ctx.JSON(200, map[string]interface{}{
+				"success":          true,
+				"status":           "error",
+				"type":             "account",
+				"currentAuthority": "guest",
+				"errorMessage":     "登录失败次数过多，请稍后再试",
+			})
+			return
+		}
+		if verifyAdminPassword(auth.Password) && auth.Username == name {
+			clearLoginAttempts(ctx, auth.Username)
 			token, err := createAdminJWTSession(ctx, name)
 			if err != nil {
 				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
@@ -156,6 +195,7 @@ func init() {
 				"expiresIn":        adminJWTExpireSeconds,
 			})
 		} else {
+			recordFailedLoginAttempt(ctx, auth.Username)
 			ctx.JSON(200, map[string]interface{}{
 				"success":          true,
 				"status":           "error",
@@ -428,7 +468,8 @@ func createAdminJWTSession(ctx *gin.Context, username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ctx.SetCookie("token", token, adminJWTExpireSeconds, "/", "", false, true)
+	ctx.SetSameSite(http.SameSiteLaxMode)
+	ctx.SetCookie("token", token, adminJWTExpireSeconds, "/", "", adminCookieSecure(ctx), true)
 	return token, nil
 }
 
@@ -514,6 +555,85 @@ func signAdminJWTPart(unsigned string) string {
 func adminJWTSecret() []byte {
 	sum := sha256.Sum256([]byte(GetMachineID() + "|" + password + "|sillyGirl-admin-jwt"))
 	return sum[:]
+}
+
+func hashAdminPassword(raw string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(raw), adminPasswordHashCost)
+	return string(hash), err
+}
+
+func isAdminPasswordHash(value string) bool {
+	return strings.HasPrefix(value, "$2a$") || strings.HasPrefix(value, "$2b$") || strings.HasPrefix(value, "$2y$")
+}
+
+func verifyAdminPassword(raw string) bool {
+	stored := strings.TrimSpace(password)
+	if stored == "" {
+		return false
+	}
+	if isAdminPasswordHash(stored) {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(raw)) == nil
+	}
+	legacyEncrypted, _ := EncryptByAes([]byte(raw))
+	if raw == stored || legacyEncrypted == stored {
+		if hashed, err := hashAdminPassword(raw); err == nil {
+			sillyGirl.Set("password", hashed)
+			password = hashed
+		}
+		return true
+	}
+	return false
+}
+
+func adminCookieSecure(ctx *gin.Context) bool {
+	if strings.EqualFold(strings.TrimSpace(sillyGirl.GetString("secure_cookie")), "true") ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("SILLYGIRL_SECURE_COOKIE")), "true") {
+		return true
+	}
+	return ctx.Request.TLS != nil || strings.EqualFold(ctx.GetHeader("X-Forwarded-Proto"), "https")
+}
+
+func loginAttemptKey(ctx *gin.Context, username string) string {
+	return ctx.ClientIP() + "|" + strings.ToLower(strings.TrimSpace(username))
+}
+
+func loginAttemptBlocked(ctx *gin.Context, username string) bool {
+	loginAttemptLock.Lock()
+	defer loginAttemptLock.Unlock()
+	state := loginAttempts[loginAttemptKey(ctx, username)]
+	if state == nil {
+		return false
+	}
+	now := time.Now()
+	if !state.LockedTil.IsZero() && state.LockedTil.After(now) {
+		return true
+	}
+	if now.Sub(state.FirstSeen) > loginAttemptWindow {
+		delete(loginAttempts, loginAttemptKey(ctx, username))
+	}
+	return false
+}
+
+func recordFailedLoginAttempt(ctx *gin.Context, username string) {
+	loginAttemptLock.Lock()
+	defer loginAttemptLock.Unlock()
+	key := loginAttemptKey(ctx, username)
+	now := time.Now()
+	state := loginAttempts[key]
+	if state == nil || now.Sub(state.FirstSeen) > loginAttemptWindow {
+		state = &loginAttemptState{FirstSeen: now}
+		loginAttempts[key] = state
+	}
+	state.Count++
+	if state.Count >= maxLoginAttempts {
+		state.LockedTil = now.Add(loginAttemptWindow)
+	}
+}
+
+func clearLoginAttempts(ctx *gin.Context, username string) {
+	loginAttemptLock.Lock()
+	defer loginAttemptLock.Unlock()
+	delete(loginAttempts, loginAttemptKey(ctx, username))
 }
 
 func ValidAuths() []*Auth {

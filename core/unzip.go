@@ -16,6 +16,7 @@ func unzip(filename string, perm fs.FileMode) error {
 	}
 	defer zipFile.Close()
 	top := ""
+	baseDir := filepath.Clean(filepath.Dir(filename))
 	for i := range zipFile.File {
 		file := zipFile.File[i]
 		if top == "" {
@@ -24,7 +25,11 @@ func unzip(filename string, perm fs.FileMode) error {
 		if strings.HasPrefix(file.Name, "__MACOSX/") {
 			continue
 		}
-		path := filepath.Join(filepath.Dir(filename), file.Name)
+		path := filepath.Clean(filepath.Join(baseDir, file.Name))
+		rel, err := filepath.Rel(baseDir, path)
+		if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+			continue
+		}
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(path, perm); err != nil {
 				return err

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beego/beego/v2/adapter/httplib"
+	"github.com/beego/beego/v2/client/httplib"
 	"github.com/goccy/go-json"
 	"github.com/smallfawn/sillyGirl/core/common"
 	"github.com/smallfawn/sillyGirl/core/storage"

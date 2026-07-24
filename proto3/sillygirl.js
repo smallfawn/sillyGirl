@@ -28,11 +28,12 @@ const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
 grpc_1.setLogVerbosity(grpc_1.logVerbosity.NONE);
-let client = new srpc_1.srpc.SillyGirlServiceClient("localhost:50051", grpc_1.credentials.createInsecure());
+let client = new srpc_1.srpc.SillyGirlServiceClient(process.env?.SILLYGIRL_GRPC_ADDR || "127.0.0.1:50051", grpc_1.credentials.createInsecure());
 let senders = [];
 let plugin_id = process.env?.PLUGIN_ID ?? "";
 const metadata = new grpc_1.Metadata();
 metadata.add("RUNTIME_ID", process.env?.RUNTIME_ID ?? "");
+metadata.add("sillygirl-runtime-token", process.env?.SILLYGIRL_GRPC_TOKEN ?? "");
 class Sender {
     uuid;
     destoried = false;

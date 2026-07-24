@@ -3,7 +3,7 @@ package core
 import (
 	"time"
 
-	"github.com/beego/beego/v2/adapter/httplib"
+	"github.com/beego/beego/v2/client/httplib"
 	"github.com/smallfawn/sillyGirl/core/storage"
 	"github.com/smallfawn/sillyGirl/utils"
 )

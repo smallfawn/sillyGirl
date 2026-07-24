@@ -30,17 +30,42 @@ var Handle = make(map[string]func(c *gin.Context))
 func Cors() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		method := c.Request.Method
-		c.Header("Access-Control-Allow-Origin", "*")
+		if origin := allowedCORSOrigin(c); origin != "" {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Credentials", "true")
+			c.Header("Vary", "Origin")
+		}
 		c.Header("Access-Control-Allow-Headers", "Content-Type,AccessToken,X-CSRF-Token, Authorization, Token")
 		c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE,UPDATE") //服务器支持的所有跨域请求的方
 		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
-		c.Header("Access-Control-Allow-Credentials", "true")
 		if method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
 		}
 		// 处理请求
 		c.Next()
 	}
+}
+
+func allowedCORSOrigin(c *gin.Context) string {
+	origin := strings.TrimSpace(c.GetHeader("Origin"))
+	if origin == "" {
+		return ""
+	}
+	configured := strings.TrimSpace(firstNonEmpty(os.Getenv("SILLYGIRL_CORS_ORIGINS"), sillyGirl.GetString("cors_origins")))
+	if configured != "" {
+		for _, item := range strings.Split(configured, ",") {
+			if strings.TrimSpace(item) == origin {
+				return origin
+			}
+		}
+		return ""
+	}
+	if strings.HasPrefix(origin, "http://127.0.0.1:") ||
+		strings.HasPrefix(origin, "http://localhost:") ||
+		strings.HasPrefix(origin, "http://[::1]:") {
+		return origin
+	}
+	return ""
 }
 
 func SecurityHeaders() gin.HandlerFunc {
