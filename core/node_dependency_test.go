@@ -182,6 +182,142 @@ func TestNormalizeNodeScriptFileName(t *testing.T) {
 	}
 }
 
+func TestFinishNodeDependencyInstallRetriesPluginConfigSchema(t *testing.T) {
+	if _, err := resolveNodeCommand(); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+
+	dataHome := t.TempDir()
+	t.Setenv("SILLYGIRL_DATA_PATH", dataHome)
+	root := filepath.Join(dataHome, "plugins")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	pluginName := "dependency-form-retry"
+	uuid := nameUuid(pluginName)
+	pluginConfigSchemas.Set(uuid, "")
+	t.Cleanup(func() {
+		pluginConfigSchemas.Set(uuid, "")
+	})
+	pluginPath := filepath.Join(root, pluginName+".js")
+	plugin := `
+/**
+ * @title Dependency form retry
+ * @form true
+ */
+const helper = require("schema-helper-retry");
+if (typeof helper.schemaTitle !== "string") {
+  throw new Error("schema helper dependency is unavailable");
+}
+const { sillyGirlCreateSchema, SillyGirlPluginConfig } = require("sillygirl");
+new SillyGirlPluginConfig(sillyGirlCreateSchema.object({
+  token: sillyGirlCreateSchema.string().setTitle(helper.schemaTitle)
+}));
+`
+	if err := os.WriteFile(pluginPath, []byte(plugin), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	registrationErr := registerNodePluginConfigSchema(pluginPath, uuid)
+	if registrationErr == nil {
+		t.Fatal("config registration should fail before the dependency is installed")
+	}
+	t.Logf("baseline without dependency: %v", registrationErr)
+	if got := pluginConfigSchemas.GetString(uuid); got != "" {
+		t.Fatalf("schema should still be empty before dependency install: %s", got)
+	}
+
+	moduleDir := filepath.Join(root, "node_modules", "schema-helper-retry")
+	if err := os.MkdirAll(moduleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "index.js"), []byte(`module.exports = { schemaTitle: "Dependency Token" };`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := finishNodeDependencyInstall(root, pluginName, "dependency installed")
+	if output != "dependency installed" {
+		t.Fatalf("unexpected post-install warning: %s", output)
+	}
+	got := pluginConfigSchemas.GetString(uuid)
+	if !strings.Contains(got, `"token"`) || !strings.Contains(got, `"Dependency Token"`) {
+		t.Fatalf("schema was not retried after dependency install: %s", got)
+	}
+	t.Logf("modified after dependency install: %s", got)
+}
+
+func TestFinishPythonDependencyInstallRetriesPluginConfigSchema(t *testing.T) {
+	if _, _, err := resolvePythonCommand(); err != nil {
+		t.Skipf("python 3.12 not available: %v", err)
+	}
+	if _, err := resolvePipxCommand(); err != nil {
+		t.Skipf("pipx not available: %v", err)
+	}
+
+	dataHome := t.TempDir()
+	t.Setenv("SILLYGIRL_DATA_PATH", dataHome)
+	root := filepath.Join(dataHome, "plugins")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	pluginName := "python-dependency-form-retry"
+	uuid := nameUuid(pluginName)
+	pluginConfigSchemas.Set(uuid, "")
+	t.Cleanup(func() {
+		pluginConfigSchemas.Set(uuid, "")
+	})
+	pluginPath := filepath.Join(root, pluginName+".py")
+	plugin := `
+"""
+@title Python dependency form retry
+@form true
+"""
+import schema_helper_retry
+
+if schema_helper_retry.SCHEMA_TITLE != "Dependency Token":
+    raise RuntimeError("schema helper dependency is unavailable")
+
+from sillygirl import sillyGirlCreateSchema, SillyGirlPluginConfig
+
+SillyGirlPluginConfig(sillyGirlCreateSchema.object({
+    "token": sillyGirlCreateSchema.string().setTitle(schema_helper_retry.SCHEMA_TITLE)
+}))
+`
+	if err := os.WriteFile(pluginPath, []byte(plugin), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	registrationErr := registerPythonPluginConfigSchema(pluginPath, uuid)
+	if registrationErr == nil {
+		t.Fatal("config registration should fail before the Python dependency is installed")
+	}
+	t.Logf("baseline without Python dependency: %v", registrationErr)
+	if got := pluginConfigSchemas.GetString(uuid); got != "" {
+		t.Fatalf("schema should still be empty before Python dependency install: %s", got)
+	}
+
+	moduleDir := pythonPackagesDir()
+	if err := os.MkdirAll(moduleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	modulePath := filepath.Join(moduleDir, "schema_helper_retry.py")
+	if err := os.WriteFile(modulePath, []byte(`SCHEMA_TITLE = "Dependency Token"`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := finishPythonDependencyInstall(pluginName, "dependency installed")
+	if output != "dependency installed" {
+		t.Fatalf("unexpected Python post-install warning: %s", output)
+	}
+	got := pluginConfigSchemas.GetString(uuid)
+	if !strings.Contains(got, `"token"`) || !strings.Contains(got, `"Dependency Token"`) {
+		t.Fatalf("Python schema was not retried after dependency install: %s", got)
+	}
+	t.Logf("modified after Python dependency install: %s", got)
+}
+
 func TestNormalizePythonDependencyName(t *testing.T) {
 	tests := map[string]string{
 		"requests==2.32.0":   "requests",

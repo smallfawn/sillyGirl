@@ -27,17 +27,11 @@ func init() {
 	})
 }
 
-var machine_id = ""
-
 var GetMachineID = func() string {
-	var id = ""
-	if id == "" {
-		id = sillyGirl.GetString("machine_id")
-	}
+	id := sillyGirl.GetString("machine_id")
 	if id == "" {
 		id = protect(utils.GenUUID(), "sillyGirl")
 		sillyGirl.Set("machine_id", id)
 	}
-	machine_id = id
 	return id
 }

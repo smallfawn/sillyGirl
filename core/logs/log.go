@@ -789,9 +789,9 @@ func Trace(f interface{}, v ...interface{}) {
 
 func formatPattern(f interface{}, v ...interface{}) string {
 	var msg string
-	switch f.(type) {
+	switch f := f.(type) {
 	case string:
-		msg = f.(string)
+		msg = f
 		if len(v) == 0 {
 			return msg
 		}

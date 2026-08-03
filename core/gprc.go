@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/smallfawn/sillyGirl/proto3/srpc"
@@ -26,7 +27,8 @@ func init() {
 	go func() {
 		lis, err := net.Listen("tcp", grpcListenAddress())
 		if err != nil {
-			log.Fatalf("failed to listen: %v", err)
+			log.Printf("gRPC runtime listen failed: %v", err)
+			return
 		}
 		s := grpc.NewServer(
 			grpc.UnaryInterceptor(grpcUnaryAuthInterceptor),
@@ -35,7 +37,7 @@ func init() {
 		srpc.RegisterSillyGirlServiceServer(s, &SillyGirlService{})
 		// log.Printf("grpc server listening at %v", lis.Addr())
 		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
+			log.Printf("gRPC runtime serve failed: %v", err)
 		}
 	}()
 }
@@ -43,6 +45,10 @@ func init() {
 func grpcListenAddress() string {
 	address := strings.TrimSpace(os.Getenv("SILLYGIRL_GRPC_ADDR"))
 	if address == "" {
+		name := strings.ToLower(filepath.Base(os.Args[0]))
+		if strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".test.exe") {
+			return "127.0.0.1:0"
+		}
 		return "127.0.0.1:50051"
 	}
 	return address

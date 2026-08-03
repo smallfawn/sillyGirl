@@ -328,7 +328,10 @@ func (f *Factory) Destroy() {
 	f.destroid = true
 	f.cancel()
 	close(f.msgChan)
-	delete(Bots, [2]string{f.botplt, f.botid})
+	key := [2]string{f.botplt, f.botid}
+	if current, ok := Bots[key]; ok && current == f {
+		delete(Bots, key)
+	}
 	botid := ""
 	if f.botid != "" {
 		botid = fmt.Sprintf("(%s)", f.botid)

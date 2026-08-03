@@ -191,13 +191,12 @@ func addNodePluginLocked(path, name, class string) error {
 		}
 	}
 	//移除
-	var rf *common.Function
 	if script == "" {
-		rf = unloadNodePluginLocked(uuid)
+		unloadNodePluginLocked(uuid)
 		nodePluginSourceHashCache.Delete(cleanPath)
 		return nil
 	}
-	rf = unloadNodePluginLocked(uuid)
+	rf := unloadNodePluginLocked(uuid)
 	// plugins_id.Store(uuid, path)
 	// fmt.Println("add,", uuid, name)
 	f, cbs := pluginParse(script, uuid)

@@ -48,3 +48,8 @@ language
 .VSCodeCounter
 security-test/
 security-pentest/
+.codex-artifacts/
+.tmp-proto-venv/
+.tmp-*.log
+**/__pycache__/
+/skills.md

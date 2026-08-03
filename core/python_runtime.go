@@ -18,6 +18,93 @@ import (
 
 const pythonRequiredVersion = "3.12"
 
+// pythonConfigPreloadScript mirrors the Node config-registration preload: real
+// modules are preferred, while imports that are still absent during the first
+// plugin install resolve to an inert placeholder. This lets a top-level
+// SillyGirlPluginConfig/form call export its schema before @depe packages are
+// installed, without hiding syntax errors or other runtime exceptions.
+const pythonConfigPreloadScript = `
+from __future__ import annotations
+
+import importlib.abc
+import importlib.util
+import runpy
+import sys
+import types
+
+
+class _SillyGirlMissingDependency(str):
+    def __new__(cls):
+        return super().__new__(cls, "")
+
+    def __getattr__(self, _name):
+        return self
+
+    def __call__(self, *_args, **_kwargs):
+        return self
+
+    def __getitem__(self, _key):
+        return self
+
+    def __iter__(self):
+        return iter(())
+
+    def __await__(self):
+        async def _done():
+            return self
+        return _done().__await__()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def __mro_entries__(self, _bases):
+        return (object,)
+
+
+_MISSING_VALUE = _SillyGirlMissingDependency()
+
+
+class _SillyGirlMissingModule(types.ModuleType):
+    def __init__(self, name):
+        super().__init__(name)
+        self.__path__ = []
+        self.__all__ = []
+
+    def __getattr__(self, _name):
+        return _MISSING_VALUE
+
+
+class _SillyGirlMissingImportFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    def find_spec(self, fullname, _path=None, _target=None):
+        return importlib.util.spec_from_loader(fullname, self, is_package=True)
+
+    def create_module(self, spec):
+        return _SillyGirlMissingModule(spec.name)
+
+    def exec_module(self, _module):
+        return None
+
+
+# Appending keeps built-in, stdlib, local and installed packages authoritative.
+# The finder runs only after the normal import machinery found no module.
+sys.meta_path.append(_SillyGirlMissingImportFinder())
+sys.dont_write_bytecode = True
+
+if len(sys.argv) != 2:
+    raise SystemExit("usage: sillygirl-config-preload.py PLUGIN_PATH")
+
+runpy.run_path(sys.argv[1], run_name="__main__")
+`
+
 var pythonSillygirlModuleCache sync.Map
 var pythonPathEnvCache sync.Map
 var pythonCommandCache = struct {
@@ -51,6 +138,14 @@ func ensurePythonSillygirlModule() (string, error) {
 	}
 	pythonSillygirlModuleCache.Store(dir, true)
 	return dir, nil
+}
+
+func ensurePythonConfigPreload(runtimePath string) (string, error) {
+	path := filepath.Join(runtimePath, "sillygirl-config-preload.py")
+	if err := writeFileIfChanged(path, []byte(pythonConfigPreloadScript), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func validatePythonRuntimePath(dir string) error {
@@ -220,6 +315,10 @@ func registerPythonPluginConfigSchema(path, uuid string) error {
 	if err != nil {
 		return err
 	}
+	preload, err := ensurePythonConfigPreload(pythonPath)
+	if err != nil {
+		return err
+	}
 	if err := ensurePipxRuntimeEnv(); err != nil {
 		return err
 	}
@@ -233,7 +332,7 @@ func registerPythonPluginConfigSchema(path, uuid string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmdArgs := append(append([]string{}, args...), "-u", path)
+	cmdArgs := append(append([]string{}, args...), "-u", preload, path)
 	cmd := exec.CommandContext(ctx, bin, cmdArgs...)
 	cmd.Dir = nodePluginWorkDir(path)
 	env := pythonRuntimeEnvVars(pythonPath)

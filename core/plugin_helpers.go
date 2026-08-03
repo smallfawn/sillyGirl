@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"github.com/beego/beego/v2/client/httplib"
 )
 
 type ScriptUtils struct {
@@ -117,23 +115,6 @@ func DecryptPlugin(script string) string {
 		return script
 	}
 	return fmt.Sprintf("%s%s", su.script, str)
-}
-
-func fetchScript(address, uuid string) (data []byte) {
-	if strings.HasPrefix(address, "http://") || strings.HasPrefix(address, "https://") {
-		if strings.HasSuffix(strings.ToLower(address), ".js") {
-			data, _ = httplib.Get(address).Bytes()
-			return
-		}
-	}
-	prefix := "?uuid=" + uuid
-	if !strings.HasSuffix(address, "list.json") {
-		address = address + "/api/plugins/download" + prefix
-	} else {
-		address = strings.ReplaceAll(address, "list.json", "download"+prefix)
-	}
-	data, _ = httplib.Get(address).Bytes()
-	return
 }
 
 func formatRule(rule string) []string {

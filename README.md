@@ -466,7 +466,7 @@ task.remove(ret.id);
 | 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new QingLong({ id })` 调用 |
 | smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new SmallCat({ id })` 调用 |
 | 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new DaiDai({ id })` 调用 |
-| 适配器 | 内置微信 ClawBot、QQ、Telegram Bot、Web、Pagermaid 适配器；Pagermaid 端只需放置轻量桥接脚本 |
+| 适配器 | 内置微信 ClawBot、QQ/OneBot、Telegram Bot、钉钉 Stream、QQ 官方频道 Webhook、Web、Pagermaid 适配器 |
 | 定时任务 | 支持 Cron 表达式、`node 插件名.js` 和 `python 插件名.py` 脚本触发 |
 | Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub 镜像 |
 
@@ -555,6 +555,49 @@ SillyGirl 侧配置：
 4. 保存后适配器会自动重启；日志出现 `telegram机器人(...)轮询已启动` 即表示接入成功。
 
 Telegram 当前使用 Bot API 长轮询模式，启动时会调用 `deleteWebhook`。如果这个 Bot 之前设置过 webhook，程序会自动清理后再开始轮询。
+
+### 钉钉机器人
+
+钉钉适配器基于官方 [dingtalk-stream-sdk-go](https://github.com/open-dingtalk/dingtalk-stream-sdk-go) 使用 Stream 模式收消息，不需要暴露公网回调地址；文本回复通过消息携带的 `sessionWebhook` 发回原会话。
+
+| 存储桶 | 键 | 说明 |
+|------|----|------|
+| `dingtalk` | `client_id` | 钉钉开放平台应用的 Client ID（原 AppKey） |
+| `dingtalk` | `client_secret` | 钉钉开放平台应用的 Client Secret（原 AppSecret） |
+| `dingtalk` | `enable` | 可选，设为 `false` 时禁用 |
+| `dingtalk` | `debug` | 可选，设为 `true` 时输出收发消息调试日志 |
+
+接入步骤：
+
+1. 在钉钉开放平台创建机器人应用，启用机器人能力并选择 Stream 模式。
+2. 在 Admin 面板「BOT」填写 `Client ID` 与 `Client Secret`。
+3. 保存后日志出现 `dingtalk机器人(...) Stream 已连接` 即表示接入成功。
+
+`sessionWebhook` 有时效；普通规则回复会直接复用当前消息上下文，主动推送只会使用该用户或群最近一次仍有效的会话地址。
+
+### QQ 官方频道机器人
+
+该适配器和现有 `QQ / OneBot` 相互独立，平台名为 `qqguild`。它基于腾讯官方 [BotGo](https://github.com/tencent-connect/botgo) 的 HTTP Webhook 事件回调，支持频道消息、频道 `@机器人` 消息和频道私信，并通过官方 OpenAPI 回复。
+
+Webhook 地址：
+
+```text
+https://<SillyGirl域名>/qqguild/webhook
+```
+
+| 存储桶 | 键 | 说明 |
+|------|----|------|
+| `qqguild` | `app_id` | QQ 开放平台机器人的 AppID |
+| `qqguild` | `app_secret` | QQ 开放平台机器人的 AppSecret |
+| `qqguild` | `enable` | 可选，设为 `false` 时禁用 |
+| `qqguild` | `sandbox` | 可选，设为 `true` 时使用 BotGo 沙箱 OpenAPI |
+| `qqguild` | `debug` | 可选，设为 `true` 时输出收发消息调试日志 |
+
+接入步骤：
+
+1. 在 QQ 开放平台创建频道机器人，配置需要的消息事件权限。
+2. 给 SillyGirl 配置可公网访问的 HTTPS 域名，把上面的 Webhook 地址填入机器人事件回调并完成平台校验。
+3. 在 Admin 面板「BOT」填写 `AppID` 与 `AppSecret`，保存后日志出现 `qqguild机器人(...) Webhook 已就绪`。
 
 ### Pagermaid
 

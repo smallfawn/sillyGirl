@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/smallfawn/sillyGirl/emoji"
 	"github.com/smallfawn/sillyGirl/utils"
@@ -138,7 +137,6 @@ func (sender *Strings) Random(length int, substr string) string {
 	if substr != "" {
 		ws = substr
 	}
-	rand.Seed(time.Now().UnixNano())
 	letters := []rune(ws)
 	b := make([]rune, length)
 	for i := range b {

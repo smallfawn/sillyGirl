@@ -137,9 +137,9 @@ const containerKind = ref<ContainerKind>(containerKindFromPath());
 const messageToolKind = ref<MessageToolKind>(messageToolKindFromPath());
 const selectedScriptId = ref(scriptIdFromPath());
 const mobileMenuOpen = ref(false);
-const loginModel = reactive({ username: 'admin', password: '' });
+const loginModel = reactive({ username: '', password: '' });
 const setupRequired = ref(false);
-const setupModel = reactive({ username: 'admin', password: '', confirm: '' });
+const setupModel = reactive({ username: '', password: '', confirm: '' });
 
 type AuthResponse = {
   status: string;
@@ -193,8 +193,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '1.0.0',
-    remote: info.remote || info.local || '1.0.0',
+    local: info.local || '1.0.1',
+    remote: info.remote || info.local || '1.0.1',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -409,7 +409,7 @@ async function loadSetupStatus() {
   return !!data?.initialized;
 }
 
-async function loadUser(setBooting = true) {
+async function loadUser(setBooting = true, reloadSetupOnUnauthorized = true) {
   if (setBooting) booting.value = true;
   try {
     const res = await get<ApiEnvelope<CurrentUser>>('/api/admin/currentUser');
@@ -420,7 +420,9 @@ async function loadUser(setBooting = true) {
     user.value = null;
     if (error instanceof ApiError && error.status === 401) {
       clearAuthToken();
-      await loadSetupStatus().catch(() => undefined);
+      if (reloadSetupOnUnauthorized) {
+        await loadSetupStatus().catch(() => undefined);
+      }
     }
   } finally {
     if (setBooting) booting.value = false;
@@ -492,7 +494,7 @@ async function bootApp() {
   try {
     const initialized = await loadSetupStatus();
     if (initialized) {
-      await loadUser(false);
+      await loadUser(false, false);
     } else {
       user.value = null;
     }
@@ -527,7 +529,7 @@ onBeforeUnmount(() => {
 });
 
 const scriptState = reactive({ content: '', loading: false });
-const scriptCreateState = reactive({ open: false, fileName: '新脚本.js', saving: false });
+const scriptCreateState = reactive({ open: false, fileName: '新脚本', suffix: '.js', saving: false });
 const scriptEditorHost = ref<HTMLElement | null>(null);
 const scriptEditorEditable = new Compartment();
 const scriptEditorLanguage = new Compartment();
@@ -712,15 +714,16 @@ async function removeScript() {
 }
 
 function openCreateScriptModal() {
-  scriptCreateState.fileName = '新脚本.js';
+  scriptCreateState.fileName = '新脚本';
+  scriptCreateState.suffix = '.js';
   scriptCreateState.open = true;
 }
 
 function normalizeCreateScriptFileName() {
-  const fileName = scriptCreateState.fileName.trim();
+  const fileName = scriptCreateState.fileName.trim().replace(/\.(js|py)$/i, '');
   if (!fileName) return '';
   if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) return fileName;
-  return /\.(js|py)$/i.test(fileName) ? fileName : `${fileName}.js`;
+  return `${fileName}${scriptCreateState.suffix}`;
 }
 
 async function createScript() {
@@ -731,10 +734,6 @@ async function createScript() {
   }
   if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) {
     message.error('脚本文件名不合法');
-    return;
-  }
-  if (!/\.(js|py)$/i.test(fileName)) {
-    message.error('脚本文件名必须是 .js 或 .py 文件');
     return;
   }
   scriptCreateState.saving = true;
@@ -1503,6 +1502,14 @@ const dependencyPluginOptions = computed(() => [
   { label: `全部 ${dependencyRuntimeLabel.value} 插件`, value: '' },
   ...nodeDeps.plugins.map((item) => ({ label: `${item.title || item.name} / ${item.file || scriptFileName(item)}`, value: item.name })),
 ]);
+function showDependencyInstallResult(output: unknown) {
+  const text = String(output || '').trim();
+  if (text.includes('插件配置表单重载失败：')) {
+    message.warning(text.slice(text.lastIndexOf('插件配置表单重载失败：')));
+    return;
+  }
+  message.success('依赖已安装，插件配置表单已自动重载');
+}
 async function loadNodeDependencies(plugin = nodeDeps.plugin) {
   nodeDeps.loading = true;
   try {
@@ -1539,9 +1546,9 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
   }
   nodeDeps.saving = true;
   try {
-    await post('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
+    const res = await post<ApiEnvelope<string>>('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
     after?.();
-    message.success('依赖已安装');
+    showDependencyInstallResult(apiData(res));
     await loadNodeDependencies(nodeDeps.plugin);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '依赖安装失败');
@@ -1552,8 +1559,8 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
 async function installNodeDependencyRow(row: NodeDependencyRow) {
   nodeDeps.saving = true;
   try {
-    await post('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
-    message.success('依赖已安装');
+    const res = await post<ApiEnvelope<string>>('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
+    showDependencyInstallResult(apiData(res));
     await loadNodeDependencies(nodeDeps.plugin);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '依赖安装失败');
@@ -1673,6 +1680,15 @@ type BotSettingsForm = {
   telegram_enable: boolean;
   telegram_api_base: string;
   telegram_debug: boolean;
+  dingtalk_enable: boolean;
+  dingtalk_client_id: string;
+  dingtalk_client_secret: string;
+  dingtalk_debug: boolean;
+  qqguild_enable: boolean;
+  qqguild_app_id: string;
+  qqguild_app_secret: string;
+  qqguild_sandbox: boolean;
+  qqguild_debug: boolean;
   pagermaid_enable: boolean;
   pagermaid_token: string;
   pagermaid_debug: boolean;
@@ -1713,6 +1729,15 @@ const botSettings = reactive({
     telegram_enable: true,
     telegram_api_base: 'https://api.telegram.org',
     telegram_debug: false,
+    dingtalk_enable: true,
+    dingtalk_client_id: '',
+    dingtalk_client_secret: '',
+    dingtalk_debug: false,
+    qqguild_enable: true,
+    qqguild_app_id: '',
+    qqguild_app_secret: '',
+    qqguild_sandbox: false,
+    qqguild_debug: false,
     pagermaid_enable: true,
     pagermaid_token: '',
     pagermaid_debug: false,
@@ -1846,6 +1871,15 @@ const botSettingsKeys = [
   'telegram.enable',
   'telegram.api_base',
   'telegram.debug',
+  'dingtalk.enable',
+  'dingtalk.client_id',
+  'dingtalk.client_secret',
+  'dingtalk.debug',
+  'qqguild.enable',
+  'qqguild.app_id',
+  'qqguild.app_secret',
+  'qqguild.sandbox',
+  'qqguild.debug',
   'pagermaid.enable',
   'pagermaid.token',
   'pagermaid.debug',
@@ -1855,6 +1889,10 @@ const oneBotReceiveURL = computed(() => {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.port === '5173' ? `${window.location.hostname}:8080` : window.location.host;
   return `${wsProtocol}://${host}/qq/receive`;
+});
+const qqGuildWebhookURL = computed(() => {
+  const host = window.location.port === '5173' ? `${window.location.hostname}:8080` : window.location.host;
+  return `${window.location.protocol}//${host}/qqguild/webhook`;
 });
 const pagermaidBridgeURL = computed(() => {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1886,6 +1924,15 @@ async function loadBots() {
       telegram_enable: boolSetting(data['telegram.enable'], true),
       telegram_api_base: data['telegram.api_base'] || 'https://api.telegram.org',
       telegram_debug: boolSetting(data['telegram.debug']),
+      dingtalk_enable: boolSetting(data['dingtalk.enable'], true),
+      dingtalk_client_id: data['dingtalk.client_id'] || '',
+      dingtalk_client_secret: data['dingtalk.client_secret'] || '',
+      dingtalk_debug: boolSetting(data['dingtalk.debug']),
+      qqguild_enable: boolSetting(data['qqguild.enable'], true),
+      qqguild_app_id: data['qqguild.app_id'] || '',
+      qqguild_app_secret: data['qqguild.app_secret'] || '',
+      qqguild_sandbox: boolSetting(data['qqguild.sandbox']),
+      qqguild_debug: boolSetting(data['qqguild.debug']),
       pagermaid_enable: boolSetting(data['pagermaid.enable'], true),
       pagermaid_token: data['pagermaid.token'] || '',
       pagermaid_debug: boolSetting(data['pagermaid.debug']),
@@ -1915,6 +1962,15 @@ async function saveBots() {
       'telegram.enable': !!v.telegram_enable,
       'telegram.api_base': v.telegram_api_base || 'https://api.telegram.org',
       'telegram.debug': !!v.telegram_debug,
+      'dingtalk.enable': !!v.dingtalk_enable,
+      'dingtalk.client_id': v.dingtalk_client_id || '',
+      'dingtalk.client_secret': v.dingtalk_client_secret || '',
+      'dingtalk.debug': !!v.dingtalk_debug,
+      'qqguild.enable': !!v.qqguild_enable,
+      'qqguild.app_id': v.qqguild_app_id || '',
+      'qqguild.app_secret': v.qqguild_app_secret || '',
+      'qqguild.sandbox': !!v.qqguild_sandbox,
+      'qqguild.debug': !!v.qqguild_debug,
       'pagermaid.enable': !!v.pagermaid_enable,
       'pagermaid.token': v.pagermaid_token || '',
       'pagermaid.debug': !!v.pagermaid_debug,
@@ -1930,6 +1986,8 @@ function botFormEnableKey(platform: string) {
   if (platform === 'clawbot') return 'clawbot_enable';
   if (platform === 'qq') return 'qq_enable';
   if (platform === 'telegram') return 'telegram_enable';
+  if (platform === 'dingtalk') return 'dingtalk_enable';
+  if (platform === 'qqguild') return 'qqguild_enable';
   if (platform === 'pagermaid') return 'pagermaid_enable';
   return '';
 }
@@ -2372,6 +2430,60 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <section class="bot-config-panel">
                     <div class="bot-config-header">
                       <Radio :size="16" />
+                      <Typography.Text strong>钉钉机器人</Typography.Text>
+                      <Tag :color="botStatusRows.find((item) => item.platform === 'dingtalk')?.online ? 'green' : 'default'">
+                        {{ botStatusRows.find((item) => item.platform === 'dingtalk')?.online ? '已连接' : '未连接' }}
+                      </Tag>
+                    </div>
+                    <Form layout="vertical">
+                      <Form.Item label="启用钉钉">
+                        <Switch v-model:checked="botSettings.form.dingtalk_enable" />
+                      </Form.Item>
+                      <Form.Item label="Client ID" extra="钉钉开放平台应用的 Client ID（原 AppKey）。适配器使用 Stream 模式，不需要公网回调地址。">
+                        <Input v-model:value="botSettings.form.dingtalk_client_id" placeholder="dingxxxxxxxx" />
+                      </Form.Item>
+                      <Form.Item label="Client Secret">
+                        <Input.Password v-model:value="botSettings.form.dingtalk_client_secret" placeholder="请输入 Client Secret" />
+                      </Form.Item>
+                      <Form.Item label="钉钉调试日志">
+                        <Switch v-model:checked="botSettings.form.dingtalk_debug" />
+                      </Form.Item>
+                    </Form>
+                  </section>
+
+                  <section class="bot-config-panel">
+                    <div class="bot-config-header">
+                      <Radio :size="16" />
+                      <Typography.Text strong>QQ 官方频道机器人</Typography.Text>
+                      <Tag :color="botStatusRows.find((item) => item.platform === 'qqguild')?.online ? 'green' : 'default'">
+                        {{ botStatusRows.find((item) => item.platform === 'qqguild')?.online ? '已连接' : '未连接' }}
+                      </Tag>
+                    </div>
+                    <Form layout="vertical">
+                      <Form.Item label="启用 QQ 官方频道">
+                        <Switch v-model:checked="botSettings.form.qqguild_enable" />
+                      </Form.Item>
+                      <Form.Item label="Webhook 回调地址" extra="把该地址填入 QQ 开放平台机器人事件回调；HTTPS 由反向代理提供。">
+                        <Input :value="qqGuildWebhookURL" readonly />
+                      </Form.Item>
+                      <Form.Item label="AppID">
+                        <Input v-model:value="botSettings.form.qqguild_app_id" placeholder="请输入机器人 AppID" />
+                      </Form.Item>
+                      <Form.Item label="AppSecret">
+                        <Input.Password v-model:value="botSettings.form.qqguild_app_secret" placeholder="请输入机器人 AppSecret" />
+                      </Form.Item>
+                      <Form.Item label="沙箱环境">
+                        <Switch v-model:checked="botSettings.form.qqguild_sandbox" />
+                      </Form.Item>
+                      <Form.Item label="QQ 频道调试日志">
+                        <Switch v-model:checked="botSettings.form.qqguild_debug" />
+                      </Form.Item>
+                    </Form>
+                  </section>
+
+                  <section class="bot-config-panel">
+                    <div class="bot-config-header">
+                      <Radio :size="16" />
                       <Typography.Text strong>Pagermaid</Typography.Text>
                       <Tag :color="botStatusRows.find((item) => item.platform === 'pagermaid')?.online ? 'green' : 'default'">
                         {{ botStatusRows.find((item) => item.platform === 'pagermaid')?.online ? '已连接' : '未连接' }}
@@ -2443,7 +2555,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                     </Space>
                     <Tag>{{ realScripts.length }}</Tag>
                   </div>
-                  <Input v-model:value="scriptKeyword" allow-clear placeholder="搜索脚本文件">
+                  <Input id="script-file-search" name="script-file-search" v-model:value="scriptKeyword" allow-clear placeholder="搜索脚本文件">
                     <template #prefix><Search :size="15" /></template>
                   </Input>
                   <div class="script-file-actions">
@@ -3125,8 +3237,18 @@ function smallcatOpenids(record?: AdminUserRow) {
         @ok="createScript"
       >
         <Form layout="vertical">
-          <Form.Item label="脚本文件名" required extra="会创建为 /data/plugins/文件名.js 或 .py；不填写后缀会自动补全 .js。">
-            <Input v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign.js 或 daily-sign.py" @press-enter="createScript" />
+          <Form.Item label="脚本名称" html-for="script-create-name" required extra="只填写名称，系统会按下面选择的类型自动添加后缀。">
+            <Input id="script-create-name" v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign" @press-enter="createScript" />
+          </Form.Item>
+          <Form.Item label="脚本类型" html-for="script-create-suffix" required>
+            <Select
+              id="script-create-suffix"
+              v-model:value="scriptCreateState.suffix"
+              :options="[
+                { label: 'NodeJS（.js）', value: '.js' },
+                { label: 'Python（.py）', value: '.py' },
+              ]"
+            />
           </Form.Item>
         </Form>
       </Modal>

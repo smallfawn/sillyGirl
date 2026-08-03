@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -404,13 +403,6 @@ func normalizeDependencyRuntime(runtime string) string {
 	}
 }
 
-func dependencyToolStatus(runtime string) map[string]interface{} {
-	if normalizeDependencyRuntime(runtime) == PYTHON {
-		return pipxDependencyStatus()
-	}
-	return pnpmDependencyStatus()
-}
-
 func pnpmDependencyStatus() map[string]interface{} {
 	pnpm, err := resolvePnpmCommand()
 	status := map[string]interface{}{
@@ -441,10 +433,6 @@ func pipxDependencyStatus() map[string]interface{} {
 		status["message"] = pyErr.Error()
 	}
 	return status
-}
-
-func listNodeDependencyPlugins() []nodeDependencyPlugin {
-	return listDependencyPlugins(NODE)
 }
 
 func listDependencyPlugins(runtime string) []nodeDependencyPlugin {
@@ -482,10 +470,6 @@ func listDependencyPlugins(runtime string) []nodeDependencyPlugin {
 		return rows[i].Name < rows[j].Name
 	})
 	return rows
-}
-
-func nodeDependencyPluginByName(plugins []nodeDependencyPlugin, name string) (nodeDependencyPlugin, error) {
-	return dependencyPluginByName(plugins, name, NODE)
 }
 
 func dependencyPluginByName(plugins []nodeDependencyPlugin, name string, runtime string) (nodeDependencyPlugin, error) {
@@ -592,16 +576,6 @@ func dependencyRuntimeLabel(runtime string) string {
 		return "Python"
 	}
 	return "NodeJS"
-}
-
-func checkedNodePluginDir(dir string) (string, error) {
-	root := nodePluginsRoot()
-	clean := filepath.Clean(dir)
-	rel, err := filepath.Rel(root, clean)
-	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || rel == "." {
-		return "", errors.New("NodeJS 插件目录不合法")
-	}
-	return clean, nil
 }
 
 func checkedNodeScriptPath(path string) (string, error) {
@@ -1487,9 +1461,85 @@ func installNodeDependency(pluginName, pkg string, dev bool) (string, error) {
 	}
 	output, err := runPnpm(dir, args...)
 	if err == nil {
-		invalidateNodeRuntimeDependencyCache(dir)
+		output = finishNodeDependencyInstall(dir, pluginName, output)
 	}
 	return output, err
+}
+
+// finishNodeDependencyInstall clears the runtime dependency cache and retries
+// config-only execution. A plugin can be imported before its npm dependencies
+// exist; in that case its source hash does not change after pnpm succeeds, so
+// the file watcher cannot be relied on to register the missing config schema.
+func finishNodeDependencyInstall(dir, pluginName, output string) string {
+	invalidateNodeRuntimeDependencyCache(dir)
+	return appendPluginConfigRefreshResult(output, pluginName, NODE)
+}
+
+func finishPythonDependencyInstall(pluginName, output string) string {
+	invalidatePipxRuntimeEnvCache()
+	return appendPluginConfigRefreshResult(output, pluginName, PYTHON)
+}
+
+func appendPluginConfigRefreshResult(output, pluginName, runtime string) string {
+	if err := refreshPluginConfigSchemas(pluginName, runtime); err != nil {
+		console.Warn("%s 依赖已安装，插件配置表单重载失败：%v", dependencyRuntimeLabel(runtime), err)
+		if strings.TrimSpace(output) != "" {
+			output += "\n"
+		}
+		output += "插件配置表单重载失败：" + err.Error()
+	}
+	return output
+}
+
+// refreshNodePluginConfigSchemas bypasses the normal source-hash fast path and
+// only reruns scripts which declare a config form. Dependencies are shared by
+// plugins of the same runtime, so an empty/shared target retries every form
+// plugin for that runtime.
+func refreshNodePluginConfigSchemas(pluginName string) error {
+	return refreshPluginConfigSchemas(pluginName, NODE)
+}
+
+func refreshPythonPluginConfigSchemas(pluginName string) error {
+	return refreshPluginConfigSchemas(pluginName, PYTHON)
+}
+
+func refreshPluginConfigSchemas(pluginName, runtime string) error {
+	pluginName = strings.TrimSpace(pluginName)
+	runtime = normalizeDependencyRuntime(runtime)
+	plugins := listDependencyPlugins(runtime)
+	if pluginName != "" && pluginName != "__shared__" {
+		plugin, err := dependencyPluginByName(plugins, pluginName, runtime)
+		if err != nil {
+			return err
+		}
+		plugins = []nodeDependencyPlugin{plugin}
+	}
+
+	failures := make([]string, 0)
+	for _, plugin := range plugins {
+		data, err := os.ReadFile(plugin.Path)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", plugin.Name, err))
+			continue
+		}
+		f, _ := pluginParse(string(data), nameUuid(plugin.Name))
+		if f == nil || !f.HasForm {
+			continue
+		}
+		var registerErr error
+		if runtime == PYTHON {
+			registerErr = registerPythonPluginConfigSchema(plugin.Path, nameUuid(plugin.Name))
+		} else {
+			registerErr = registerNodePluginConfigSchema(plugin.Path, nameUuid(plugin.Name))
+		}
+		if registerErr != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", plugin.Name, registerErr))
+		}
+	}
+	if len(failures) != 0 {
+		return errors.New(strings.Join(failures, "; "))
+	}
+	return nil
 }
 
 func installPythonDependency(pluginName, pkg string) (string, error) {
@@ -1504,7 +1554,7 @@ func installPythonDependency(pluginName, pkg string) (string, error) {
 	}
 	output, err := runPipx([]string{"runpip", pythonPipxRuntimePackage, "install", "--upgrade", "--no-cache-dir", pkg}, pipxInstallEnv())
 	if err == nil {
-		invalidatePipxRuntimeEnvCache()
+		output = finishPythonDependencyInstall(pluginName, output)
 	}
 	return output, err
 }
@@ -1928,131 +1978,6 @@ func pipxEnvWithoutPythonDefault() []string {
 	return env
 }
 
-func removePythonPackageFromTarget(target, packageName string) (int, error) {
-	target = filepath.Clean(target)
-	entries, err := os.ReadDir(target)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	removed := 0
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".dist-info") {
-			continue
-		}
-		distInfo := filepath.Join(target, entry.Name())
-		if normalizePythonDependencyName(pythonDistInfoName(distInfo)) != packageName {
-			continue
-		}
-		count, err := removePythonDistInfoPackage(target, distInfo)
-		if err != nil {
-			return removed, err
-		}
-		removed += count
-	}
-	if removed != 0 {
-		return removed, nil
-	}
-	variants := []string{
-		packageName,
-		strings.ReplaceAll(packageName, "-", "_"),
-	}
-	for _, entry := range entries {
-		base := strings.TrimSuffix(entry.Name(), ".py")
-		if !Contains(variants, strings.ToLower(base)) {
-			continue
-		}
-		targetPath := filepath.Join(target, entry.Name())
-		if err := ensureChildPath(target, targetPath); err != nil {
-			return removed, err
-		}
-		if err := os.RemoveAll(targetPath); err != nil {
-			return removed, err
-		}
-		removed++
-	}
-	return removed, nil
-}
-
-func pythonDistInfoName(distInfo string) string {
-	if data, err := os.ReadFile(filepath.Join(distInfo, "METADATA")); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(strings.ToLower(line), "name:") {
-				return strings.TrimSpace(line[len("name:"):])
-			}
-		}
-	}
-	name := strings.TrimSuffix(filepath.Base(distInfo), ".dist-info")
-	if idx := strings.LastIndex(name, "-"); idx >= 0 {
-		name = name[:idx]
-	}
-	return name
-}
-
-func removePythonDistInfoPackage(target, distInfo string) (int, error) {
-	removed := 0
-	topLevels := pythonDistInfoTopLevels(distInfo)
-	recordPath := filepath.Join(distInfo, "RECORD")
-	if data, err := os.ReadFile(recordPath); err == nil {
-		reader := csv.NewReader(strings.NewReader(string(data)))
-		records, err := reader.ReadAll()
-		if err != nil {
-			return removed, err
-		}
-		for _, record := range records {
-			if len(record) == 0 || strings.TrimSpace(record[0]) == "" {
-				continue
-			}
-			rel := filepath.Clean(filepath.FromSlash(record[0]))
-			targetPath := filepath.Join(target, rel)
-			if err := ensureChildPath(target, targetPath); err != nil {
-				return removed, err
-			}
-			if err := os.Remove(targetPath); err == nil {
-				removed++
-			}
-		}
-	}
-	for _, topLevel := range topLevels {
-		targetPath := filepath.Join(target, topLevel)
-		if err := ensureChildPath(target, targetPath); err != nil {
-			return removed, err
-		}
-		if _, err := os.Stat(targetPath); err == nil {
-			if err := os.RemoveAll(targetPath); err != nil {
-				return removed, err
-			}
-			removed++
-		}
-	}
-	if err := ensureChildPath(target, distInfo); err != nil {
-		return removed, err
-	}
-	if err := os.RemoveAll(distInfo); err != nil {
-		return removed, err
-	}
-	removed++
-	return removed, nil
-}
-
-func pythonDistInfoTopLevels(distInfo string) []string {
-	data, err := os.ReadFile(filepath.Join(distInfo, "top_level.txt"))
-	if err != nil {
-		return nil
-	}
-	items := []string{}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.ContainsAny(line, `/\:`) || strings.Contains(line, "..") {
-			continue
-		}
-		items = append(items, line)
-	}
-	return items
-}
-
 func nodeDependencyInstalled(dir, name string) bool {
 	return nodeDependencyInstalledAt(filepath.Join(dir, "node_modules"), name)
 }
@@ -2101,9 +2026,7 @@ func nodeRuntimeNodePath() string {
 func nodeRuntimeModulePaths() []string {
 	candidates := []string{}
 	for _, env := range []string{os.Getenv("SILLYGIRL_NODE_PATH"), os.Getenv("NODE_PATH")} {
-		for _, item := range filepath.SplitList(env) {
-			candidates = append(candidates, item)
-		}
+		candidates = append(candidates, filepath.SplitList(env)...)
 	}
 	candidates = append(candidates,
 		filepath.Join(utils.ExecPath, "node-runtime", "node_modules"),

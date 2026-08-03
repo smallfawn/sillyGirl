@@ -94,7 +94,12 @@ var once = new(sync.Once)
 var GetDataHome = func() string {
 	home := os.Getenv("SILLYGIRL_DATA_PATH")
 	if home == "" {
-		if runtime.GOOS == "windows" {
+		if isGoTestBinary() {
+			// Each `go test` package runs in its own process. Sharing the normal
+			// PID file and Bolt database makes those processes kill or lock each
+			// other, so keep their state isolated by process.
+			home = filepath.Join(os.TempDir(), fmt.Sprintf("sillygirl-test-%d", os.Getpid()))
+		} else if runtime.GOOS == "windows" {
 			home = `C:\ProgramData\sillyGirl\`
 		} else if runtime.GOOS == "darwin" {
 			home = ExecPath + "/.sillyGirl/"
@@ -108,6 +113,11 @@ var GetDataHome = func() string {
 		}
 	})
 	return home
+}
+
+func isGoTestBinary() bool {
+	name := strings.ToLower(filepath.Base(os.Args[0]))
+	return strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".test.exe")
 }
 
 func KillProcess(pid int) error {

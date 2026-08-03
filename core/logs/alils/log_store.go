@@ -3,7 +3,7 @@ package alils
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -41,7 +41,7 @@ func (s *LogStore) ListShards() (shardIDs []int, err error) {
 		return
 	}
 
-	buf, err := ioutil.ReadAll(r.Body)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		return
 	}
@@ -102,7 +102,7 @@ func (s *LogStore) PutLogs(lg *LogGroup) (err error) {
 		return
 	}
 
-	buf, err := ioutil.ReadAll(r.Body)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		return
 	}
@@ -138,7 +138,7 @@ func (s *LogStore) GetCursor(shardID int, from string) (cursor string, err error
 		return
 	}
 
-	buf, err := ioutil.ReadAll(r.Body)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		return
 	}
@@ -189,7 +189,7 @@ func (s *LogStore) GetLogsBytes(shardID int, cursor string,
 		return
 	}
 
-	buf, err := ioutil.ReadAll(r.Body)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		return
 	}

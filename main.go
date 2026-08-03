@@ -10,8 +10,10 @@ import (
 	"time"
 
 	_ "github.com/smallfawn/sillyGirl/adapters/clawbot"
+	_ "github.com/smallfawn/sillyGirl/adapters/dingtalk"
 	_ "github.com/smallfawn/sillyGirl/adapters/pagermaid"
 	_ "github.com/smallfawn/sillyGirl/adapters/qq"
+	_ "github.com/smallfawn/sillyGirl/adapters/qqguild"
 	_ "github.com/smallfawn/sillyGirl/adapters/telegram"
 	"github.com/smallfawn/sillyGirl/adapters/web"
 	"github.com/smallfawn/sillyGirl/core"

@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	for _, platform := range []string{"clawbot", "pagermaid"} {
+	for _, platform := range []string{"clawbot", "dingtalk", "pagermaid", "qqguild"} {
 		platform := platform
 		storage.Watch(MakeBucket(platform), "enable", func(old, new, key string) *storage.Final {
 			if !adapterConfigEnabledValue(new) {
@@ -55,7 +55,7 @@ func DestroyAdaptersByPlatform(platform string) {
 
 func AdapterConfigManageable(platform string) bool {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
-	case "clawbot", "qq", "telegram", "pagermaid":
+	case "clawbot", "dingtalk", "qq", "qqguild", "telegram", "pagermaid":
 		return true
 	default:
 		return false
