@@ -167,7 +167,7 @@ onMounted(loadCurrentUser);
       <div class="home-page">
         <header class="home-topbar">
           <a class="home-brand" href="/">
-            <span class="home-brand-mark">S</span>
+            <span class="home-brand-mark" role="img" aria-label="傻妞 Logo"></span>
             <span>SillyGirl</span>
           </a>
           <Space wrap>
@@ -357,8 +357,8 @@ onMounted(loadCurrentUser);
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: #111827;
-  color: #ffffff;
+  background: #ffffff url("../logo.png") center 45% / 150% auto no-repeat;
+  box-shadow: 0 1px 4px rgb(148 81 48 / 18%);
 }
 
 .home-content {

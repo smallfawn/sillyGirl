@@ -149,8 +149,13 @@ func initWebPluginList() {
 		class := ctx.Query("class")
 		mclass := ctx.Query("mclass")
 		rr := RequestPluginResult{}
-		if pageSize == 0 {
+		if pageSize <= 0 {
 			pageSize = 10
+		} else if pageSize > 200 {
+			pageSize = 200
+		}
+		if current < 0 {
+			current = 1
 		}
 		if class == "" {
 			class = "全部"

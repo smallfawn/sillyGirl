@@ -293,7 +293,7 @@ func overviewAdapterStatuses() []map[string]interface{} {
 		{Platform: "pagermaid", Label: "Pagermaid"},
 		{Platform: "qq", Label: "QQ"},
 		{Platform: "qqguild", Label: "QQ 官方频道机器人"},
-		{Platform: "web", Label: "Web"},
+		{Platform: "web", Label: "Web Bot"},
 		{Platform: "telegram", Label: "Telegram Bot"},
 	}
 	rows := []map[string]interface{}{}

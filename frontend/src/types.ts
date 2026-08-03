@@ -69,6 +69,7 @@ export type AdminUserRow = {
 export type PluginInfo = {
   id: string;
   title: string;
+  type?: string;
   suffix?: string;
   desc?: string;
   rule?: string;
@@ -90,6 +91,7 @@ export type PluginInfo = {
   organization?: string;
   address?: string;
   messages?: unknown;
+  dependencies?: string[];
 };
 
 export type Reply = {

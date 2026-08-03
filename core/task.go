@@ -148,7 +148,7 @@ func findScriptFunctionByTask(taskID, command string) (*common.Function, string)
 func RegistTasks(pt *Tasks) {
 	pt.Handle = func() {
 		content := pt.Command
-		if runScriptTaskCommand(content) {
+		if runScriptTaskCommand(content, pt.Senders) {
 			return
 		}
 		for _, meta := range pt.Senders {
@@ -261,22 +261,9 @@ func init() {
 			rows[i].Index = i + 1
 		}
 		rr.Total = len(rows)
-		if current == 0 {
-			current = 1
-		}
-		rr.Page = current
 		rr.Time = time.Now()
-		if pageSize == 0 {
-			pageSize = 20
-		}
-		begin := (current - 1) * pageSize
-		end := (current) * pageSize
-		if end > rr.Total {
-			end = rr.Total
-		}
-		if begin > end {
-			begin = end
-		}
+		current, _, begin, end := paginationBounds(current, pageSize, rr.Total)
+		rr.Page = current
 		rr.Data = rows[begin:end]
 		for i := range rr.Data {
 			rr.Data[i].Icons = []interface{}{}
@@ -343,7 +330,6 @@ func init() {
 					tp.Command = v
 					if isScriptTaskCommand(v) {
 						tp.Scripts = nil
-						tp.Senders = nil
 						tp.Remark = ""
 					}
 				}
@@ -368,7 +354,12 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
-		if f, platform := findScriptFunctionByTask(task_id, tp.Command); f != nil {
+		if _, _, pluginCronTask := parsePluginCronTaskID(task_id); pluginCronTask {
+			f, platform := findScriptFunctionByTask(task_id, tp.Command)
+			if f == nil {
+				ApiFail(ctx, "定时任务脚本不存在")
+				return
+			}
 			if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
 				ApiFail(ctx, err.Error())
 				return
@@ -397,7 +388,12 @@ func init() {
 			ApiFail(ctx, "任务ID不为空")
 			return
 		}
-		if f, platform := findScriptFunctionByTask(pt.ID, pt.Command); f != nil {
+		if _, _, pluginCronTask := parsePluginCronTaskID(pt.ID); pluginCronTask {
+			f, platform := findScriptFunctionByTask(pt.ID, pt.Command)
+			if f == nil {
+				ApiFail(ctx, "定时任务脚本不存在")
+				return
+			}
 			if err := updatePluginCronAnnotation(f, platform, ""); err != nil {
 				ApiFail(ctx, err.Error())
 				return
@@ -508,7 +504,7 @@ func validateTaskSchedule(schedule string) error {
 	return nil
 }
 
-func runScriptTaskCommand(command string) bool {
+func runScriptTaskCommand(command string, targets []Sender) bool {
 	target, class := scriptTaskTarget(command)
 	if target == "" {
 		return false
@@ -518,16 +514,35 @@ func runScriptTaskCommand(command string) bool {
 		console.Error("定时任务脚本不存在：%s", target)
 		return true
 	}
-	sender := &CustomSender{
-		F: &Factory{
-			botplt: "task",
-			uuid:   f.UUID,
-		},
+	if len(targets) == 0 {
+		sender := &CustomSender{
+			F: &Factory{
+				botplt: "task",
+				uuid:   f.UUID,
+			},
+		}
+		sender.SetFsps(&common.FakerSenderParams{Content: command})
+		sender.SetMatch([]string{})
+		sender.SetParams([]string{})
+		f.Handle(sender)
+		return true
 	}
-	sender.SetFsps(&common.FakerSenderParams{Content: command})
-	sender.SetMatch([]string{})
-	sender.SetParams([]string{})
-	f.Handle(sender)
+	for _, target := range targets {
+		adapter, err := GetAdapter(target.Platfrom, target.BotID)
+		if err != nil || adapter == nil {
+			console.Error("定时任务接收平台不可用：%s(%s)", target.Platfrom, target.BotID)
+			continue
+		}
+		sender := adapter.Sender2(nil)
+		sender.SetFsps(&common.FakerSenderParams{
+			Content: command,
+			ChatID:  target.ChatID,
+			UserID:  target.UserID,
+		})
+		sender.SetMatch([]string{})
+		sender.SetParams([]string{})
+		f.Handle(sender)
+	}
 	return true
 }
 

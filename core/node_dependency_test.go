@@ -98,6 +98,18 @@ func TestNodeRuntimeDependenciesIncludeGrpcPackages(t *testing.T) {
 	}
 }
 
+func TestPnpmCommandArgsSkipsRegistryForRemove(t *testing.T) {
+	registry := "https://registry.example.test"
+	removeArgs := pnpmCommandArgs([]string{"pnpm.cjs"}, []string{"remove", "ipp"}, registry)
+	if strings.Contains(strings.Join(removeArgs, " "), "--registry") {
+		t.Fatalf("pnpm remove must not receive --registry: %#v", removeArgs)
+	}
+	addArgs := pnpmCommandArgs([]string{"pnpm.cjs"}, []string{"add", "ipp"}, registry)
+	if got := strings.Join(addArgs, " "); !strings.Contains(got, "--registry "+registry) {
+		t.Fatalf("pnpm add should receive registry override: %#v", addArgs)
+	}
+}
+
 func TestEnsureNodeSillygirlModuleWritesRuntimeFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := ensureNodeSillygirlModule(dir); err != nil {

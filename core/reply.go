@@ -80,29 +80,26 @@ func init() {
 			return filteredReplies[i].CreatedAt > filteredReplies[j].CreatedAt
 		})
 		// paginate the filtered replies
-		start := (page - 1) * perPage
-		end := start + perPage
-		if end > len(filteredReplies) {
-			end = len(filteredReplies)
-		}
+		page, perPage, start, end := paginationBounds(page, perPage, len(filteredReplies))
 		paginatedReplies := filteredReplies[start:end]
 		index := start + 1
 		for i := range paginatedReplies {
-			filteredReplies[i].Index = index
+			paginatedReplies[i].Index = index
 			index++
-			if filteredReplies[i].Nickname == "" || len(filteredReplies[i].Platforms) == 0 {
-				nk := Nickname{ID: filteredReplies[i].Number}
+			if paginatedReplies[i].Nickname == "" || len(paginatedReplies[i].Platforms) == 0 {
+				nk := Nickname{ID: paginatedReplies[i].Number}
 				nickname.First(&nk)
-				if nk.Value != "" && filteredReplies[i].Nickname == "" {
-					filteredReplies[i].Nickname = nk.Value
+				if nk.Value != "" && paginatedReplies[i].Nickname == "" {
+					paginatedReplies[i].Nickname = nk.Value
 				}
-				if nk.Platform != "" && len(filteredReplies[i].Platforms) == 0 {
-					filteredReplies[i].Platforms = []string{nk.Platform}
+				if nk.Platform != "" && len(paginatedReplies[i].Platforms) == 0 {
+					paginatedReplies[i].Platforms = []string{nk.Platform}
 				}
 			}
 		}
 		ApiList(ctx, paginatedReplies, len(filteredReplies), map[string]interface{}{
 			"page":      page,
+			"pageSize":  perPage,
 			"platforms": getPltsLabel(),
 		})
 	})

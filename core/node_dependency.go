@@ -2056,11 +2056,7 @@ func runPnpm(dir string, args ...string) (string, error) {
 		return "", err
 	}
 	registry := pnpmRegistry()
-	cmdArgs := append([]string{}, pnpm.Args...)
-	cmdArgs = append(cmdArgs, args...)
-	if registry != "" {
-		cmdArgs = append(cmdArgs, "--registry", registry)
-	}
+	cmdArgs := pnpmCommandArgs(pnpm.Args, args, registry)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, pnpm.Bin, cmdArgs...)
@@ -2078,6 +2074,17 @@ func runPnpm(dir string, args ...string) (string, error) {
 		return output, fmt.Errorf("pnpm 执行失败：%s", output)
 	}
 	return output, nil
+}
+
+func pnpmCommandArgs(base []string, args []string, registry string) []string {
+	cmdArgs := append([]string{}, base...)
+	cmdArgs = append(cmdArgs, args...)
+	// pnpm remove does not accept the registry option. It only updates the
+	// existing lockfile/package.json, so no registry override is needed.
+	if registry != "" && (len(args) == 0 || args[0] != "remove") {
+		cmdArgs = append(cmdArgs, "--registry", registry)
+	}
+	return cmdArgs
 }
 
 func resolvePnpmCommand() (pnpmCommand, error) {

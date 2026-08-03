@@ -267,7 +267,7 @@ onMounted(loadProfile);
       <div class="user-page">
         <header class="user-topbar">
           <a class="user-brand" href="/">
-            <span class="user-brand-mark">S</span>
+            <span class="user-brand-mark" role="img" aria-label="傻妞 Logo"></span>
             <span>SillyGirl</span>
           </a>
           <Space v-if="user" align="center">
@@ -452,6 +452,8 @@ onMounted(loadProfile);
   width: 32px;
   height: 32px;
   border-radius: 8px;
+  background: #ffffff url("../logo.png") center 45% / 150% auto no-repeat;
+  box-shadow: 0 1px 4px rgb(148 81 48 / 18%);
 }
 
 .user-content {

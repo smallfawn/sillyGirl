@@ -223,22 +223,9 @@ func init() {
 		rr := CarryGroupsResult{}
 		cgs := cgs
 		rr.Total = len(cgs)
-		if current == 0 {
-			current = 1
-		}
-		rr.Page = current
 		rr.Time = time.Now()
-		if pageSize == 0 {
-			pageSize = 20
-		}
-		begin := (current - 1) * pageSize
-		end := (current) * pageSize
-		if end > rr.Total {
-			end = rr.Total
-		}
-		if begin > end {
-			begin = end
-		}
+		current, _, begin, end := paginationBounds(current, pageSize, rr.Total)
+		rr.Page = current
 		rr.Data = cgs[begin:end]
 		for i := range rr.Data {
 			gn := &Nickname{

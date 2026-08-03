@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -59,12 +60,49 @@ func shouldHideStorageKey(bucket string, key string) bool {
 	return key == storageBucketMarkerKey || isBackendVersionStorageKey(bucket, key)
 }
 
+func storageEntryMatchesSearch(key string, value string, search string) bool {
+	search = strings.ToLower(strings.TrimSpace(search))
+	if search == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(key), search) || strings.Contains(strings.ToLower(value), search)
+}
+
+func paginationBounds(page int, perPage int, total int) (int, int, int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 20
+	}
+	if perPage > 200 {
+		perPage = 200
+	}
+	if total < 0 {
+		total = 0
+	}
+
+	start := total
+	if page <= total/perPage+1 {
+		start = (page - 1) * perPage
+		if start > total {
+			start = total
+		}
+	}
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	return page, perPage, start, end
+}
+
 func init() {
 	var sillyGirl = MakeBucket("sillyGirl")
 	GinApi(GET, "/api/admin/storage/list", RequireAuth, func(ctx *gin.Context) {
 		page, _ := strconv.Atoi(ctx.DefaultQuery("current", "1"))
 		perPage, _ := strconv.Atoi(ctx.DefaultQuery("pageSize", "20"))
 		keys := ctx.Query("keys")
+		search := ctx.Query("search")
 		data := []map[string]string{}
 		arr := strings.Split(keys, ",")
 		if keys == "" {
@@ -80,17 +118,23 @@ func init() {
 				if ar[0] == "plugins" && false { //todo
 					// data[bk] = halfDeEct(MakeBucket(ar[0]).GetString(ar[1]))
 				} else {
-					// data[bk] = MakeBucket(ar[0]).GetString(ar[1])
+					value := MakeBucket(ar[0]).GetString(ar[1])
+					if !storageEntryMatchesSearch(ar[1], value, search) {
+						continue
+					}
 					data = append(data, map[string]string{
 						"bucket": ar[0],
 						"key":    ar[1],
-						"value":  MakeBucket(ar[0]).GetString(ar[1]),
+						"value":  value,
 					})
 				}
 			}
 			if len(ar) == 1 {
 				MakeBucket(ar[0]).Foreach(func(b1, b2 []byte) error {
 					if shouldHideStorageKey(ar[0], string(b1)) {
+						return nil
+					}
+					if !storageEntryMatchesSearch(string(b1), string(b2), search) {
 						return nil
 					}
 					data = append(data, map[string]string{
@@ -102,23 +146,26 @@ func init() {
 				})
 			}
 		}
-		start := (page - 1) * perPage
-		end := start + perPage
-		if end > len(data) {
-			end = len(data)
-		}
+		sort.Slice(data, func(i, j int) bool {
+			if data[i]["bucket"] == data[j]["bucket"] {
+				return data[i]["key"] < data[j]["key"]
+			}
+			return data[i]["bucket"] < data[j]["bucket"]
+		})
+		page, perPage, start, end := paginationBounds(page, perPage, len(data))
 		res := data[start:end]
 		index := start + 1
 		for i := range res {
 			res[i]["index"] = fmt.Sprint(index)
 			index++
 		}
-		ApiList(ctx, res, len(data), map[string]interface{}{"page": page})
+		ApiList(ctx, res, len(data), map[string]interface{}{"page": page, "pageSize": perPage})
 	})
 	GinApi(GET, "/api/admin/storage", RequireAuth, func(ctx *gin.Context) {
 		keys := ctx.Query("keys")
 		if keys == "" {
 			buckets := sillyGirl.Buckets()
+			sort.Strings(buckets)
 			search := ctx.Query("search")
 			res := []map[string]interface{}{}
 			if search == "" {
