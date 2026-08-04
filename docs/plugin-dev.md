@@ -121,7 +121,7 @@ s.reply("收到")
 ### 常用 API
 
 ```python
-from sillygirl import sender as s, Bucket, Container, utils
+from sillygirl import sender as s, Bucket, container, utils
 
 content = await s.getContent()
 user_id = await s.getUserId()
@@ -140,22 +140,20 @@ update_result = await utils.update({"restart": True})
 `utils.userList()` 提供普通用户及当前插件的授权和绑定状态。`authorized` 只表示当前插件的 `smallcat:read` 授权，运行时会从当前插件上下文判定，不接受插件 UUID 参数。
 
 ```js
-const { Container, utils } = require("sillygirl");
+const { container, utils } = require("sillygirl");
 
 const users = await utils.userList();
-const ct = new Container();
 const openids = users
   .filter((user) => !user.disabled && user.authorized)
   .flatMap((user) => user.bindings.smallcat_openids);
 
-const accounts = await new ct.SmallCat({ id: 1 }).userList();
+const accounts = await new container.SmallCat({ id: 1 }).userList();
 ```
 
 ```python
-from sillygirl import Container, utils
+from sillygirl import container, utils
 
 users = await utils.userList()
-ct = Container()
 openids = [
     openid
     for user in users
@@ -163,7 +161,7 @@ openids = [
     for openid in user["bindings"]["smallcat_openids"]
 ]
 
-accounts = await ct.SmallCat({"id": 1}).userList()
+accounts = await container.SmallCat({"id": 1}).userList()
 ```
 
 `utils.userList()` 的每个用户包含：
@@ -629,29 +627,27 @@ async def main():
     print(values)
 ```
 
-### Container 容器入口
+### container 容器入口
 
-`Container` 是容器面板统一入口：
+`container` 是容器面板统一入口：
 
 ```js
-const { Container } = require("sillygirl");
-const ct = new Container();
+const { container } = require("sillygirl");
 
-const all = await ct.getList();       // { smallcat, qinglong, daidai }
-const qlList = await ct.getList("qinglong");
-const ql1 = new ct.QingLong({ id: 1 });
+const all = await container.getList();       // { smallcat, qinglong, daidai }
+const qlList = await container.getList("qinglong");
+const ql1 = new container.QingLong({ id: 1 });
 const envs = await ql1.getEnvs();
 ```
 
-`ct.getList()` 返回后台已绑定的 smallcat / 青龙 / 呆呆容器数量和只读列表；`ct.QingLong`、`ct.SmallCat`、`ct.DaiDai` 负责继续调用对应面板 API。
+`container.getList()` 返回后台已绑定的 smallcat / 青龙 / 呆呆容器数量和只读列表；`container.QingLong`、`container.SmallCat`、`container.DaiDai` 负责继续调用对应面板 API。
 
 ### QingLong 内联客户端
 
-`Container` 顶层导出负责容器列表和面板客户端。`ct.QingLong` 是青龙面板的脚本内联客户端。先在 Admin 面板左侧「青龙容器」中添加青龙面板，再在脚本里按页面表格编号创建实例。
+`container` 顶层导出负责容器列表和面板客户端。`container.QingLong` 是青龙面板的脚本内联客户端。先在 Admin 面板左侧「青龙容器」中添加青龙面板，再在脚本里按页面表格编号创建实例。
 
 ```js
-const ct = new Container();
-const ql = new ct.QingLong({ id: 1 });
+const ql = new container.QingLong({ id: 1 });
 ```
 
 构造参数必须是对象：
@@ -695,8 +691,7 @@ ql.request(method, path, body, query);
 示例：
 
 ```js
-const ct = new Container();
-const ql = new ct.QingLong({ id: 1 });
+const ql = new container.QingLong({ id: 1 });
 
 const envs = ql.getEnvs({ searchValue: "JD_COOKIE" });
 console.log("匹配数量", envs.length);
@@ -714,17 +709,16 @@ ql.deleteEnvs([created[0].id]);
 
 注意：
 
-- `new ct.QingLong({ id: 1 })` 只接受对象参数，不支持 `new ct.QingLong(1)`。
+- `new container.QingLong({ id: 1 })` 只接受对象参数，不支持 `new container.QingLong(1)`。
 - 编号按「青龙容器」页面当前列表顺序，从 `1` 开始。
 - 除 `request` 外，封装方法会在青龙业务 `code != 200` 或 HTTP 非 2xx 时抛出脚本异常。
 
 ### SmallCat 内联客户端
 
-`Container` 顶层导出负责容器列表和面板客户端。`ct.SmallCat` 是 smallcat 面板的脚本内联客户端。先在 Admin 面板左侧「smallcat」中添加地址和 `api_auth`，再在脚本里按页面表格编号创建实例。
+`container` 顶层导出负责容器列表和面板客户端。`container.SmallCat` 是 smallcat 面板的脚本内联客户端。先在 Admin 面板左侧「smallcat」中添加地址和 `api_auth`，再在脚本里按页面表格编号创建实例。
 
 ```js
-const ct = new Container();
-const sc = new ct.SmallCat({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
 ```
 
 构造参数必须是对象：
@@ -791,8 +785,7 @@ smallcat 运行时不会改写 API 返回。脚本收到的就是 smallcat 原�
 示例：
 
 ```js
-const ct = new Container();
-const sc = new ct.SmallCat({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
 
 const qr = sc.createQr(1);
 if (!qr.status) {
@@ -864,17 +857,16 @@ console.log(qrOAuth.status, qrOAuth.message, qrOAuth.data);
 
 注意：
 
-- `new ct.SmallCat({ id: 1 })` 只接受对象参数，不支持 `new ct.SmallCat(1)`。
+- `new container.SmallCat({ id: 1 })` 只接受对象参数，不支持 `new container.SmallCat(1)`。
 - `addUser` 只接受对象参数，推荐写 `sc.addUser({ code: "xxxxx", displayName: "备注" })`；重扫已有账号使用 `rescanUser`。
 - 只有网络失败、请求体编码失败、JSON 解析失败这类没有 smallcat 原始响应的情况，运行时才会返回 `{ status: false, message: "..." }`。
 
 ### DaiDai 内联客户端
 
-`Container` 顶层导出负责容器列表和面板客户端。`ct.DaiDai` 是呆呆面板的脚本内联客户端。先在 Admin 面板左侧「呆呆面板」中添加地址、`app_key`、`app_secret`，再在脚本里按页面表格编号创建实例。
+`container` 顶层导出负责容器列表和面板客户端。`container.DaiDai` 是呆呆面板的脚本内联客户端。先在 Admin 面板左侧「呆呆面板」中添加地址、`app_key`、`app_secret`，再在脚本里按页面表格编号创建实例。
 
 ```js
-const ct = new Container();
-const dd = new ct.DaiDai({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 ```
 
 构造参数必须是对象：
@@ -928,8 +920,7 @@ dd.request(method, path, body, query);
 示例：
 
 ```js
-const ct = new Container();
-const dd = new ct.DaiDai({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 
 const envs = dd.getEnvs({ keyword: "JD_COOKIE" });
 console.log("匹配数量", envs.length);
@@ -947,7 +938,7 @@ dd.deleteEnv(created.id);
 
 注意：
 
-- `new ct.DaiDai({ id: 1 })` 只接受对象参数，不支持 `new ct.DaiDai(1)`。
+- `new container.DaiDai({ id: 1 })` 只接受对象参数，不支持 `new container.DaiDai(1)`。
 - 编号按「呆呆面板」页面当前列表顺序，从 `1` 开始。
 - 除 `request` 外，封装方法默认返回呆呆响应里的 `data`；HTTP 非 2xx 或 `success: false` 会抛出脚本异常。
 

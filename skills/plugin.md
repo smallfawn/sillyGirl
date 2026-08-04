@@ -17,25 +17,23 @@ Use this skill to write SillyGirl script plugins for this repository.
 const {
   sender: s,
   Bucket,
-  Container,
+  container,
   form,
   utils,
 } = require('sillygirl');
 
-const ct = new Container();
 ```
 
-Use `new ct.QingLong({ id })`, `new ct.SmallCat({ id })`, `new ct.DaiDai({ id })` for panel clients. Use `utils.userList()`, `utils.sleep()`, `utils.version()`, `utils.restart()`, `utils.update()` for system helpers.
+Use `new container.QingLong({ id })`, `new container.SmallCat({ id })`, `new container.DaiDai({ id })` for panel clients. Use `utils.userList()`, `utils.sleep()`, `utils.version()`, `utils.restart()`, `utils.update()` for system helpers.
 
 - Import Python runtime APIs from `sillygirl`:
 
 ```python
-from sillygirl import sender as s, Bucket, Container, form, utils
+from sillygirl import sender as s, Bucket, container, form, utils
 
-ct = Container()
 ```
 
-Use `ct.QingLong({"id": 1})`, `ct.SmallCat({"id": 1})`, `ct.DaiDai({"id": 1})`.
+Use `container.QingLong({"id": 1})`, `container.SmallCat({"id": 1})`, `container.DaiDai({"id": 1})`.
 
 - Do not use Goja-only APIs or BNCR globals.
 - Do not use `BncrDB`, `BncrCreateSchema`, or `BncrPluginConfig`.
@@ -251,13 +249,13 @@ asyncio.run(main())
 Python inline clients:
 
 ```python
-ql = ct.QingLong({"id": 1})
+ql = container.QingLong({"id": 1})
 envs = await ql.getEnvs({"searchValue": "JD_COOKIE"})
 
-sc = ct.SmallCat({"id": 1})
+sc = container.SmallCat({"id": 1})
 code = await sc.getCode({"openid": "openid", "appid": "wx123"})
 
-dd = ct.DaiDai({"id": 1})
+dd = container.DaiDai({"id": 1})
 items = await dd.getEnvs({"keyword": "JD_COOKIE"})
 ```
 
@@ -266,18 +264,17 @@ items = await dd.getEnvs({"keyword": "JD_COOKIE"})
 Constructors use object parameters only:
 
 ```js
-const ct = new Container();
-const ql = new ct.QingLong({ id: 1 });
-const sc = new ct.SmallCat({ id: 1 });
-const dd = new ct.DaiDai({ id: 1 });
+const ql = new container.QingLong({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 ```
 
 Do not write:
 
 ```js
-new ct.QingLong(1);
-new ct.SmallCat(1);
-new ct.DaiDai(1);
+new container.QingLong(1);
+new container.SmallCat(1);
+new container.DaiDai(1);
 ```
 
 ### QingLong
@@ -441,7 +438,7 @@ Before finishing a plugin:
 - Header uses `@title`, not `@name`.
 - Description uses `@desc`, not `@description`.
 - No BNCR names remain.
-- Constructors are `new ct.QingLong({ id })`, `new ct.SmallCat({ id })`, `new ct.DaiDai({ id })`.
+- Constructors are `new container.QingLong({ id })`, `new container.SmallCat({ id })`, `new container.DaiDai({ id })`.
 - `SmallCat.checkQr` is spelled correctly.
 - Sensitive commands check admin permission.
 - External requests have timeouts or are wrapped in try/catch.

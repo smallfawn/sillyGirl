@@ -627,15 +627,15 @@ interface ContainerPanelList {
     total: number;
     list: ContainerPanelInfo[];
 }
-declare class Container {
+interface ContainerApi {
     QingLong: typeof QingLong;
     SmallCat: typeof SmallCat;
     DaiDai: typeof DaiDai;
-    constructor(_options?: Record<string, any>);
     getList(kind?: ContainerKind | string): Promise<Record<ContainerKind, ContainerPanelList> | ContainerPanelList>;
     count(kind: ContainerKind | string): Promise<number>;
     get(kind: ContainerKind | string, id: number | string): Promise<ContainerPanelInfo | undefined>;
 }
+declare const container: ContainerApi;
 declare class QingLong {
     id: number;
     uuid: string;
@@ -852,7 +852,7 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, Container, form, sender, utils, console, };
+export { Adapter, Bucket, container, form, sender, utils, console, };
 `
 
 func defaultScript(title string) string {
@@ -866,7 +866,7 @@ func defaultScript(title string) string {
 const {
   sender: s,
   Bucket,
-  Container,
+  container,
   form,
   utils: { buildCQTag, image, video, userList, sleep, version, restart, update },
 } = require("sillygirl");

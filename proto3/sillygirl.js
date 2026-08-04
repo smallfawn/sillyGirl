@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.console = exports.utils = exports.sender = exports.form = exports.Container = exports.Bucket = exports.Adapter = void 0;
+exports.console = exports.utils = exports.sender = exports.form = exports.container = exports.Bucket = exports.Adapter = void 0;
 const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
@@ -749,43 +749,39 @@ function publicContainerPanel(panel, index) {
         message: String(panel?.message || ""),
     };
 }
-class Container {
-    QingLong;
-    SmallCat;
-    DaiDai;
-    constructor(_options = {}) {
-        this.QingLong = QingLong;
-        this.SmallCat = SmallCat;
-        this.DaiDai = DaiDai;
-    }
-    async getList(kind) {
-        const wanted = normalizeContainerKind(kind);
-        const kinds = wanted ? [wanted] : ["smallcat", "qinglong", "daidai"];
-        const result = {};
-        for (const item of kinds) {
-            const definition = containerDefinitions[item];
-            const panels = await readRuntimePanels(definition.key);
-            result[item] = {
-                type: item,
-                key: item,
-                label: definition.label,
-                total: panels.length,
-                list: panels.map((panel, index) => publicContainerPanel(panel, index + 1)),
-            };
-        }
-        return wanted ? result[wanted] : result;
-    }
-    async count(kind) {
-        const info = await this.getList(kind);
-        return info.total;
-    }
-    async get(kind, id) {
-        const info = await this.getList(kind);
-        const index = runtimePanelIndex(id);
-        return info.list.find((item) => item.index === index || item.id === String(id));
-    }
+function createContainerApi() {
+    return {
+        QingLong,
+        SmallCat,
+        DaiDai,
+        async getList(kind) {
+            const wanted = normalizeContainerKind(kind);
+            const kinds = wanted ? [wanted] : ["smallcat", "qinglong", "daidai"];
+            const result = {};
+            for (const item of kinds) {
+                const definition = containerDefinitions[item];
+                const panels = await readRuntimePanels(definition.key);
+                result[item] = {
+                    type: item,
+                    key: item,
+                    label: definition.label,
+                    total: panels.length,
+                    list: panels.map((panel, index) => publicContainerPanel(panel, index + 1)),
+                };
+            }
+            return wanted ? result[wanted] : result;
+        },
+        async count(kind) {
+            const info = await this.getList(kind);
+            return info.total;
+        },
+        async get(kind, id) {
+            const info = await this.getList(kind);
+            const index = runtimePanelIndex(id);
+            return info.list.find((item) => item.index === index || item.id === String(id));
+        },
+    };
 }
-exports.Container = Container;
 function normalizeRuntimePath(path, prefix) {
     path = String(path || "").trim();
     if (!path)
@@ -1804,3 +1800,5 @@ let console = {
     },
 };
 exports.console = console;
+const container = createContainerApi();
+exports.container = container;
