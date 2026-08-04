@@ -21,7 +21,7 @@ const pythonRequiredVersion = "3.12"
 // pythonConfigPreloadScript mirrors the Node config-registration preload: real
 // modules are preferred, while imports that are still absent during the first
 // plugin install resolve to an inert placeholder. This lets a top-level
-// SillyGirlPluginConfig/form call export its schema before @depe packages are
+// form call export its schema before @depe packages are
 // installed, without hiding syntax errors or other runtime exceptions.
 const pythonConfigPreloadScript = `
 from __future__ import annotations

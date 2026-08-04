@@ -29,22 +29,27 @@ func ensureNodeRuntimePreload() (string, error) {
 const nodeRuntimePreloadScript = `
 (function () {
   if (process.env.SILLYGIRL_CONFIG_REGISTER_ONLY === "true") {
-    function normalizeSchema(value) {
-      if (value && value.__schemaNode && value.schema) return value.schema;
-      if (value && typeof value.toJSON === "function") return value.toJSON();
-      if (Array.isArray(value)) return value.map((item) => normalizeSchema(item));
-      if (value && typeof value === "object") {
-        const result = {};
-        for (const key of Object.keys(value)) {
-          if (key.startsWith("_") || key === "__schemaNode") continue;
-          result[key] = normalizeSchema(value[key]);
-        }
-        return result;
+    function isSchemaNode(value) {
+      return !!(value && value.__schemaNode && value.schema);
+    }
+    function normalizeFormField(value, path) {
+      if (isSchemaNode(value)) return value.schema;
+      throw new Error("form schema " + (path || "field") + " must use form.string()/form.boolean()/form.select() helpers");
+    }
+    function normalizeConfigSchema(fields) {
+      if (!fields || typeof fields !== "object" || Array.isArray(fields) || isSchemaNode(fields)) {
+        throw new Error("new form(...) only accepts an object like { token: form.string().title(\"Token\") }");
       }
-      return value;
+      const properties = {};
+      for (const key of Object.keys(fields)) {
+        if (key.startsWith("_")) continue;
+        properties[key] = normalizeFormField(fields[key], key);
+      }
+      return { type: "object", properties: properties };
     }
     function collectSchemaDefaults(schema) {
-      schema = normalizeSchema(schema) || {};
+      schema = isSchemaNode(schema) ? schema.schema : (schema || {});
+      if (!schema || typeof schema !== "object") return undefined;
       if (Object.prototype.hasOwnProperty.call(schema, "default")) return schema.default;
       if (schema.type === "object" || schema.properties) {
         const values = {};
@@ -61,37 +66,61 @@ const nodeRuntimePreloadScript = `
       this.__schemaNode = true;
       this.schema = Object.assign({ type: type }, extra || {});
     }
-    SchemaNode.prototype.setTitle = function (value) { this.schema.title = value; return this; };
-    SchemaNode.prototype.setDescription = function (value) { this.schema.description = value; return this; };
-    SchemaNode.prototype.setDefault = function (value) { this.schema.default = value; return this; };
-    SchemaNode.prototype.setEnum = function (value) { this.schema.enum = value; return this; };
-    SchemaNode.prototype.setEnumNames = function (value) { this.schema.enumNames = value; return this; };
-    SchemaNode.prototype.setRequired = function (value) { this.schema.required = value; return this; };
-    SchemaNode.prototype.setFormat = function (value) { this.schema.format = value; return this; };
-    SchemaNode.prototype.setMin = function (value) { this.schema.minimum = value; return this; };
-    SchemaNode.prototype.setMax = function (value) { this.schema.maximum = value; return this; };
-    SchemaNode.prototype.setMinLength = function (value) { this.schema.minLength = value; return this; };
-    SchemaNode.prototype.setMaxLength = function (value) { this.schema.maxLength = value; return this; };
-    SchemaNode.prototype.setPattern = function (value) { this.schema.pattern = value; return this; };
-    SchemaNode.prototype.setWidget = function (value) { this.schema["ui:widget"] = value; return this; };
+    SchemaNode.prototype.title = function (value) { this.schema.title = value; return this; };
+    SchemaNode.prototype.description = function (value) { this.schema.description = value; return this; };
+    SchemaNode.prototype.default = function (value) { this.schema.default = value; return this; };
+    SchemaNode.prototype.options = function (value) { return applySchemaOptions(this, value); };
+    SchemaNode.prototype.required = function (value) { this.schema.required = value; return this; };
+    SchemaNode.prototype.format = function (value) { this.schema.format = value; return this; };
+    SchemaNode.prototype.min = function (value) { this.schema.minimum = value; return this; };
+    SchemaNode.prototype.max = function (value) { this.schema.maximum = value; return this; };
+    SchemaNode.prototype.minLength = function (value) { this.schema.minLength = value; return this; };
+    SchemaNode.prototype.maxLength = function (value) { this.schema.maxLength = value; return this; };
+    SchemaNode.prototype.pattern = function (value) { this.schema.pattern = value; return this; };
+    SchemaNode.prototype.widget = function (value) { this.schema["ui:widget"] = value; return this; };
     SchemaNode.prototype.toJSON = function () { return this.schema; };
-    const sillyGirlCreateSchema = {
+    function applySchemaOptions(node, options) {
+      if (Array.isArray(options)) {
+        const values = [];
+        const names = [];
+        for (const item of options) {
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            const value = Object.prototype.hasOwnProperty.call(item, "value") ? item.value : (item.id ?? item.key ?? item.name ?? item.label);
+            values.push(value);
+            names.push(String(item.label ?? item.name ?? value));
+          } else {
+            values.push(item);
+            names.push(String(item));
+          }
+        }
+        node.schema.enum = values;
+        if (names.some(function (name, index) { return name !== String(values[index]); })) node.schema.enumNames = names;
+        return node;
+      }
+      if (options && typeof options === "object") {
+        const values = Object.keys(options);
+        node.schema.enum = values;
+        node.schema.enumNames = values.map(function (key) { return String(options[key]); });
+      }
+      return node;
+    }
+    const formHelpers = {
       string: function () { return new SchemaNode("string"); },
       number: function () { return new SchemaNode("number"); },
       integer: function () { return new SchemaNode("integer"); },
       boolean: function () { return new SchemaNode("boolean"); },
-      array: function (item) { return new SchemaNode("array", { items: normalizeSchema(item) || {} }); },
+      array: function (item) { return new SchemaNode("array", item === undefined ? {} : { items: normalizeFormField(item, "array item") }); },
       object: function (props) {
         const properties = {};
-        for (const key of Object.keys(props || {})) properties[key] = normalizeSchema(props[key]);
-        return new SchemaNode("object", { properties });
+        for (const key of Object.keys(props || {})) properties[key] = normalizeFormField(props[key], key);
+        return new SchemaNode("object", { properties: properties });
       },
+      select: function (options) { return applySchemaOptions(new SchemaNode("string"), options); },
     };
-    class SillyGirlPluginConfig {
+    class PluginConfigFormInstance {
       constructor(schema) {
         this.uuid = process.env.PLUGIN_ID || "";
-        this.jsonSchema = normalizeSchema(schema) || {};
-        if (!this.jsonSchema.type) this.jsonSchema.type = "object";
+        this.jsonSchema = normalizeConfigSchema(schema);
         try {
           const fs = require("fs");
           const target = process.env.SILLYGIRL_CONFIG_SCHEMA_FILE || "";
@@ -99,12 +128,13 @@ const nodeRuntimePreloadScript = `
           else console.log("__SILLYGIRL_CONFIG_SCHEMA__" + JSON.stringify(this.jsonSchema));
           process.exit(0);
         } catch (err) {
-          console.error("SillyGirlPluginConfig schema export failed:", err && err.message ? err.message : err);
+          console.error("form schema export failed:", err && err.message ? err.message : err);
           process.exit(1);
         }
       }
     }
-    function form(schema) { return new SillyGirlPluginConfig(schema); }
+    function form(schema) { return new PluginConfigFormInstance(schema); }
+    Object.assign(form, formHelpers, { defaults: function (fields) { return collectSchemaDefaults(normalizeConfigSchema(fields)); } });
     const dummy = new Proxy(function () {}, {
       get: function () { return dummy; },
       apply: function () { return dummy; },
@@ -113,18 +143,15 @@ const nodeRuntimePreloadScript = `
     const sg = {
       Adapter: dummy,
       Bucket: dummy,
-      QingLong: dummy,
-      SmallCat: dummy,
-      DaiDai: dummy,
-      sillyGirlCreateSchema,
-      SillyGirlPluginConfig,
       form,
-      pluginConfigDefaults: collectSchemaDefaults,
-      userList: async function () { return []; },
       sender: dummy,
-      restart: async function () { return {}; },
-      update: async function () { return {}; },
+      Container: dummy,
       utils: {
+        userList: async function () { return []; },
+        sleep: async function () {},
+        version: async function () { return {}; },
+        restart: async function () { return {}; },
+        update: async function () { return {}; },
         buildCQTag: function () { return ""; },
         parseCQText: function () { return []; },
         image: function (url) { return "[CQ:image,url=" + String(url || "") + "]"; },
@@ -133,17 +160,8 @@ const nodeRuntimePreloadScript = `
     };
     globalThis.Adapter = sg.Adapter;
     globalThis.Bucket = sg.Bucket;
-    globalThis.QingLong = sg.QingLong;
-    globalThis.SmallCat = sg.SmallCat;
-    globalThis.DaiDai = sg.DaiDai;
-    globalThis.sillyGirlCreateSchema = sillyGirlCreateSchema;
-    globalThis.SillyGirlPluginConfig = SillyGirlPluginConfig;
     globalThis.form = form;
-    globalThis.pluginConfigDefaults = collectSchemaDefaults;
-    globalThis.userList = sg.userList;
     globalThis.sender = sg.sender;
-    globalThis.restart = sg.restart;
-    globalThis.update = sg.update;
     globalThis.utils = sg.utils;
     const Module = require("module");
     const originalLoad = Module._load;
@@ -197,6 +215,72 @@ const nodeRuntimePreloadScript = `
     return Number.isInteger(index) ? index : 0;
   }
 
+
+
+  const containerDefinitions = {
+    smallcat: { key: "smallcat_panels", label: "smallcat" },
+    qinglong: { key: "qinglong_panels", label: "青龙" },
+    daidai: { key: "daidai_panels", label: "呆呆" },
+  };
+
+  function normalizeContainerKind(kind) {
+    const value = String(kind || "").trim().toLowerCase();
+    if (!value) return "";
+    if (value === "smallcat" || value === "small_cat" || value === "sc") return "smallcat";
+    if (value === "qinglong" || value === "qing_long" || value === "ql" || value === "青龙") return "qinglong";
+    if (value === "daidai" || value === "dai_dai" || value === "dd" || value === "呆呆") return "daidai";
+    throw new Error("未知容器类型：" + kind);
+  }
+
+  function publicContainerPanel(panel, index) {
+    return {
+      index,
+      id: String(panel && panel.id || ""),
+      name: String(panel && panel.name || ""),
+      address: String(panel && panel.address || ""),
+      status: String(panel && panel.status || ""),
+      message: String(panel && panel.message || ""),
+    };
+  }
+
+  class Container {
+    constructor(options) {
+      this.options = options || {};
+      this.QingLong = QingLong;
+      this.SmallCat = SmallCat;
+      this.DaiDai = DaiDai;
+    }
+    async getList(kind) {
+      const wanted = normalizeContainerKind(kind);
+      const kinds = wanted ? [wanted] : ["smallcat", "qinglong", "daidai"];
+      const result = {};
+      for (const item of kinds) {
+        const definition = containerDefinitions[item];
+        const panels = await readPanels(definition.key);
+        result[item] = {
+          type: item,
+          key: item,
+          label: definition.label,
+          total: panels.length,
+          list: panels.map((panel, index) => publicContainerPanel(panel, index + 1)),
+        };
+      }
+      return wanted ? result[wanted] : result;
+    }
+    async count(kind) {
+      const info = await this.getList(kind);
+      return info.total;
+    }
+    async get(kind, id) {
+      const info = await this.getList(kind);
+      const index = panelIndex(id);
+      return info.list.find((item) => item.index === index || item.id === String(id));
+    }
+  }
+
+
+
+
   function queryString(query) {
     const values = new URLSearchParams();
     for (const key of Object.keys(query || {})) {
@@ -223,23 +307,27 @@ const nodeRuntimePreloadScript = `
     return [value];
   }
 
-  function normalizeSchema(value) {
-    if (value && value.__schemaNode && value.schema) return value.schema;
-    if (value && typeof value.toJSON === "function") return value.toJSON();
-    if (Array.isArray(value)) return value.map((item) => normalizeSchema(item));
-    if (value && typeof value === "object") {
-      const result = {};
-      for (const key of Object.keys(value)) {
-        if (key.startsWith("_") || key === "__schemaNode") continue;
-        result[key] = normalizeSchema(value[key]);
-      }
-      return result;
-    }
-    return value;
+  function isSchemaNode(value) {
+    return !!(value && value.__schemaNode && value.schema);
   }
-
+  function normalizeFormField(value, path) {
+    if (isSchemaNode(value)) return value.schema;
+    throw new Error("form schema " + (path || "field") + " must use form.string()/form.boolean()/form.select() helpers");
+  }
+  function normalizeConfigSchema(fields) {
+    if (!fields || typeof fields !== "object" || Array.isArray(fields) || isSchemaNode(fields)) {
+      throw new Error("new form(...) only accepts an object like { token: form.string().title(\"Token\") }");
+    }
+    const properties = {};
+    for (const key of Object.keys(fields)) {
+      if (key.startsWith("_")) continue;
+      properties[key] = normalizeFormField(fields[key], key);
+    }
+    return { type: "object", properties: properties };
+  }
   function collectSchemaDefaults(schema) {
-    schema = normalizeSchema(schema) || {};
+    schema = isSchemaNode(schema) ? schema.schema : (schema || {});
+    if (!schema || typeof schema !== "object") return undefined;
     if (Object.prototype.hasOwnProperty.call(schema, "default")) return schema.default;
     if (schema.type === "object" || schema.properties) {
       const values = {};
@@ -252,44 +340,65 @@ const nodeRuntimePreloadScript = `
     if (schema.type === "array") return [];
     return undefined;
   }
-
   function SchemaNode(type, extra) {
     this.__schemaNode = true;
     this.schema = Object.assign({ type: type }, extra || {});
   }
-  SchemaNode.prototype.setTitle = function (value) { this.schema.title = value; return this; };
-  SchemaNode.prototype.setDescription = function (value) { this.schema.description = value; return this; };
-  SchemaNode.prototype.setDefault = function (value) { this.schema.default = value; return this; };
-  SchemaNode.prototype.setEnum = function (value) { this.schema.enum = value; return this; };
-  SchemaNode.prototype.setEnumNames = function (value) { this.schema.enumNames = value; return this; };
-  SchemaNode.prototype.setRequired = function (value) { this.schema.required = value; return this; };
-  SchemaNode.prototype.setFormat = function (value) { this.schema.format = value; return this; };
-  SchemaNode.prototype.setMin = function (value) { this.schema.minimum = value; return this; };
-  SchemaNode.prototype.setMax = function (value) { this.schema.maximum = value; return this; };
-  SchemaNode.prototype.setMinLength = function (value) { this.schema.minLength = value; return this; };
-  SchemaNode.prototype.setMaxLength = function (value) { this.schema.maxLength = value; return this; };
-  SchemaNode.prototype.setPattern = function (value) { this.schema.pattern = value; return this; };
-  SchemaNode.prototype.setWidget = function (value) { this.schema["ui:widget"] = value; return this; };
+  SchemaNode.prototype.title = function (value) { this.schema.title = value; return this; };
+  SchemaNode.prototype.description = function (value) { this.schema.description = value; return this; };
+  SchemaNode.prototype.default = function (value) { this.schema.default = value; return this; };
+  SchemaNode.prototype.options = function (value) { return applySchemaOptions(this, value); };
+  SchemaNode.prototype.required = function (value) { this.schema.required = value; return this; };
+  SchemaNode.prototype.format = function (value) { this.schema.format = value; return this; };
+  SchemaNode.prototype.min = function (value) { this.schema.minimum = value; return this; };
+  SchemaNode.prototype.max = function (value) { this.schema.maximum = value; return this; };
+  SchemaNode.prototype.minLength = function (value) { this.schema.minLength = value; return this; };
+  SchemaNode.prototype.maxLength = function (value) { this.schema.maxLength = value; return this; };
+  SchemaNode.prototype.pattern = function (value) { this.schema.pattern = value; return this; };
+  SchemaNode.prototype.widget = function (value) { this.schema["ui:widget"] = value; return this; };
   SchemaNode.prototype.toJSON = function () { return this.schema; };
-
-  const sillyGirlCreateSchema = {
+  function applySchemaOptions(node, options) {
+    if (Array.isArray(options)) {
+      const values = [];
+      const names = [];
+      for (const item of options) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const value = Object.prototype.hasOwnProperty.call(item, "value") ? item.value : (item.id ?? item.key ?? item.name ?? item.label);
+          values.push(value);
+          names.push(String(item.label ?? item.name ?? value));
+        } else {
+          values.push(item);
+          names.push(String(item));
+        }
+      }
+      node.schema.enum = values;
+      if (names.some(function (name, index) { return name !== String(values[index]); })) node.schema.enumNames = names;
+      return node;
+    }
+    if (options && typeof options === "object") {
+      const values = Object.keys(options);
+      node.schema.enum = values;
+      node.schema.enumNames = values.map(function (key) { return String(options[key]); });
+    }
+    return node;
+  }
+  const formHelpers = {
     string: function () { return new SchemaNode("string"); },
     number: function () { return new SchemaNode("number"); },
     integer: function () { return new SchemaNode("integer"); },
     boolean: function () { return new SchemaNode("boolean"); },
-    array: function (item) { return new SchemaNode("array", { items: normalizeSchema(item) || {} }); },
+    array: function (item) { return new SchemaNode("array", item === undefined ? {} : { items: normalizeFormField(item, "array item") }); },
     object: function (props) {
       const properties = {};
-      for (const key of Object.keys(props || {})) properties[key] = normalizeSchema(props[key]);
-      return new SchemaNode("object", { properties });
+      for (const key of Object.keys(props || {})) properties[key] = normalizeFormField(props[key], key);
+      return new SchemaNode("object", { properties: properties });
     },
+    select: function (options) { return applySchemaOptions(new SchemaNode("string"), options); },
   };
-
-  class SillyGirlPluginConfig {
+  class PluginConfigFormInstance {
     constructor(schema) {
       this.uuid = process.env.PLUGIN_ID || "";
-      this.jsonSchema = normalizeSchema(schema) || {};
-      if (!this.jsonSchema.type) this.jsonSchema.type = "object";
+      this.jsonSchema = normalizeConfigSchema(schema);
       this.userConfig = {};
       if (process.env.PLUGIN_CONFIG_JSON) {
         try {
@@ -325,8 +434,9 @@ const nodeRuntimePreloadScript = `
   }
 
   function form(schema) {
-    return new SillyGirlPluginConfig(schema);
+    return new PluginConfigFormInstance(schema);
   }
+  Object.assign(form, formHelpers, { defaults: function (fields) { return collectSchemaDefaults(normalizeConfigSchema(fields)); } });
 
   async function userList() {
     return await new Bucket("__plugin_users__").get("list", []);
@@ -576,23 +686,20 @@ const nodeRuntimePreloadScript = `
     async systemNotify(title, content) { return this.request("POST", "/notifications/send", { title, content }); }
   }
 
-  sg.QingLong = sg.QingLong || QingLong;
-  sg.SmallCat = sg.SmallCat || SmallCat;
-  sg.DaiDai = sg.DaiDai || DaiDai;
-  sg.sillyGirlCreateSchema = sg.sillyGirlCreateSchema || sillyGirlCreateSchema;
-  sg.SillyGirlPluginConfig = sg.SillyGirlPluginConfig || SillyGirlPluginConfig;
+
+  sg.Container = sg.Container || Container;
   sg.form = sg.form || form;
-  sg.pluginConfigDefaults = sg.pluginConfigDefaults || collectSchemaDefaults;
-  sg.userList = sg.userList || userList;
-  globalThis.QingLong = sg.QingLong;
-  globalThis.SmallCat = sg.SmallCat;
-  globalThis.DaiDai = sg.DaiDai;
-  globalThis.sillyGirlCreateSchema = sg.sillyGirlCreateSchema;
-  globalThis.SillyGirlPluginConfig = sg.SillyGirlPluginConfig;
+
+  sg.utils = sg.utils || {};
+  sg.utils.userList = sg.utils.userList || userList;
+  if (typeof sg.sleep === "function") sg.utils.sleep = sg.utils.sleep || sg.sleep;
+  if (typeof sg.version === "function") sg.utils.version = sg.utils.version || sg.version;
+  if (typeof sg.restart === "function") sg.utils.restart = sg.utils.restart || sg.restart;
+  if (typeof sg.update === "function") sg.utils.update = sg.utils.update || sg.update;
+  if (sg.sender && typeof sg.sender === "object" && typeof sg.pushAdmin === "function") {
+    sg.sender.pushAdmin = sg.sender.pushAdmin || sg.pushAdmin;
+  }
   globalThis.form = sg.form;
-  globalThis.pluginConfigDefaults = sg.pluginConfigDefaults;
-  globalThis.userList = sg.userList;
-  globalThis.restart = sg.restart;
-  globalThis.update = sg.update;
+  globalThis.Container = sg.Container;
 })();
 `

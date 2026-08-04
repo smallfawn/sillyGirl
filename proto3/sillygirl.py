@@ -219,31 +219,42 @@ class Bucket:
             asyncio.get_event_loop().create_task(watch_loop())
 
 
-async def userList():
+async def _userList():
     """Read ordinary users and this plugin's authorization state."""
     return await Bucket("__plugin_users__").get("list", [])
 
 
-def normalize_schema(value):
-    if isinstance(value, SchemaNode):
-        return value.toJSON()
-    if hasattr(value, "toJSON") and callable(value.toJSON):
-        return value.toJSON()
-    if isinstance(value, list):
-        return [normalize_schema(item) for item in value]
-    if isinstance(value, dict):
-        return {key: normalize_schema(item) for key, item in value.items() if not str(key).startswith("_")}
-    return value
+def _is_schema_node(value):
+    return isinstance(value, SchemaNode)
 
 
-def pluginConfigDefaults(schema):
-    schema = normalize_schema(schema) or {}
+def _normalize_form_field(value, path="field"):
+    if _is_schema_node(value):
+        return value.toJSON()
+    raise RuntimeError(f"form schema {path} must use form.string()/form.boolean()/form.select() helpers")
+
+
+def normalize_config_schema(fields):
+    if not isinstance(fields, dict):
+        raise RuntimeError('form(...) only accepts an object like {"token": form.string().title("Token")}')
+    result = {"type": "object", "properties": {}}
+    for key, value in fields.items():
+        if str(key).startswith("_"):
+            continue
+        result["properties"][key] = _normalize_form_field(value, key)
+    return result
+
+
+def _pluginConfigDefaults(schema):
+    schema = schema.toJSON() if _is_schema_node(schema) else (schema or {})
+    if not isinstance(schema, dict):
+        return None
     if "default" in schema:
         return schema["default"]
     if schema.get("type") == "object" or schema.get("properties"):
         result = {}
         for key, value in (schema.get("properties") or {}).items():
-            default_value = pluginConfigDefaults(value)
+            default_value = _pluginConfigDefaults(value)
             if default_value is not None:
                 result[key] = default_value
         return result
@@ -258,55 +269,50 @@ class SchemaNode:
         if extra:
             self.schema.update(extra)
 
-    def setTitle(self, value):
+    def title(self, value):
         self.schema["title"] = value
         return self
 
-    def setDescription(self, value):
+    def description(self, value):
         self.schema["description"] = value
         return self
 
-    def setDefault(self, value):
+    def default(self, value):
         self.schema["default"] = value
         return self
 
-    def setEnum(self, value):
-        self.schema["enum"] = value
-        return self
+    def options(self, value):
+        return _apply_schema_options(self, value)
 
-    def setEnumNames(self, value):
-        self.schema["enumNames"] = value
-        return self
-
-    def setRequired(self, value):
+    def required(self, value):
         self.schema["required"] = value
         return self
 
-    def setFormat(self, value):
+    def format(self, value):
         self.schema["format"] = value
         return self
 
-    def setMin(self, value):
+    def min(self, value):
         self.schema["minimum"] = value
         return self
 
-    def setMax(self, value):
+    def max(self, value):
         self.schema["maximum"] = value
         return self
 
-    def setMinLength(self, value):
+    def minLength(self, value):
         self.schema["minLength"] = value
         return self
 
-    def setMaxLength(self, value):
+    def maxLength(self, value):
         self.schema["maxLength"] = value
         return self
 
-    def setPattern(self, value):
+    def pattern(self, value):
         self.schema["pattern"] = value
         return self
 
-    def setWidget(self, value):
+    def widget(self, value):
         self.schema["ui:widget"] = value
         return self
 
@@ -314,7 +320,30 @@ class SchemaNode:
         return self.schema
 
 
-class _SillyGirlCreateSchema:
+def _apply_schema_options(node, options):
+    if isinstance(options, list):
+        values = []
+        names = []
+        for item in options:
+            if isinstance(item, dict):
+                value = item["value"] if "value" in item else (item.get("id") or item.get("key") or item.get("name") or item.get("label"))
+                values.append(value)
+                names.append(str(item.get("label") or item.get("name") or value))
+            else:
+                values.append(item)
+                names.append(str(item))
+        node.schema["enum"] = values
+        if any(name != str(values[index]) for index, name in enumerate(names)):
+            node.schema["enumNames"] = names
+        return node
+    if isinstance(options, dict):
+        values = list(options.keys())
+        node.schema["enum"] = values
+        node.schema["enumNames"] = [str(options[key]) for key in values]
+    return node
+
+
+class _FormHelpers:
     def string(self):
         return SchemaNode("string")
 
@@ -328,24 +357,24 @@ class _SillyGirlCreateSchema:
         return SchemaNode("boolean")
 
     def array(self, item=None):
-        return SchemaNode("array", {"items": normalize_schema(item) or {}})
+        return SchemaNode("array", {} if item is None else {"items": _normalize_form_field(item, "array item")})
 
     def object(self, props=None):
         return SchemaNode(
             "object",
-            {"properties": {key: normalize_schema(value) for key, value in (props or {}).items()}},
+            {"properties": {key: _normalize_form_field(value, key) for key, value in (props or {}).items()}},
         )
 
+    def select(self, options):
+        return _apply_schema_options(SchemaNode("string"), options)
 
-sillyGirlCreateSchema = _SillyGirlCreateSchema()
 
+_formHelpers = _FormHelpers()
 
-class SillyGirlPluginConfig:
+class _PluginConfigFormInstance:
     def __init__(self, schema):
         self.uuid = plugin_id
-        self.jsonSchema = normalize_schema(schema) or {}
-        if not self.jsonSchema.get("type"):
-            self.jsonSchema["type"] = "object"
+        self.jsonSchema = normalize_config_schema(schema)
         self.userConfig = {}
         if os.environ.get("PLUGIN_CONFIG_JSON"):
             try:
@@ -389,7 +418,12 @@ class SillyGirlPluginConfig:
 
 
 def form(schema):
-    return SillyGirlPluginConfig(schema)
+    return _PluginConfigFormInstance(schema)
+
+
+for _name in ("string", "number", "integer", "boolean", "array", "object", "select"):
+    setattr(form, _name, getattr(_formHelpers, _name))
+form.defaults = lambda fields: _pluginConfigDefaults(normalize_config_schema(fields))
 
 
 async def _read_runtime_panels(key):
@@ -413,6 +447,77 @@ def _runtime_panel_index(ref):
         return int(ref)
     except Exception:
         return 0
+
+
+
+
+_CONTAINER_DEFINITIONS = {
+    "smallcat": {"key": "smallcat_panels", "label": "smallcat"},
+    "qinglong": {"key": "qinglong_panels", "label": "青龙"},
+    "daidai": {"key": "daidai_panels", "label": "呆呆"},
+}
+
+
+def _normalize_container_kind(kind=None):
+    value = str(kind or "").strip().lower()
+    if not value:
+        return ""
+    if value in ("smallcat", "small_cat", "sc"):
+        return "smallcat"
+    if value in ("qinglong", "qing_long", "ql", "青龙"):
+        return "qinglong"
+    if value in ("daidai", "dai_dai", "dd", "呆呆"):
+        return "daidai"
+    raise RuntimeError(f"未知容器类型：{kind}")
+
+
+def _public_container_panel(panel, index):
+    panel = panel or {}
+    return {
+        "index": index,
+        "id": str(panel.get("id") or ""),
+        "name": str(panel.get("name") or ""),
+        "address": str(panel.get("address") or ""),
+        "status": str(panel.get("status") or ""),
+        "message": str(panel.get("message") or ""),
+    }
+
+
+class Container:
+    def __init__(self, options=None):
+        self.options = options or {}
+        self.QingLong = _QingLong
+        self.SmallCat = _SmallCat
+        self.DaiDai = _DaiDai
+
+    async def getList(self, kind=None):
+        wanted = _normalize_container_kind(kind)
+        kinds = [wanted] if wanted else ["smallcat", "qinglong", "daidai"]
+        result = {}
+        for item in kinds:
+            definition = _CONTAINER_DEFINITIONS[item]
+            panels = await _read_runtime_panels(definition["key"])
+            result[item] = {
+                "type": item,
+                "key": item,
+                "label": definition["label"],
+                "total": len(panels),
+                "list": [_public_container_panel(panel, index + 1) for index, panel in enumerate(panels)],
+            }
+        return result[wanted] if wanted else result
+
+    async def count(self, kind):
+        info = await self.getList(kind)
+        return int(info.get("total") or 0)
+
+    async def get(self, kind, panel_id):
+        info = await self.getList(kind)
+        index = _runtime_panel_index(panel_id)
+        target_id = str(panel_id)
+        for item in info.get("list", []):
+            if item.get("index") == index or item.get("id") == target_id:
+                return item
+        return None
 
 
 def _normalize_path(value, prefix):
@@ -470,7 +575,7 @@ async def _http_json(method, url, headers=None, body=None):
     return await asyncio.to_thread(_http_json_sync, method, url, headers, body)
 
 
-class QingLong:
+class _QingLong:
     def __init__(self, options):
         self.id = _runtime_panel_index(options)
         self.uuid = ""
@@ -581,7 +686,7 @@ def _filter_smallcat_account_payload(value, allowed):
     return result
 
 
-class SmallCat:
+class _SmallCat:
     def __init__(self, options):
         self.id = _runtime_panel_index(options)
         self.uuid = ""
@@ -712,7 +817,7 @@ class SmallCat:
         return await self._post("/wx/appmsglike", options)
 
 
-class DaiDai:
+class _DaiDai:
     def __init__(self, options):
         self.id = _runtime_panel_index(options)
         self.uuid = ""
@@ -997,6 +1102,10 @@ class Sender:
         return json.loads(response.value or "null")
 
 
+    async def pushAdmin(self, content, options=None):
+        return await _pushAdmin(content, options or {})
+
+
 setattr(Sender, "continue", Sender.continue_)
 sender = Sender(os.environ.get("SENDER_ID", ""))
 s = sender
@@ -1082,6 +1191,26 @@ class Adapter:
 
 
 class Utils:
+    async def userList(self):
+        return await _userList()
+
+    async def sleep(self, ms=1000):
+        return await _sleep(ms)
+
+    async def restart(self):
+        return await _restart()
+
+    async def version(self):
+        return {
+            "current": str(os.environ.get("SILLYGIRL_VERSION") or "unknown"),
+            "remote": str(os.environ.get("SILLYGIRL_REMOTE_VERSION") or os.environ.get("SILLYGIRL_VERSION") or "unknown"),
+            "source": str(os.environ.get("SILLYGIRL_VERSION_SOURCE") or ""),
+            "repository": str(os.environ.get("SILLYGIRL_REPOSITORY") or ""),
+        }
+
+    async def update(self, options=None):
+        return await _update(options or {})
+
     def buildCQTag(self, cq_type, params=None, prefix="CQ"):
         params = params or {}
         values = ",".join(f"{key}={value}" for key, value in params.items())
@@ -1121,7 +1250,7 @@ def _normalize_list(value):
     return [item.strip() for item in re.split(r"[,&\s]+", str(value)) if item.strip()]
 
 
-async def pushAdmin(content, options=None):
+async def _pushAdmin(content, options=None):
     options = options or {}
     result = []
     platforms = _normalize_list(options.get("platform")) + _normalize_list(options.get("platforms"))
@@ -1141,11 +1270,11 @@ async def pushAdmin(content, options=None):
     return result
 
 
-async def sleep(ms=1000):
+async def _sleep(ms=1000):
     await asyncio.sleep(float(ms or 0) / 1000)
 
 
-async def restart():
+async def _restart():
     return await Bucket("sillyGirl").set("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
@@ -1412,7 +1541,7 @@ def _normalize_version_text(value):
     return re.sub(r"^[vV]", "", str(value or "").strip().replace("refs/tags/", ""))
 
 
-async def update(options=None):
+async def _update(options=None):
     try:
         options = options or {}
         if not isinstance(options, dict):
@@ -1434,7 +1563,7 @@ async def update(options=None):
             shutil.rmtree(tmp_dir, ignore_errors=True)
         restarted = options.get("restart") is not False
         if restarted:
-            await restart()
+            await _restart()
         return {
             "status": True,
             "message": "更新完成",

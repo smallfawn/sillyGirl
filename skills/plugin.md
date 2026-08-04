@@ -17,30 +17,32 @@ Use this skill to write SillyGirl script plugins for this repository.
 const {
   sender: s,
   Bucket,
-  QingLong,
-  SmallCat,
-  DaiDai,
-  sillyGirlCreateSchema,
-  SillyGirlPluginConfig,
+  Container,
   form,
-  sleep,
-  restart,
-  update,
+  utils,
 } = require('sillygirl');
+
+const ct = new Container();
 ```
+
+Use `new ct.QingLong({ id })`, `new ct.SmallCat({ id })`, `new ct.DaiDai({ id })` for panel clients. Use `utils.userList()`, `utils.sleep()`, `utils.version()`, `utils.restart()`, `utils.update()` for system helpers.
 
 - Import Python runtime APIs from `sillygirl`:
 
 ```python
-from sillygirl import sender as s, Bucket, QingLong, SmallCat, DaiDai, pushAdmin, restart, update
+from sillygirl import sender as s, Bucket, Container, form, utils
+
+ct = Container()
 ```
+
+Use `ct.QingLong({"id": 1})`, `ct.SmallCat({"id": 1})`, `ct.DaiDai({"id": 1})`.
 
 - Do not use Goja-only APIs or BNCR globals.
 - Do not use `BncrDB`, `BncrCreateSchema`, or `BncrPluginConfig`.
 - Do not invent wrappers that change third-party API response shapes. Return or reply with the original API meaning unless the user asks for formatting.
 - Prefer `async function main() { ... }` and end with `main().catch(...)`.
 - Always handle exceptions and reply with a useful error message.
-- Never hard-code secrets in plugin code. Use `SillyGirlPluginConfig`, `Bucket`, or environment variables.
+- Never hard-code secrets in plugin code. Use `new form({...})`, `Bucket`, or environment variables.
 - Declare third-party dependencies with `@depe ["package"]`; NodeJS uses pnpm, Python uses pipx.
 
 ## Metadata Header
@@ -51,7 +53,7 @@ Every plugin should start with a block comment:
 /**
  * @title 插件标题
  * @author 作者
- * @version v1.0.0
+ * @version v1.0.1
  * @desc 插件说明
  * @rule raw ^命令$
  * @admin false
@@ -65,7 +67,7 @@ Supported metadata:
 | --- | --- | --- |
 | `@title 标题` | Recommended | Display name in Admin and plugin market. |
 | `@author 作者` | Optional | Plugin author. |
-| `@version v1.0.0` | Optional | Plugin version. |
+| `@version v1.0.1` | Optional | Plugin version. |
 | `@desc 说明` | Optional | Plugin description. Use `@desc`, not `@description`. |
 | `@icon URL` | Optional | Plugin icon URL. If omitted, SillyGirl uses the default apple icon. |
 | `@rule 规则` | Required for message plugins | Message trigger. Can appear multiple times. |
@@ -179,22 +181,26 @@ Use one bucket per plugin or feature. Avoid writing to shared buckets like `sill
 
 ## Plugin Configuration
 
-Use `sillyGirlCreateSchema` plus `new SillyGirlPluginConfig(schema)` or `form(schema)` at top level.
+Use only the chain-style `new form({...})` at top level. Do not use raw JSON Schema, `utils.schema`, `form.schema`, `SillyGirlPluginConfig`, or `setTitle/setDefault/setEnum` aliases.
 
 ```js
-const schema = sillyGirlCreateSchema.object({
-  apiBase: sillyGirlCreateSchema.string().title('接口地址').default(''),
-  token: sillyGirlCreateSchema.string().title('Token').format('password').default(''),
-});
+const { form } = require('sillygirl');
 
-const Config = new SillyGirlPluginConfig(schema);
+const Config = new form({
+  apiBase: form.string().title('接口地址').default(''),
+  token: form.string().title('Token').format('password').default(''),
+  open: form.boolean().title('是否启用').default(false),
+  mode: form.select([{ label: '自动', value: 'auto' }, { label: '手动', value: 'manual' }])
+    .title('模式')
+    .default('auto'),
+});
 ```
 
 Read config values:
 
 ```js
-const apiBase = await Config.get('apiBase', '');
-const token = await Config.get('token', '');
+const values = await Config.get();
+const token = values.token || '';
 ```
 
 Config registration must run at plugin load time, not inside a branch that may never execute.
@@ -209,7 +215,7 @@ Python plugin header:
 """
 * @title Python示例
 * @rule raw ^你好$
-* @version v1.0.0
+* @version v1.0.1
 * @depe ["requests"]
 """
 ```
@@ -228,7 +234,7 @@ Minimal Python plugin:
 """
 * @title Python你好
 * @rule raw ^你好$
-* @version v1.0.0
+* @version v1.0.1
 """
 
 import asyncio
@@ -245,13 +251,13 @@ asyncio.run(main())
 Python inline clients:
 
 ```python
-ql = QingLong({"id": 1})
+ql = ct.QingLong({"id": 1})
 envs = await ql.getEnvs({"searchValue": "JD_COOKIE"})
 
-sc = SmallCat({"id": 1})
+sc = ct.SmallCat({"id": 1})
 code = await sc.getCode({"openid": "openid", "appid": "wx123"})
 
-dd = DaiDai({"id": 1})
+dd = ct.DaiDai({"id": 1})
 items = await dd.getEnvs({"keyword": "JD_COOKIE"})
 ```
 
@@ -260,17 +266,18 @@ items = await dd.getEnvs({"keyword": "JD_COOKIE"})
 Constructors use object parameters only:
 
 ```js
-const ql = new QingLong({ id: 1 });
-const sc = new SmallCat({ id: 1 });
-const dd = new DaiDai({ id: 1 });
+const ct = new Container();
+const ql = new ct.QingLong({ id: 1 });
+const sc = new ct.SmallCat({ id: 1 });
+const dd = new ct.DaiDai({ id: 1 });
 ```
 
 Do not write:
 
 ```js
-new QingLong(1);
-new SmallCat(1);
-new DaiDai(1);
+new ct.QingLong(1);
+new ct.SmallCat(1);
+new ct.DaiDai(1);
 ```
 
 ### QingLong
@@ -323,7 +330,7 @@ For HTTP plugins:
 /**
  * @title Web 示例
  * @web true
- * @version v1.0.0
+ * @version v1.0.1
  */
 
 const http = require('http');
@@ -349,7 +356,7 @@ Python HTTP plugin:
 """
 * @title PythonWeb示例
 * @web true
-* @version v1.0.0
+* @version v1.0.1
 """
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -387,7 +394,7 @@ Carry handlers must include `@carry true` so Admin can select them:
 /**
  * @title 搬运处理
  * @carry true
- * @version v1.0.0
+ * @version v1.0.1
  */
 
 const { sender: s } = require('sillygirl');
@@ -408,7 +415,7 @@ Cron plugins should include `@cron`:
 /**
  * @title 每日提醒
  * @cron 0 9 * * *
- * @version v1.0.0
+ * @version v1.0.1
  */
 
 const { sender: s } = require('sillygirl');
@@ -434,7 +441,7 @@ Before finishing a plugin:
 - Header uses `@title`, not `@name`.
 - Description uses `@desc`, not `@description`.
 - No BNCR names remain.
-- Constructors are `new QingLong({ id })`, `new SmallCat({ id })`, `new DaiDai({ id })`.
+- Constructors are `new ct.QingLong({ id })`, `new ct.SmallCat({ id })`, `new ct.DaiDai({ id })`.
 - `SmallCat.checkQr` is spelled correctly.
 - Sensitive commands check admin permission.
 - External requests have timeouts or are wrapped in try/catch.

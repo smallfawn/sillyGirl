@@ -25,10 +25,10 @@ func TestRegisterNodePluginConfigSchema(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "config-plugin.js")
 	script := `
-const { sillyGirlCreateSchema, SillyGirlPluginConfig } = require("sillygirl");
-new SillyGirlPluginConfig(sillyGirlCreateSchema.object({
-  token: sillyGirlCreateSchema.string().setTitle("Token").setDefault("abc")
-}));
+const { form } = require("sillygirl");
+new form({
+  token: form.string().title("Token").default("abc")
+});
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
 		t.Fatal(err)
@@ -60,11 +60,11 @@ func TestRegisterPythonPluginConfigSchema(t *testing.T) {
 import sillygirl_config_schema_dependency_that_does_not_exist as optional_dependency
 optional_dependency.initialize().configure()
 
-from sillygirl import sillyGirlCreateSchema, SillyGirlPluginConfig
+from sillygirl import form
 
-SillyGirlPluginConfig(sillyGirlCreateSchema.object({
-    "token": sillyGirlCreateSchema.string().setTitle("Token").setDefault("abc")
-}))
+form({
+    "token": form.string().title("Token").default("abc")
+})
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
 		t.Fatal(err)
@@ -95,11 +95,25 @@ func TestPythonConfigPreloadStubsMissingDependencies(t *testing.T) {
 import json
 import os
 
-class SillyGirlPluginConfig:
-    def __init__(self, schema):
-        with open(os.environ["SILLYGIRL_CONFIG_SCHEMA_FILE"], "w", encoding="utf-8") as handle:
-            json.dump(schema, handle, ensure_ascii=False, separators=(",", ":"))
-        os._exit(0)
+class Field:
+    def __init__(self, field_type):
+        self.schema = {"type": field_type}
+    def title(self, value):
+        self.schema["title"] = value
+        return self
+    def default(self, value):
+        self.schema["default"] = value
+        return self
+    def toJSON(self):
+        return self.schema
+
+def form(fields):
+    schema = {"type": "object", "properties": {key: value.toJSON() for key, value in fields.items()}}
+    with open(os.environ["SILLYGIRL_CONFIG_SCHEMA_FILE"], "w", encoding="utf-8") as handle:
+        json.dump(schema, handle, ensure_ascii=False, separators=(",", ":"))
+    os._exit(0)
+
+form.string = lambda: Field("string")
 `
 	if err := os.WriteFile(filepath.Join(runtimeDir, "sillygirl.py"), []byte(module), 0644); err != nil {
 		t.Fatal(err)
@@ -111,11 +125,10 @@ import sillygirl_dependency_that_is_definitely_not_installed as optional_depende
 from sillygirl_dependency_that_is_definitely_not_installed.deep import Client
 optional_dependency.initialize().configure(Client)
 
-from sillygirl import SillyGirlPluginConfig
+from sillygirl import form
 
-SillyGirlPluginConfig({
-    "type": "object",
-    "properties": {"token": {"type": "string", "title": "Token"}}
+form({
+    "token": form.string().title("Token")
 })
 
 raise RuntimeError("business code ran after config export")

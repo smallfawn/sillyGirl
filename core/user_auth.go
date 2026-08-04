@@ -21,7 +21,7 @@ import (
 
 var userBucket = MakeBucket("users")
 
-const userJWTExpireSeconds = 86400 * 30
+const userJWTExpireSeconds = 7 * 24 * 60 * 60
 
 var (
 	userNamePattern      = regexp.MustCompile(`^[A-Za-z0-9_\-.]{3,32}$`)
@@ -796,7 +796,7 @@ func parseUserJWT(token string) (*userJWTClaims, error) {
 	if claims.Sub == "" || claims.UID == "" {
 		return nil, errors.New("JWT 缺少用户信息")
 	}
-	if claims.Exp <= time.Now().Unix() {
+	if jwtClaimsExpired(time.Now().Unix(), claims.Iat, claims.Exp, userJWTExpireSeconds) {
 		return nil, errors.New("JWT 已过期")
 	}
 	return claims, nil

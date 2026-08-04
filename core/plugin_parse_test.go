@@ -30,7 +30,7 @@ func TestPluginParseDetectsSmallCatUsage(t *testing.T) {
 		script string
 		want   bool
 	}{
-		{name: "javascript constructor", script: `const client = new SmallCat({id: 1})`, want: true},
+		{name: "javascript constructor", script: `const client = new ct.SmallCat({id: 1})`, want: true},
 		{name: "python constructor", script: `client = SmallCat({"id": 1})`, want: true},
 		{name: "static call", script: `SmallCat.userList()`, want: true},
 		{name: "description only", script: `/** SmallCat account helper */`, want: false},
@@ -41,6 +41,27 @@ func TestPluginParseDetectsSmallCatUsage(t *testing.T) {
 			fn, _ := pluginParse(test.script, "demo")
 			if fn.UsesSmallCat != test.want {
 				t.Fatalf("UsesSmallCat = %v; want %v", fn.UsesSmallCat, test.want)
+			}
+		})
+	}
+}
+
+func TestPluginParseDetectsV2FormUsage(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   bool
+	}{
+		{name: "new form", script: `const config = new form({ token: form.string() })`, want: true},
+		{name: "spaced new form", script: `const config = new form ({ token: form.string() })`, want: true},
+		{name: "python form", script: `config = form({"token": form.string()})`, want: true},
+		{name: "word only", script: `// form config`, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fn, _ := pluginParse(test.script, "demo")
+			if fn.HasForm != test.want {
+				t.Fatalf("HasForm = %v; want %v", fn.HasForm, test.want)
 			}
 		})
 	}

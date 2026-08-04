@@ -65,7 +65,7 @@ func TestSmallCatInlineEndpointWrappers(t *testing.T) {
 	runtimes := map[string]string{
 		"node preload":  smallCatSourceBlock(t, nodeRuntimePreloadScript, "class SmallCat {", "class DaiDai {"),
 		"node module":   readSmallCatSource(t, "proto3/sillygirl.js", "class SmallCat {", "class DaiDai {"),
-		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "class SmallCat:", "class DaiDai:"),
+		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "class _SmallCat:", "class _DaiDai:"),
 	}
 	typings := map[string]string{
 		"grpc plugin typings": smallCatSourceBlock(t, typeat, "declare class SmallCat {", "declare class DaiDai {"),
@@ -117,23 +117,23 @@ func TestSmallCatInlineEndpointWrappers(t *testing.T) {
 	}
 }
 
-func TestTopLevelUserListRuntimeExports(t *testing.T) {
+func TestUtilsUserListRuntimeExports(t *testing.T) {
 	runtimes := map[string]string{
 		"node preload":  nodeRuntimePreloadScript,
-		"node module":   readSmallCatSource(t, "proto3/sillygirl.js", "exports.userList", "function normalizeSchema"),
-		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "async def userList", "def normalize_schema"),
+		"node module":   readSmallCatSource(t, "proto3/sillygirl.js", "async function userList", "function normalizeSchema"),
+		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "async def _userList", "def normalize_schema"),
 	}
 	for name, source := range runtimes {
 		if !strings.Contains(source, "userList") || !strings.Contains(source, pluginUserRuntimeBucket) || !strings.Contains(source, pluginUserRuntimeListKey) {
-			t.Errorf("%s: top-level userList runtime bridge is missing", name)
+			t.Errorf("%s: utils.userList runtime bridge is missing", name)
 		}
 	}
 	for name, source := range map[string]string{
 		"grpc plugin typings": typeat,
-		"node typings":        readSmallCatSource(t, "proto3/sillygirl.d.ts", "interface SillyGirlUserBindings", "interface SillyGirlSchemaNode"),
+		"node typings":        readSmallCatSource(t, "proto3/sillygirl.d.ts", "interface SillyGirlUserBindings", "export {"),
 	} {
-		if !strings.Contains(source, "userList(): Promise<SillyGirlUser[]>") {
-			t.Errorf("%s: top-level userList typing is missing", name)
+		if !strings.Contains(source, "userList: typeof userList") {
+			t.Errorf("%s: utils.userList typing is missing", name)
 		}
 		for _, field := range []string{"authorized", "qq", "telegram", "smallcat_openids"} {
 			if !strings.Contains(source, field) {
