@@ -82,26 +82,33 @@ jobs:
             read -r goos goarch <<< "${target}"
             name="sillyGirl_${VERSION}_${goos}_${goarch}"
             binary="${name}"
+            migrate_binary="storage-migrate_${VERSION}_${goos}_${goarch}"
             if [[ "${goos}" == "windows" ]]; then
               binary="${name}.exe"
+              migrate_binary="${migrate_binary}.exe"
             fi
 
             GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build \
               -trimpath \
               -ldflags="${ldflags}" \
               -o "build/${binary}" .
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags="${ldflags}" \
+              -o "build/${migrate_binary}" ./cmd/storage-migrate
 
             package_dir="build/${name}-package"
             rm -rf "${package_dir}"
             mkdir -p "${package_dir}/proto3"
             cp "build/${binary}" "${package_dir}/${binary}"
+            cp "build/${migrate_binary}" "${package_dir}/${migrate_binary}"
             cp proto3/sillygirl.js proto3/sillygirl.d.ts proto3/srpc.js "${package_dir}/proto3/"
             cp proto3/sillygirl.py proto3/srpc_pb2.py proto3/srpc_pb2_grpc.py "${package_dir}/proto3/"
 
             if [[ "${goos}" == "windows" ]]; then
-              (cd "${package_dir}" && zip -r "../../dist/${name}.zip" "${binary}" proto3)
+              (cd "${package_dir}" && zip -r "../../dist/${name}.zip" "${binary}" "${migrate_binary}" proto3)
             else
-              tar -czf "dist/${name}.tar.gz" -C "${package_dir}" "${binary}" proto3
+              tar -czf "dist/${name}.tar.gz" -C "${package_dir}" "${binary}" "${migrate_binary}" proto3
             fi
           done
 

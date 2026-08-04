@@ -167,11 +167,10 @@ interface ContainerPanelList {
     total: number;
     list: ContainerPanelInfo[];
 }
-declare class Container {
+interface ContainerApi {
     QingLong: typeof QingLong;
     SmallCat: typeof SmallCat;
     DaiDai: typeof DaiDai;
-    constructor(_options?: Record<string, any>);
     getList(kind?: ContainerKind | string): Promise<Record<ContainerKind, ContainerPanelList> | ContainerPanelList>;
     count(kind: ContainerKind | string): Promise<number>;
     get(kind: ContainerKind | string, id: number | string): Promise<ContainerPanelInfo | undefined>;
@@ -392,4 +391,5 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, Container, form, sender, utils, console, };
+declare const container: ContainerApi;
+export { Adapter, Bucket, container, form, sender, utils, console, };

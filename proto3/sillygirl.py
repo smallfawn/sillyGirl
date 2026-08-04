@@ -483,7 +483,7 @@ def _public_container_panel(panel, index):
     }
 
 
-class Container:
+class _Container:
     def __init__(self, options=None):
         self.options = options or {}
         self.QingLong = _QingLong
@@ -518,6 +518,7 @@ class Container:
             if item.get("index") == index or item.get("id") == target_id:
                 return item
         return None
+
 
 
 def _normalize_path(value, prefix):
@@ -1237,6 +1238,9 @@ class Utils:
 
     def video(self, url):
         return self.buildCQTag("video", {"url": url})
+
+
+container = _Container()
 
 
 utils = Utils()

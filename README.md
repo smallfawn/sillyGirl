@@ -21,6 +21,22 @@ docker run -d \
 访问 `http://localhost:8080/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件和配置。
 机器人里发送 `更新` 会通过 GitHub 加速地址下载最新 Release 包并替换程序文件，不需要挂载 Docker socket。
 
+## 升级前数据迁移
+
+主程序启动前会自动执行一次旧字段迁移，把旧的容器面板、BOT 配置、插件配置、用户绑定和插件授权字段写入新版存储字段。
+
+也可以在启动前单独运行迁移小程序检查或手动迁移：
+
+```bash
+# 只检查不写入
+go run ./cmd/storage-migrate -dry-run
+
+# 手动迁移
+go run ./cmd/storage-migrate
+```
+
+Release 包内会附带同平台的 `storage-migrate_*` 小程序；二进制部署时也可以直接运行该文件。
+
 ## Docker Compose
 
 创建 `docker-compose.yml`：
@@ -95,7 +111,7 @@ Python 插件要点：
 |------|------|
 | 运行版本 | 只使用 Python 3.12；Docker 镜像已内置，本地运行需要安装 Python 3.12 |
 | 运行路径 | 推荐扁平文件 `/data/plugins/插件名.py`，不要再套 `插件名/main.py` |
-| SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, Container, form, utils` |
+| SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, container, form, utils` |
 | 异步调用 | Python SDK 方法都是异步方法，`s.reply()`、`Bucket.get()` 等都要 `await` |
 | 运行时依赖 | 内置 `grpcio==1.83.0`、`protobuf==7.35.1`，用于和 Go 主程序 gRPC 通信 |
 | 第三方依赖 | 在注释中写 `@depe ["requests"]`，后台「依赖管理」选择 Python 后可安装/卸载 |
@@ -296,8 +312,7 @@ db.keys();
 先在 Admin 面板「青龙容器」中添加青龙地址、`client_id`、`client_secret`。脚本里按页面编号创建实例：
 
 ```js
-const ct = new Container();
-const ql = new ct.QingLong({ id: 1 });
+const ql = new container.QingLong({ id: 1 });
 ```
 
 常用方法：
@@ -317,21 +332,19 @@ const ql = new ct.QingLong({ id: 1 });
 示例：
 
 ```js
-const ct = new Container();
-const ql = new ct.QingLong({ id: 1 });
+const ql = new container.QingLong({ id: 1 });
 const envs = ql.getEnvs({ searchValue: "JD_COOKIE" });
 s.reply("匹配到 " + envs.length + " 个变量");
 ```
 
-注意：`new ct.QingLong({ id: 1 })` 只接受对象参数，不支持 `new ct.QingLong(1)`。
+注意：`new container.QingLong({ id: 1 })` 只接受对象参数，不支持 `new container.QingLong(1)`。
 
 ### 普通用户列表
 
 `utils.userList()` 返回普通用户、绑定信息以及当前插件的 SmallCat 读取授权状态；授权状态由运行时自动绑定到当前插件，脚本不需要也不能传入其他插件 UUID。
 
 ```js
-const { Container, utils } = require("sillygirl");
-const ct = new Container();
+const { container, utils } = require("sillygirl");
 
 const users = await utils.userList();
 const authorizedOpenids = users
@@ -339,7 +352,7 @@ const authorizedOpenids = users
   .flatMap((user) => user.bindings.smallcat_openids);
 
 // SmallCat.userList() 保持为 SmallCat 账号列表接口。
-const accounts = await new ct.SmallCat({ id: 1 }).userList();
+const accounts = await new container.SmallCat({ id: 1 }).userList();
 ```
 
 每项包含 `id`、`username`、`nickname`、`disabled`、`authorized`，以及 `bindings.qq`、`bindings.telegram`、`bindings.smallcat_openids`。未授权、用户已禁用、插件已关闭或插件已禁用时，`authorized` 为 `false`，`smallcat_openids` 固定为空数组。
@@ -349,8 +362,7 @@ const accounts = await new ct.SmallCat({ id: 1 }).userList();
 先在 Admin 面板「smallcat」中添加地址和 `api_auth`。脚本里按页面编号创建实例：
 
 ```js
-const ct = new Container();
-const sc = new ct.SmallCat({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
 ```
 
 常用方法：
@@ -381,8 +393,7 @@ const sc = new ct.SmallCat({ id: 1 });
 示例：
 
 ```js
-const ct = new Container();
-const sc = new ct.SmallCat({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
 const qr = sc.createQr(1);
 if (!qr.status) {
   s.reply("生成二维码失败：" + qr.message);
@@ -433,8 +444,7 @@ smallcat 返回值保持原始 API 响应，不额外改写。
 先在 Admin 面板「呆呆面板」中添加地址、`app_key`、`app_secret`。脚本里按页面编号创建实例：
 
 ```js
-const ct = new Container();
-const dd = new ct.DaiDai({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 ```
 
 常用方法：
@@ -454,13 +464,12 @@ const dd = new ct.DaiDai({ id: 1 });
 示例：
 
 ```js
-const ct = new Container();
-const dd = new ct.DaiDai({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 const envs = dd.getEnvs({ keyword: "JD_COOKIE" });
 s.reply("呆呆面板变量数量：" + envs.length);
 ```
 
-注意：`new ct.DaiDai({ id: 1 })` 只接受对象参数，不支持 `new ct.DaiDai(1)`。
+注意：`new container.DaiDai({ id: 1 })` 只接受对象参数，不支持 `new container.DaiDai(1)`。
 
 ### Cron
 
@@ -488,9 +497,9 @@ task.remove(ret.id);
 | Python 运行 | `/data/plugins/插件名.py` 走 Python 3.12 运行时，Docker 镜像已内置 Python、pipx、`grpcio==1.83.0` 和 `protobuf==7.35.1` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
 | 搬运 | 可按平台和群号把消息交给指定插件脚本处理，业务过滤和转发由脚本自行实现 |
-| 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new ct.QingLong({ id })` 调用 |
-| smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new ct.SmallCat({ id })` 调用 |
-| 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new ct.DaiDai({ id })` 调用 |
+| 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new container.QingLong({ id })` 调用 |
+| smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new container.SmallCat({ id })` 调用 |
+| 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new container.DaiDai({ id })` 调用 |
 | 适配器 | 内置微信 ClawBot、QQ/OneBot、Telegram Bot、钉钉 Stream、QQ 官方频道 Webhook、Web、Pagermaid 适配器 |
 | 定时任务 | 支持 Cron 表达式、`node 插件名.js` 和 `python 插件名.py` 脚本触发 |
 | Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub 镜像 |

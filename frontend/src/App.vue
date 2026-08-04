@@ -10,6 +10,7 @@ import Alert from 'ant-design-vue/es/alert';
 import AntApp from 'ant-design-vue/es/app';
 import Button from 'ant-design-vue/es/button';
 import Card from 'ant-design-vue/es/card';
+import Checkbox from 'ant-design-vue/es/checkbox';
 import Col from 'ant-design-vue/es/col';
 import ConfigProvider from 'ant-design-vue/es/config-provider';
 import Drawer from 'ant-design-vue/es/drawer';
@@ -1621,6 +1622,11 @@ const plugins = reactive({
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
   uninstalling: {} as Record<string, boolean>,
+  uninstallModal: {
+    open: false,
+    row: null as PluginInfo | null,
+    deleteConfig: false,
+  },
   requestId: 0,
   detailOpen: false,
   detail: null as PluginInfo | null,
@@ -1778,7 +1784,23 @@ async function installPlugin(row: PluginInfo) {
     plugins.installing[row.id] = false;
   }
 }
-async function uninstallPlugin(row: PluginInfo) {
+function openUninstallPluginModal(row: PluginInfo) {
+  plugins.uninstallModal.row = row;
+  plugins.uninstallModal.deleteConfig = false;
+  plugins.uninstallModal.open = true;
+}
+function cancelUninstallPluginModal() {
+  if (plugins.uninstallModal.row && plugins.uninstalling[plugins.uninstallModal.row.id]) return;
+  plugins.uninstallModal.open = false;
+  plugins.uninstallModal.row = null;
+  plugins.uninstallModal.deleteConfig = false;
+}
+async function confirmUninstallPlugin() {
+  const row = plugins.uninstallModal.row;
+  if (!row) return;
+  await uninstallPlugin(row, plugins.uninstallModal.deleteConfig);
+}
+async function uninstallPlugin(row: PluginInfo, deleteConfig = false) {
   plugins.uninstalling[row.id] = true;
   try {
     const res = await put<ApiEnvelope<{ errors?: Record<string, string>; messages?: Record<string, string> }>>('/api/admin/storage', {
@@ -1796,7 +1818,13 @@ async function uninstallPlugin(row: PluginInfo) {
       pluginConfigs.marketRow = null;
       pluginConfigs.configurable = false;
     }
-    message.success(firstMessage || '插件已卸载');
+    if (deleteConfig) {
+      await del('/api/admin/plugin/config', { uuid: row.id, delete_schema: true });
+    }
+    plugins.uninstallModal.open = false;
+    plugins.uninstallModal.row = null;
+    plugins.uninstallModal.deleteConfig = false;
+    message.success(deleteConfig ? '插件已卸载，配置已同步删除' : (firstMessage || '插件已卸载'));
     await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '插件卸载失败');
@@ -3835,24 +3863,18 @@ function smallcatOpenids(record?: AdminUserRow) {
                       >
                         <template #icon><ArrowUp :size="20" /></template>
                       </Button>
-                      <Popconfirm
+                      <Button
                         v-else-if="pluginInstalled(record)"
-                        :title="`确认卸载「${record.title || record.id}」？`"
-                        ok-text="确认卸载"
-                        cancel-text="取消"
-                        @confirm="uninstallPlugin(record)"
+                        class="plugin-card-remove"
+                        shape="circle"
+                        danger
+                        :loading="plugins.uninstalling[record.id]"
+                        :title="`卸载 ${record.title || record.id}`"
+                        :aria-label="`卸载 ${record.title || record.id}`"
+                        @click="openUninstallPluginModal(record)"
                       >
-                        <Button
-                          class="plugin-card-remove"
-                          shape="circle"
-                          danger
-                          :loading="plugins.uninstalling[record.id]"
-                          :title="`卸载 ${record.title || record.id}`"
-                          :aria-label="`卸载 ${record.title || record.id}`"
-                        >
-                          <template #icon><Trash2 :size="18" /></template>
-                        </Button>
-                      </Popconfirm>
+                        <template #icon><Trash2 :size="18" /></template>
+                      </Button>
                       <Button
                         v-else
                         class="plugin-card-download"
@@ -4286,6 +4308,33 @@ function smallcatOpenids(record?: AdminUserRow) {
             </template>
           </dl>
         </div>
+      </Modal>
+
+      <Modal
+        v-model:open="plugins.uninstallModal.open"
+        title="卸载插件"
+        width="620px"
+        ok-text="确认卸载"
+        cancel-text="取消"
+        :confirm-loading="plugins.uninstallModal.row ? plugins.uninstalling[plugins.uninstallModal.row.id] : false"
+        :ok-button-props="{ danger: true }"
+        @ok="confirmUninstallPlugin"
+        @cancel="cancelUninstallPluginModal"
+      >
+        <Space v-if="plugins.uninstallModal.row" direction="vertical" size="middle" style="width: 100%">
+          <Alert
+            type="warning"
+            show-icon
+            :message="`确认卸载「${plugins.uninstallModal.row.title || plugins.uninstallModal.row.id}」？`"
+            description="卸载会删除本地插件脚本文件并停止正在运行的插件任务。"
+          />
+          <Checkbox v-model:checked="plugins.uninstallModal.deleteConfig">
+            同步删除插件配置
+          </Checkbox>
+          <Typography.Paragraph class="muted" style="margin-bottom: 0">
+            勾选后会同时删除该插件的配置值和配置表单缓存；不勾选则保留配置，后续重新安装可继续使用。
+          </Typography.Paragraph>
+        </Space>
       </Modal>
 
       <Modal

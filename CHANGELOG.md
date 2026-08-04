@@ -1,17 +1,35 @@
 # 更新日志
 
+## v1.0.5 - 2026-08-04
+
+### 迁移与卸载
+
+- 新增启动前自动执行的数据字段迁移，独立迁移程序 `storage-migrate` 同步纳入发布包。
+- 插件卸载确认改为大弹窗，并支持勾选“同步删除插件配置”。
+- 修复旧版插件配置、用户绑定、插件授权和面板桶字段迁移遗漏。
+
+### 插件 SDK
+
+- 容器入口统一改为 `container` 单例：`container.getList()` 可直接调用，`QingLong`、`SmallCat`、`DaiDai` 继续通过 `new container.X({ id })` 创建面板客户端。
+- 移除文档、模板和插件示例里的 `new Container()` 用法。
+
+### 清理与构建
+
+- 更新 README、插件开发文档和 skills 插件规范。
+- 清理旧前端构建资源并重新生成正式版静态资源。
+
 ## v1.0.4 - 2026-08-04
 
 ### 插件运行时与配置
 
 - 重构插件配置导出为顶层 `new form({...})` 链式 API，移除旧配置导出入口，插件版本示例维持 `v1` 并按补丁号自增。
-- 新增统一 `Container` 运行时导出，支持 `QingLong`、`DaiDai`、`SmallCat` 通过实例读取容器能力和后续面板操作。
+- 新增统一 `container` 运行时入口，支持 `QingLong`、`DaiDai`、`SmallCat` 读取容器能力和后续面板操作。
 - 插件设置弹窗支持 SmallCat、青龙、呆呆容器编号按后台容器列表动态渲染圆形单选；同步目标切换时只展示对应面板编号。
 - 修复带空格的 `new form (...)` 无法被插件配置检测识别的问题，并补充 Node.js/Python 表单注册测试。
 
 ### 文档与发布清理
 
-- 更新 README、插件开发文档和技能文档中的 `form`、`Container`、`sender`、`utils` 导出关系。
+- 更新 README、插件开发文档和技能文档中的 `form`、`container`、`sender`、`utils` 导出关系。
 - 更新前端插件配置错误提示，避免继续提示旧版 `SillyGirlPluginConfig` 或 JSON Schema 写法。
 - 清理发布前临时产物并重新生成后台静态资源。
 

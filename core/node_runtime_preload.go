@@ -145,7 +145,7 @@ const nodeRuntimePreloadScript = `
       Bucket: dummy,
       form,
       sender: dummy,
-      Container: dummy,
+      container: dummy,
       utils: {
         userList: async function () { return []; },
         sleep: async function () {},
@@ -162,6 +162,7 @@ const nodeRuntimePreloadScript = `
     globalThis.Bucket = sg.Bucket;
     globalThis.form = form;
     globalThis.sender = sg.sender;
+    globalThis.container = sg.container;
     globalThis.utils = sg.utils;
     const Module = require("module");
     const originalLoad = Module._load;
@@ -243,42 +244,39 @@ const nodeRuntimePreloadScript = `
     };
   }
 
-  class Container {
-    constructor(options) {
-      this.options = options || {};
-      this.QingLong = QingLong;
-      this.SmallCat = SmallCat;
-      this.DaiDai = DaiDai;
-    }
-    async getList(kind) {
-      const wanted = normalizeContainerKind(kind);
-      const kinds = wanted ? [wanted] : ["smallcat", "qinglong", "daidai"];
-      const result = {};
-      for (const item of kinds) {
-        const definition = containerDefinitions[item];
-        const panels = await readPanels(definition.key);
-        result[item] = {
-          type: item,
-          key: item,
-          label: definition.label,
-          total: panels.length,
-          list: panels.map((panel, index) => publicContainerPanel(panel, index + 1)),
-        };
-      }
-      return wanted ? result[wanted] : result;
-    }
-    async count(kind) {
-      const info = await this.getList(kind);
-      return info.total;
-    }
-    async get(kind, id) {
-      const info = await this.getList(kind);
-      const index = panelIndex(id);
-      return info.list.find((item) => item.index === index || item.id === String(id));
-    }
+  function createContainerApi() {
+    return {
+      QingLong,
+      SmallCat,
+      DaiDai,
+      async getList(kind) {
+        const wanted = normalizeContainerKind(kind);
+        const kinds = wanted ? [wanted] : ["smallcat", "qinglong", "daidai"];
+        const result = {};
+        for (const item of kinds) {
+          const definition = containerDefinitions[item];
+          const panels = await readPanels(definition.key);
+          result[item] = {
+            type: item,
+            key: item,
+            label: definition.label,
+            total: panels.length,
+            list: panels.map((panel, index) => publicContainerPanel(panel, index + 1)),
+          };
+        }
+        return wanted ? result[wanted] : result;
+      },
+      async count(kind) {
+        const info = await this.getList(kind);
+        return info.total;
+      },
+      async get(kind, id) {
+        const info = await this.getList(kind);
+        const index = panelIndex(id);
+        return info.list.find((item) => item.index === index || item.id === String(id));
+      },
+    };
   }
-
-
 
 
   function queryString(query) {
@@ -687,7 +685,7 @@ const nodeRuntimePreloadScript = `
   }
 
 
-  sg.Container = sg.Container || Container;
+  sg.container = sg.container || createContainerApi();
   sg.form = sg.form || form;
 
   sg.utils = sg.utils || {};
@@ -700,6 +698,6 @@ const nodeRuntimePreloadScript = `
     sg.sender.pushAdmin = sg.sender.pushAdmin || sg.pushAdmin;
   }
   globalThis.form = sg.form;
-  globalThis.Container = sg.Container;
+  globalThis.container = sg.container;
 })();
 `

@@ -18,6 +18,7 @@ import (
 	"github.com/smallfawn/sillyGirl/adapters/web"
 	"github.com/smallfawn/sillyGirl/core"
 	"github.com/smallfawn/sillyGirl/core/common"
+	storagemigrate "github.com/smallfawn/sillyGirl/internal/storage_migrate"
 
 	"github.com/smallfawn/sillyGirl/utils"
 )
@@ -26,6 +27,7 @@ var app = core.MakeBucket("app")
 var ip = ""
 
 func main() {
+	runStartupStorageMigration()
 	ip = app.GetString("ip")
 	go func() {
 		var err error
@@ -113,6 +115,15 @@ func main() {
 		}
 	}
 	select {}
+}
+
+func runStartupStorageMigration() {
+	root := core.MakeBucket("sillyGirl")
+	result := storagemigrate.Run(root, root.Type(), false)
+	if result.Total > 0 {
+		fmt.Printf("启动前数据字段迁移完成：面板=%d BOT=%d 插件配置=%d 用户=%d 授权=%d\n",
+			result.PanelBuckets, result.AdapterKeys, result.PluginConfigValues, result.Users, result.Authorizations)
+	}
 }
 
 //  git add . && git commit -m "x" && git push
