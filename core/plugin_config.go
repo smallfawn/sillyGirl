@@ -30,7 +30,7 @@ func init() {
 		uuid := ctx.Query("uuid")
 		record := getPluginConfigRecord(uuid)
 		if record == nil {
-			ApiFail(ctx, "配置不存在，请先运行一次插件或声明 SillyGirlPluginConfig")
+			ApiFail(ctx, "配置不存在，请先运行一次插件或在脚本顶层声明 new form({...})")
 			return
 		}
 		ApiOK(ctx, record)

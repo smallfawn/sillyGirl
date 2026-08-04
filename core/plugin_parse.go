@@ -15,6 +15,7 @@ var (
 	multiSpacePattern        = regexp.MustCompile("\x20{2,}")
 	classTokenPattern        = regexp.MustCompile(`\S+`)
 	smallCatCallPattern      = regexp.MustCompile(`\b(?:new\s+)?SmallCat\s*[.(]`)
+	formCallPattern          = regexp.MustCompile(`\b(?:new\s+)?form\s*\(`)
 )
 
 func pluginParse(script string, uuid string) (*common.Function, []func()) {
@@ -143,7 +144,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		usesSmallCat = *usesSmallCatDeclared
 	}
 	if !hasForm {
-		hasForm = strings.Contains(script, "form(") || strings.Contains(script, "SillyGirlPluginConfig") || strings.Contains(script, "sillyGirlCreateSchema")
+		hasForm = formCallPattern.MatchString(script)
 	}
 	return &common.Function{
 		Rules:        rules,

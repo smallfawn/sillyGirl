@@ -33,15 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.sillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
-exports.userList = userList;
-exports.form = form;
-exports.pluginConfigDefaults = pluginConfigDefaults;
-exports.pushAdmin = pushAdmin;
-exports.sleep = sleep;
-exports.version = version;
-exports.restart = restart;
-exports.update = update;
+exports.console = exports.utils = exports.sender = exports.form = exports.Container = exports.Bucket = exports.Adapter = void 0;
 const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
@@ -369,6 +361,9 @@ class Sender {
             });
         });
     }
+    async pushAdmin(content, options = {}) {
+        return pushAdmin(content, options);
+    }
 }
 class Bucket {
     name;
@@ -554,41 +549,46 @@ class Bucket {
     }
 }
 exports.Bucket = Bucket;
+/** Read ordinary users and this plugin's authorization state. */
 async function userList() {
     return await new Bucket("__plugin_users__").get("list", []);
 }
-function normalizeSchema(value) {
-    if (value && value.__schemaNode && value.schema)
+function isSchemaNode(value) {
+    return !!(value && value.__schemaNode && value.schema);
+}
+function normalizeFormField(value, path = "field") {
+    if (isSchemaNode(value))
         return value.schema;
-    if (value && typeof value.toJSON === "function")
-        return value.toJSON();
-    if (Array.isArray(value))
-        return value.map((item) => normalizeSchema(item));
-    if (value && typeof value === "object") {
-        const result = {};
-        for (const key of Object.keys(value)) {
-            if (key.startsWith("_") || key === "__schemaNode")
-                continue;
-            result[key] = normalizeSchema(value[key]);
-        }
-        return result;
+    throw new Error(`form schema ${path} must use form.string()/form.boolean()/form.select() helpers`);
+}
+function normalizeConfigSchema(fields) {
+    if (!fields || typeof fields !== "object" || Array.isArray(fields) || isSchemaNode(fields)) {
+        throw new Error("new form(...) only accepts an object like { token: form.string().title(\"Token\") }");
     }
-    return value;
+    const properties = {};
+    for (const key of Object.keys(fields)) {
+        if (key.startsWith("_"))
+            continue;
+        properties[key] = normalizeFormField(fields[key], key);
+    }
+    return { type: "object", properties };
 }
 function pluginConfigDefaults(schema) {
-    schema = normalizeSchema(schema) || {};
-    if (Object.prototype.hasOwnProperty.call(schema, "default"))
-        return schema.default;
-    if (schema.type === "object" || schema.properties) {
+    const normalized = isSchemaNode(schema) ? schema.schema : schema;
+    if (!normalized || typeof normalized !== "object")
+        return undefined;
+    if (Object.prototype.hasOwnProperty.call(normalized, "default"))
+        return normalized.default;
+    if (normalized.type === "object" || normalized.properties) {
         const values = {};
-        for (const key of Object.keys(schema.properties || {})) {
-            const value = pluginConfigDefaults(schema.properties[key]);
+        for (const key of Object.keys(normalized.properties || {})) {
+            const value = pluginConfigDefaults(normalized.properties[key]);
             if (value !== undefined)
                 values[key] = value;
         }
         return values;
     }
-    if (schema.type === "array")
+    if (normalized.type === "array")
         return [];
     return undefined;
 }
@@ -598,45 +598,69 @@ class SchemaNode {
     constructor(type, extra = {}) {
         this.schema = Object.assign({ type }, extra);
     }
-    setTitle(value) { this.schema.title = value; return this; }
-    setDescription(value) { this.schema.description = value; return this; }
-    setDefault(value) { this.schema.default = value; return this; }
-    setEnum(value) { this.schema.enum = value; return this; }
-    setEnumNames(value) { this.schema.enumNames = value; return this; }
-    setRequired(value) { this.schema.required = value; return this; }
-    setFormat(value) { this.schema.format = value; return this; }
-    setMin(value) { this.schema.minimum = value; return this; }
-    setMax(value) { this.schema.maximum = value; return this; }
-    setMinLength(value) { this.schema.minLength = value; return this; }
-    setMaxLength(value) { this.schema.maxLength = value; return this; }
-    setPattern(value) { this.schema.pattern = value; return this; }
-    setWidget(value) { this.schema["ui:widget"] = value; return this; }
+    title(value) { this.schema.title = value; return this; }
+    description(value) { this.schema.description = value; return this; }
+    default(value) { this.schema.default = value; return this; }
+    options(value) { return applySchemaOptions(this, value); }
+    required(value) { this.schema.required = value; return this; }
+    format(value) { this.schema.format = value; return this; }
+    min(value) { this.schema.minimum = value; return this; }
+    max(value) { this.schema.maximum = value; return this; }
+    minLength(value) { this.schema.minLength = value; return this; }
+    maxLength(value) { this.schema.maxLength = value; return this; }
+    pattern(value) { this.schema.pattern = value; return this; }
+    widget(value) { this.schema["ui:widget"] = value; return this; }
     toJSON() { return this.schema; }
 }
-const sillyGirlCreateSchema = {
+function applySchemaOptions(node, options) {
+    if (Array.isArray(options)) {
+        const values = [];
+        const names = [];
+        for (const item of options) {
+            if (item && typeof item === "object" && !Array.isArray(item)) {
+                const value = Object.prototype.hasOwnProperty.call(item, "value") ? item.value : (item.id ?? item.key ?? item.name ?? item.label);
+                values.push(value);
+                names.push(String(item.label ?? item.name ?? value));
+            }
+            else {
+                values.push(item);
+                names.push(String(item));
+            }
+        }
+        node.schema.enum = values;
+        if (names.some((name, index) => name !== String(values[index])))
+            node.schema.enumNames = names;
+        return node;
+    }
+    if (options && typeof options === "object") {
+        const values = Object.keys(options);
+        node.schema.enum = values;
+        node.schema.enumNames = values.map((key) => String(options[key]));
+    }
+    return node;
+}
+const formHelpers = {
     string: () => new SchemaNode("string"),
     number: () => new SchemaNode("number"),
     integer: () => new SchemaNode("integer"),
     boolean: () => new SchemaNode("boolean"),
-    array: (item) => new SchemaNode("array", { items: normalizeSchema(item) || {} }),
+    array: (item) => new SchemaNode("array", item === undefined ? {} : { items: normalizeFormField(item, "array item") }),
     object: (props) => {
         const properties = {};
         for (const key of Object.keys(props || {})) {
-            properties[key] = normalizeSchema(props?.[key]);
+            properties[key] = normalizeFormField(props?.[key], key);
         }
         return new SchemaNode("object", { properties });
     },
+    select: (options) => applySchemaOptions(new SchemaNode("string"), options),
 };
-exports.sillyGirlCreateSchema = sillyGirlCreateSchema;
-class SillyGirlPluginConfig {
+class PluginConfigFormInstance {
     uuid = plugin_id;
     jsonSchema;
     userConfig = {};
     ready;
     constructor(schema) {
-        this.jsonSchema = normalizeSchema(schema) || {};
-        if (!this.jsonSchema.type)
-            this.jsonSchema.type = "object";
+        this.jsonSchema = normalizeConfigSchema(schema);
         if (process.env.PLUGIN_CONFIG_JSON) {
             try {
                 const value = JSON.parse(process.env.PLUGIN_CONFIG_JSON);
@@ -674,10 +698,10 @@ class SillyGirlPluginConfig {
         return this.set(values);
     }
 }
-exports.SillyGirlPluginConfig = SillyGirlPluginConfig;
-function form(schema) {
-    return new SillyGirlPluginConfig(schema);
-}
+const form = Object.assign(function (fields) {
+    return new PluginConfigFormInstance(fields);
+}, formHelpers, { defaults: (fields) => pluginConfigDefaults(normalizeConfigSchema(fields)) });
+exports.form = form;
 async function readRuntimePanels(key) {
     const raw = await new Bucket("sillyGirl").get(key, []);
     if (Array.isArray(raw))
@@ -698,6 +722,70 @@ function runtimePanelIndex(ref) {
     const index = Number(typeof ref === "object" && ref ? ref.id ?? ref.ID : ref);
     return Number.isInteger(index) ? index : 0;
 }
+const containerDefinitions = {
+    smallcat: { key: "smallcat_panels", label: "smallcat" },
+    qinglong: { key: "qinglong_panels", label: "青龙" },
+    daidai: { key: "daidai_panels", label: "呆呆" },
+};
+function normalizeContainerKind(kind) {
+    const value = String(kind || "").trim().toLowerCase();
+    if (!value)
+        return "";
+    if (value === "smallcat" || value === "small_cat" || value === "sc")
+        return "smallcat";
+    if (value === "qinglong" || value === "qing_long" || value === "ql" || value === "青龙")
+        return "qinglong";
+    if (value === "daidai" || value === "dai_dai" || value === "dd" || value === "呆呆")
+        return "daidai";
+    throw new Error(`未知容器类型：${kind}`);
+}
+function publicContainerPanel(panel, index) {
+    return {
+        index,
+        id: String(panel?.id || ""),
+        name: String(panel?.name || ""),
+        address: String(panel?.address || ""),
+        status: String(panel?.status || ""),
+        message: String(panel?.message || ""),
+    };
+}
+class Container {
+    QingLong;
+    SmallCat;
+    DaiDai;
+    constructor(_options = {}) {
+        this.QingLong = QingLong;
+        this.SmallCat = SmallCat;
+        this.DaiDai = DaiDai;
+    }
+    async getList(kind) {
+        const wanted = normalizeContainerKind(kind);
+        const kinds = wanted ? [wanted] : ["smallcat", "qinglong", "daidai"];
+        const result = {};
+        for (const item of kinds) {
+            const definition = containerDefinitions[item];
+            const panels = await readRuntimePanels(definition.key);
+            result[item] = {
+                type: item,
+                key: item,
+                label: definition.label,
+                total: panels.length,
+                list: panels.map((panel, index) => publicContainerPanel(panel, index + 1)),
+            };
+        }
+        return wanted ? result[wanted] : result;
+    }
+    async count(kind) {
+        const info = await this.getList(kind);
+        return info.total;
+    }
+    async get(kind, id) {
+        const info = await this.getList(kind);
+        const index = runtimePanelIndex(id);
+        return info.list.find((item) => item.index === index || item.id === String(id));
+    }
+}
+exports.Container = Container;
 function normalizeRuntimePath(path, prefix) {
     path = String(path || "").trim();
     if (!path)
@@ -836,7 +924,6 @@ class QingLong {
         return result.data ?? result;
     }
 }
-exports.QingLong = QingLong;
 function smallcatAccountOpenID(value) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         return "";
@@ -1014,7 +1101,6 @@ class SmallCat {
         return this.post("/wx/appmsglike", options);
     }
 }
-exports.SmallCat = SmallCat;
 class DaiDai {
     id = 0;
     uuid = "";
@@ -1156,11 +1242,6 @@ class DaiDai {
         return this.request("POST", "/notifications/send", { title, content });
     }
 }
-exports.DaiDai = DaiDai;
-globalThis.QingLong = QingLong;
-globalThis.SmallCat = SmallCat;
-globalThis.DaiDai = DaiDai;
-globalThis.sillyGirlCreateSchema = sillyGirlCreateSchema;
 globalThis.form = form;
 class Adapter {
     platform;
@@ -1321,7 +1402,6 @@ async function pushAdmin(content, options = {}) {
     }
     return result;
 }
-globalThis.pushAdmin = pushAdmin;
 async function sleep(ms = 1000) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1366,9 +1446,8 @@ async function updateRelease(options, timeout) {
     const beforeInfo = await version();
     const release = await fetchReleaseMetadata(options, timeout);
     const asset = selectReleaseAsset(release, options);
-    if (!asset) {
+    if (!asset)
         throw new Error(`未找到适配当前系统的 Release 包：${release.tag_name || release.name || "latest"}`);
-    }
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sillygirl-update-"));
     const archive = path.join(tmpDir, safeFileName(asset.name || "sillyGirl-release"));
     try {
@@ -1410,9 +1489,8 @@ async function fetchReleaseMetadata(options, timeout) {
 function selectReleaseAsset(release, options) {
     const assets = Array.isArray(release.assets) ? release.assets : [];
     const configured = String(options.releaseAsset || "").trim();
-    if (configured) {
+    if (configured)
         return assets.find((asset) => asset.name === configured || String(asset.name || "").includes(configured));
-    }
     const goos = releaseGOOS();
     const goarch = releaseGOARCH();
     const suffix = goos === "windows" ? ".zip" : ".tar.gz";
@@ -1532,8 +1610,7 @@ function findReleaseBinary(root) {
     });
 }
 function findReleaseProto3(root) {
-    const dirs = walkDirs(root);
-    return dirs.find((dir) => path.basename(dir) === "proto3" && fs.existsSync(path.join(dir, "sillygirl.js")));
+    return walkDirs(root).find((dir) => path.basename(dir) === "proto3" && fs.existsSync(path.join(dir, "sillygirl.js")));
 }
 function walkFiles(root) {
     const out = [];
@@ -1550,9 +1627,8 @@ function walkDirs(root) {
     const out = [];
     for (const item of fs.readdirSync(root, { withFileTypes: true })) {
         const full = path.join(root, item.name);
-        if (item.isDirectory()) {
+        if (item.isDirectory())
             out.push(full, ...walkDirs(full));
-        }
     }
     return out;
 }
@@ -1595,20 +1671,15 @@ async function curlDownload(urls, target, timeout) {
 }
 function releaseDownloadURLs(address) {
     const urls = [];
-    for (const prefix of releaseGithubProxyPrefixes()) {
+    for (const prefix of releaseGithubProxyPrefixes())
         urls.push(`${prefix.replace(/\/+$/, "")}/${address}`);
-    }
     urls.push(address);
     return [...new Set(urls)];
 }
 function releaseGithubProxyPrefixes() {
     const configured = String(process.env?.SILLYGIRL_GITHUB_PROXY || "").trim();
     const values = configured ? [configured] : [];
-    return values.concat([
-        "https://gh-proxy.org",
-        "https://ghproxy.net",
-        "https://cdn.gh-proxy.org",
-    ]);
+    return values.concat(["https://gh-proxy.org", "https://ghproxy.net", "https://cdn.gh-proxy.org"]);
 }
 function safeFileName(name) {
     return String(name || "release").replace(/[\\/:*?"<>|]/g, "_");
@@ -1646,6 +1717,11 @@ class Console {
     debug = (message, ...optionalParams) => { };
 }
 let utils = {
+    userList,
+    sleep,
+    version,
+    restart,
+    update,
     buildCQTag: (type, params, prefix = "CQ") => {
         const paramStrings = [];
         for (const key in params) {

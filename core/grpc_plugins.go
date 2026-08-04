@@ -459,286 +459,400 @@ func unloadNodePluginLocked(uuid string) *common.Function {
 }
 
 var typeat = `declare class Sender {
-	private uuid;
-	private destoried;
-	constructor(uuid: string);
-	destroy(): void;
-	getUserId(): Promise<string>;
-	getUserName(): Promise<string>;
-	getChatId(): Promise<string>;
-	getChatName(): Promise<string>;
-	getMessageId(): Promise<string>;
-	getPlatform(): Promise<string>;
-	getBotId(): Promise<string>;
-	getContent(): Promise<string>;
-	isAdmin(): Promise<boolean>;
-	param(key: number | string): Promise<string>;
-	setContent(content: string): Promise<undefined>;
-	continue(): Promise<undefined>;
-	getAdapter(): Promise<Adapter>;
-	listen(options?: {
-			rules?: string[];
-			timeout?: number;
-			handle?: (s: Sender) => Promise<string | void> | string | void;
-			listen_private?: boolean;
-			listen_group?: boolean;
-			allow_platforms?: string[];
-			prohibit_platforms?: string[];
-			allow_groups?: string[];
-			prohibit_groups?: string[];
-			allow_users?: string[];
-			prohibit_users?: string[];
-	}): Promise<Sender | undefined>;
-	holdOn(str: string): string;
-	reply(content: string): Promise<string>;
-	doAction(options: Record<string, any>): Promise<any>;
-	getEvent(): Promise<Record<string, any>>;
+    private uuid;
+    private destoried;
+    constructor(uuid: string);
+    destroy(): void;
+    getUserId(): Promise<string>;
+    getUserName(): Promise<string>;
+    getChatId(): Promise<string>;
+    getChatName(): Promise<string>;
+    getMessageId(): Promise<string>;
+    getPlatform(): Promise<string>;
+    getBotId(): Promise<string>;
+    getContent(): Promise<string>;
+    isAdmin(): Promise<boolean>;
+    param(key: number | string): Promise<string>;
+    setContent(content: string): Promise<undefined>;
+    continue(): Promise<undefined>;
+    getAdapter(): Promise<Adapter>;
+    listen(options?: {
+        rules?: string[];
+        timeout?: number;
+        handle?: (s: Sender) => Promise<string | void> | string | void;
+        listen_private?: boolean;
+        listen_group?: boolean;
+        allow_platforms?: string[];
+        prohibit_platforms?: string[];
+        allow_groups?: string[];
+        prohibit_groups?: string[];
+        allow_users?: string[];
+        prohibit_users?: string[];
+    }): Promise<Sender | undefined>;
+    holdOn(str: string): string;
+    reply(content: string): Promise<string>;
+    doAction(options: Record<string, any>): Promise<any>;
+    getEvent(): Promise<Record<string, any>>;
+    pushAdmin(content: string, options?: PushAdminOptions): Promise<{
+        platform: string;
+        bot_id: string;
+        user_id: string;
+        message_id?: string;
+        error?: string;
+    }[]>;
 }
 declare class Bucket {
-	private name;
-	constructor(name: string);
-	transform(v: string | undefined): string | number | boolean | undefined;
-	reverseTransform(value: any): string;
-	get(key: string, defaultValue?: any): Promise<any>;
-	set(key: string, value: any): Promise<{
-			message?: string;
-			changed?: boolean;
-	}>;
-	getAll(): Promise<Record<string, any>>;
-	delete(key: string): Promise<{
-			message?: string;
-			changed?: boolean;
-	}>;
-	deleteAll(): Promise<undefined>;
-	keys(): Promise<string[]>;
-	len(): Promise<number>;
-	buckets(): Promise<string[]>;
-	watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
-	getName(): Promise<string>;
+    private name;
+    constructor(name: string);
+    transform(v: string | undefined): string | number | boolean | undefined;
+    reverseTransform(value: any): string;
+    get(key: string, defaultValue?: any): Promise<any>;
+    set(key: string, value: any): Promise<{
+        message?: string;
+        changed?: boolean;
+    }>;
+    getAll(): Promise<Record<string, any>>;
+    delete(key: string): Promise<{
+        message?: string;
+        changed?: boolean;
+    }>;
+    deleteAll(): Promise<undefined>;
+    keys(): Promise<string[]>;
+    len(): Promise<number>;
+    buckets(): Promise<string[]>;
+    watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
+    getName(): Promise<string>;
 }
-interface SillyGirlUserBindings {
-	qq: string;
-	telegram: string;
-	smallcat_openids: string[];
+export interface SillyGirlUserBindings {
+    qq: string;
+    telegram: string;
+    smallcat_openids: string[];
 }
-interface SillyGirlUser {
-	id: string;
-	username: string;
-	nickname: string;
-	disabled: boolean;
-	authorized: boolean;
-	bindings: SillyGirlUserBindings;
+export interface SillyGirlUser {
+    id: string;
+    username: string;
+    nickname: string;
+    disabled: boolean;
+    authorized: boolean;
+    bindings: SillyGirlUserBindings;
 }
+/** Read ordinary users and this plugin's authorization state. */
 declare function userList(): Promise<SillyGirlUser[]>;
+interface SillyGirlSchemaNode {
+    __schemaNode: boolean;
+    schema: Record<string, any>;
+    title(value: string): SillyGirlSchemaNode;
+    description(value: string): SillyGirlSchemaNode;
+    default(value: any): SillyGirlSchemaNode;
+    options(value: any[] | Record<string, any>): SillyGirlSchemaNode;
+    required(value: string[] | boolean): SillyGirlSchemaNode;
+    format(value: string): SillyGirlSchemaNode;
+    min(value: number): SillyGirlSchemaNode;
+    max(value: number): SillyGirlSchemaNode;
+    minLength(value: number): SillyGirlSchemaNode;
+    maxLength(value: number): SillyGirlSchemaNode;
+    pattern(value: string): SillyGirlSchemaNode;
+    widget(value: string): SillyGirlSchemaNode;
+    toJSON(): Record<string, any>;
+}
+declare class SchemaNode implements SillyGirlSchemaNode {
+    __schemaNode: boolean;
+    schema: Record<string, any>;
+    constructor(type: string, extra?: Record<string, any>);
+    title(value: string): this;
+    description(value: string): this;
+    default(value: any): this;
+    options(value: any[] | Record<string, any>): SchemaNode;
+    required(value: string[] | boolean): this;
+    format(value: string): this;
+    min(value: number): this;
+    max(value: number): this;
+    minLength(value: number): this;
+    maxLength(value: number): this;
+    pattern(value: string): this;
+    widget(value: string): this;
+    toJSON(): Record<string, any>;
+}
+declare const formHelpers: {
+    string: () => SchemaNode;
+    number: () => SchemaNode;
+    integer: () => SchemaNode;
+    boolean: () => SchemaNode;
+    array: (item?: any) => SchemaNode;
+    object: (props?: Record<string, any>) => SchemaNode;
+    select: (options: any[] | Record<string, any>) => SchemaNode;
+};
+declare class PluginConfigFormInstance {
+    uuid: string;
+    jsonSchema: Record<string, any>;
+    userConfig: Record<string, any>;
+    ready: Promise<Record<string, any>>;
+    constructor(schema: any);
+    init(): Promise<Record<string, any>>;
+    get(): Promise<Record<string, any>>;
+    Get(): Promise<Record<string, any>>;
+    set(values?: Record<string, any>): Promise<{
+        error: string;
+    }>;
+    Set(values?: Record<string, any>): Promise<{
+        error: string;
+    }>;
+}
+interface PluginConfigFormFactory {
+    (fields: Record<string, SillyGirlSchemaNode>): PluginConfigFormInstance;
+    new (fields: Record<string, SillyGirlSchemaNode>): PluginConfigFormInstance;
+    string: typeof formHelpers.string;
+    number: typeof formHelpers.number;
+    integer: typeof formHelpers.integer;
+    boolean: typeof formHelpers.boolean;
+    array: typeof formHelpers.array;
+    object: typeof formHelpers.object;
+    select: typeof formHelpers.select;
+    defaults(fields: Record<string, SillyGirlSchemaNode>): any;
+}
+declare const form: PluginConfigFormFactory;
+type ContainerKind = "smallcat" | "qinglong" | "daidai";
+interface ContainerPanelInfo {
+    index: number;
+    id: string;
+    name: string;
+    address: string;
+    status: string;
+    message: string;
+}
+interface ContainerPanelList {
+    type: ContainerKind;
+    key: ContainerKind;
+    label: string;
+    total: number;
+    list: ContainerPanelInfo[];
+}
+declare class Container {
+    QingLong: typeof QingLong;
+    SmallCat: typeof SmallCat;
+    DaiDai: typeof DaiDai;
+    constructor(_options?: Record<string, any>);
+    getList(kind?: ContainerKind | string): Promise<Record<ContainerKind, ContainerPanelList> | ContainerPanelList>;
+    count(kind: ContainerKind | string): Promise<number>;
+    get(kind: ContainerKind | string, id: number | string): Promise<ContainerPanelInfo | undefined>;
+}
 declare class QingLong {
-	id: number;
-	uuid: string;
-	name: string;
-	address: string;
-	constructor(options: { id: number | string });
-	request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
-	getEnvs(options?: Record<string, any> | string): Promise<any>;
-	getEnvById(id: number | string): Promise<any>;
-	createEnv(env: any): Promise<any>;
-	updateEnv(env: any): Promise<any>;
-	deleteEnvs(ids: any): Promise<any>;
-	moveEnv(id: number | string, fromIndex: number, toIndex: number): Promise<any>;
-	moveEnv(id: number | string, body: Record<string, any>): Promise<any>;
-	disableEnvs(ids: any): Promise<any>;
-	enableEnvs(ids: any): Promise<any>;
-	updateEnvNames(ids: any, name: string): Promise<any>;
-	updateEnvNames(body: Record<string, any>): Promise<any>;
-	systemNotify(title: string, content: string): Promise<any>;
+    id: number;
+    uuid: string;
+    name: string;
+    address: string;
+    private panel;
+    private token;
+    private expiration;
+    private ready;
+    constructor(options: {
+        id: number | string;
+    });
+    private init;
+    private ensureToken;
+    request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
+    getEnvs(options?: Record<string, any> | string): Promise<any>;
+    getEnvById(id: number | string): Promise<any>;
+    createEnv(env: any): Promise<any>;
+    updateEnv(env: any): Promise<any>;
+    deleteEnvs(ids: any): Promise<any>;
+    moveEnv(id: number | string, arg1: any, arg2?: any): Promise<any>;
+    disableEnvs(ids: any): Promise<any>;
+    enableEnvs(ids: any): Promise<any>;
+    updateEnvNames(arg1: any, arg2?: any): Promise<any>;
+    systemNotify(title: string, content: string): Promise<any>;
 }
 declare class SmallCat {
-	id: number;
-	uuid: string;
-	name: string;
-	address: string;
-	constructor(options: { id: number | string });
-	request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
-	createQr(type: any): Promise<any>;
-	checkQr(uuid: string): Promise<any>;
-	addUser(options: Record<string, any>): Promise<any>;
-	rescanUser(options: Record<string, any>): Promise<any>;
-	authorizedUsers(): Promise<any>;
-	userList(): Promise<any>;
-	checkUsers(options: Record<string, any>): Promise<any>;
-	setUserRemark(options: Record<string, any>): Promise<any>;
-	setUserDisabled(options: Record<string, any>): Promise<any>;
-	deleteUser(options: Record<string, any>): Promise<any>;
-	proxyList(): Promise<any>;
-	testProxy(options: Record<string, any>): Promise<any>;
-	addProxy(options: Record<string, any>): Promise<any>;
-	deleteProxy(options: Record<string, any>): Promise<any>;
-	creditBalance(): Promise<any>;
-	creditLedger(query?: Record<string, any> | number): Promise<any>;
-	getCode(options: { openid: string; appid: string }): Promise<any>;
-	getSession(options: { openid: string; appid: string }): Promise<any>;
-	refreshSession(options: { openid: string; appid: string }): Promise<any>;
-	getUserInfo(options: { openid: string; appid: string }): Promise<any>;
-	getEncryptKey(options: { openid: string; appid: string }): Promise<any>;
-	getPhoneNumber(options: { openid: string; appid: string }): Promise<any>;
-	cloud(options: Record<string, any>): Promise<any>;
-	gateway(options: Record<string, any>): Promise<any>;
-	qrCodeAuth(options: Record<string, any>): Promise<any>;
-	oAuth(options: Record<string, any>): Promise<any>;
-	translateLink(options: Record<string, any>): Promise<any>;
-	autoAuth(options: Record<string, any>): Promise<any>;
-	appMsgExt(options: Record<string, any>): Promise<any>;
-	appMsgLike(options: Record<string, any>): Promise<any>;
+    id: number;
+    uuid: string;
+    name: string;
+    address: string;
+    private panel;
+    private ready;
+    constructor(options: {
+        id: number | string;
+    });
+    private init;
+    request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
+    private post;
+    createQr(type: any): Promise<any>;
+    checkQr(uuid: string): Promise<any>;
+    addUser(options: Record<string, any>): Promise<any>;
+    rescanUser(options: Record<string, any>): Promise<any>;
+    authorizedUsers(): Promise<any>;
+    userList(): Promise<any>;
+    checkUsers(options: Record<string, any>): Promise<any>;
+    setUserRemark(options: Record<string, any>): Promise<any>;
+    setUserDisabled(options: Record<string, any>): Promise<any>;
+    deleteUser(options: Record<string, any>): Promise<any>;
+    proxyList(): Promise<any>;
+    testProxy(options: Record<string, any>): Promise<any>;
+    addProxy(options: Record<string, any>): Promise<any>;
+    deleteProxy(options: Record<string, any>): Promise<any>;
+    creditBalance(): Promise<any>;
+    creditLedger(query?: Record<string, any> | number): Promise<any>;
+    getCode(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    getSession(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    refreshSession(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    getUserInfo(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    getEncryptKey(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    getPhoneNumber(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    cloud(options: Record<string, any>): Promise<any>;
+    gateway(options: Record<string, any>): Promise<any>;
+    qrCodeAuth(options: Record<string, any>): Promise<any>;
+    oAuth(options: Record<string, any>): Promise<any>;
+    translateLink(options: Record<string, any>): Promise<any>;
+    autoAuth(options: Record<string, any>): Promise<any>;
+    appMsgExt(options: Record<string, any>): Promise<any>;
+    appMsgLike(options: Record<string, any>): Promise<any>;
 }
 declare class DaiDai {
-	id: number;
-	uuid: string;
-	name: string;
-	address: string;
-	constructor(options: { id: number | string });
-	request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
-	getEnvs(options?: Record<string, any> | string): Promise<any>;
-	getEnvById(id: number | string): Promise<any>;
-	createEnv(env: any): Promise<any>;
-	updateEnv(env: any): Promise<any>;
-	deleteEnv(id: number | string): Promise<any>;
-	deleteEnvs(ids: any): Promise<any>;
-	enableEnv(id: number | string): Promise<any>;
-	disableEnv(id: number | string): Promise<any>;
-	enableEnvs(ids: any): Promise<any>;
-	disableEnvs(ids: any): Promise<any>;
-	getTasks(options?: Record<string, any> | string): Promise<any>;
-	getTaskById(id: number | string): Promise<any>;
-	createTask(task: any): Promise<any>;
-	updateTask(task: any): Promise<any>;
-	deleteTask(id: number | string): Promise<any>;
-	runTask(id: number | string): Promise<any>;
-	stopTask(id: number | string): Promise<any>;
-	enableTask(id: number | string): Promise<any>;
-	disableTask(id: number | string): Promise<any>;
-	systemNotify(title: string, content: string): Promise<any>;
+    id: number;
+    uuid: string;
+    name: string;
+    address: string;
+    private panel;
+    private token;
+    private expiration;
+    private ready;
+    constructor(options: {
+        id: number | string;
+    });
+    private init;
+    private ensureToken;
+    request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
+    getEnvs(options?: Record<string, any> | string): Promise<any>;
+    getEnvById(id: number | string): Promise<any>;
+    createEnv(env: any): Promise<any>;
+    updateEnv(env: any): Promise<any>;
+    deleteEnv(id: number | string): Promise<any>;
+    deleteEnvs(ids: any): Promise<any>;
+    enableEnv(id: number | string): Promise<any>;
+    disableEnv(id: number | string): Promise<any>;
+    enableEnvs(ids: any): Promise<any>;
+    disableEnvs(ids: any): Promise<any>;
+    getTasks(options?: Record<string, any> | string): Promise<any>;
+    getTaskById(id: number | string): Promise<any>;
+    createTask(task: any): Promise<any>;
+    updateTask(task: any): Promise<any>;
+    deleteTask(id: number | string): Promise<any>;
+    runTask(id: number | string): Promise<any>;
+    stopTask(id: number | string): Promise<any>;
+    enableTask(id: number | string): Promise<any>;
+    disableTask(id: number | string): Promise<any>;
+    systemNotify(title: string, content: string): Promise<any>;
 }
-interface SillyGirlSchemaNode {
-	schema: Record<string, any>;
-	setTitle(value: string): SillyGirlSchemaNode;
-	setDescription(value: string): SillyGirlSchemaNode;
-	setDefault(value: any): SillyGirlSchemaNode;
-	setEnum(value: any[]): SillyGirlSchemaNode;
-	setEnumNames(value: string[]): SillyGirlSchemaNode;
-	setRequired(value: string[] | boolean): SillyGirlSchemaNode;
-	setFormat(value: string): SillyGirlSchemaNode;
-	setMin(value: number): SillyGirlSchemaNode;
-	setMax(value: number): SillyGirlSchemaNode;
-	setMinLength(value: number): SillyGirlSchemaNode;
-	setMaxLength(value: number): SillyGirlSchemaNode;
-	setPattern(value: string): SillyGirlSchemaNode;
-	setWidget(value: string): SillyGirlSchemaNode;
-	toJSON(): Record<string, any>;
-}
-declare const sillyGirlCreateSchema: {
-	string(): SillyGirlSchemaNode;
-	number(): SillyGirlSchemaNode;
-	integer(): SillyGirlSchemaNode;
-	boolean(): SillyGirlSchemaNode;
-	array(item?: any): SillyGirlSchemaNode;
-	object(props?: Record<string, any>): SillyGirlSchemaNode;
-};
-declare class SillyGirlPluginConfig {
-	uuid: string;
-	jsonSchema: Record<string, any>;
-	userConfig: Record<string, any>;
-	ready: Promise<Record<string, any>>;
-	constructor(schema: any);
-	get(): Promise<Record<string, any>>;
-	Get(): Promise<Record<string, any>>;
-	set(values?: Record<string, any>): Promise<{ error: string }>;
-	Set(values?: Record<string, any>): Promise<{ error: string }>;
-}
-declare function form(schema: any): SillyGirlPluginConfig;
-declare function pluginConfigDefaults(schema: any): any;
 interface StorageModifier {
-	echo?: string;
-	now?: any;
-	message?: string;
-	error?: string;
+    echo?: string;
+    now?: any;
+    message?: string;
+    error?: string;
 }
 interface Message {
-	message_id?: string;
-	user_id: string;
-	chat_id?: string;
-	content: string;
-	user_name?: string;
-	chat_name?: string;
+    message_id?: string;
+    user_id: string;
+    chat_id?: string;
+    content: string;
+    user_name?: string;
+    chat_name?: string;
 }
 interface PushAdminOptions {
-	platform?: string | string[];
-	platforms?: string[];
-	botId?: string;
-	bot_id?: string;
-	userIds?: string[];
-	users?: string[];
+    platform?: string | string[];
+    platforms?: string[];
+    botId?: string;
+    bot_id?: string;
+    userIds?: string[];
+    users?: string[];
 }
 declare class Adapter {
-	platform: string;
-	bot_id: string;
-	call: any;
-	constructor(options: {
-			platform: string;
-			bot_id: string;
-			replyHandler?: (message: Message) => Promise<string | undefined>;
-			actionHandler?: (message: Message) => Promise<string | undefined>;
-	});
-	receive(message: Message): Promise<undefined>;
-	push(message: Message): Promise<string>;
-	destroy(): Promise<void>;
-	sender(options: any): Promise<Sender>;
+    platform: string;
+    bot_id: string;
+    call: any;
+    constructor(options: {
+        platform: string;
+        bot_id: string;
+        replyHandler?: (message: Message) => Promise<string | undefined>;
+        actionHandler?: (message: Message) => Promise<string | undefined>;
+    });
+    receive(message: Message): Promise<undefined>;
+    push(message: Message): Promise<string>;
+    destroy(): Promise<void>;
+    sender(options: any): Promise<Sender>;
 }
 declare let sender: Sender;
-declare function pushAdmin(content: string, options?: PushAdminOptions): Promise<{
-	platform: string;
-	bot_id: string;
-	user_id: string;
-	message_id?: string;
-	error?: string;
-}[]>;
 declare function sleep(ms?: number): Promise<unknown>;
 interface UpdateOptions {
-	releaseRepo?: string;
-	releaseTag?: string;
-	releaseAsset?: string;
-	executablePath?: string;
-	timeout?: number;
-	restart?: boolean;
+    releaseRepo?: string;
+    releaseTag?: string;
+    releaseAsset?: string;
+    executablePath?: string;
+    timeout?: number;
+    restart?: boolean;
 }
 interface UpdateResult {
-	mode?: string;
-	repo: string;
-	before: string;
-	after: string;
-	changed: boolean;
-	output: string;
-	restarted: boolean;
+    mode?: string;
+    repo: string;
+    before: string;
+    after: string;
+    changed: boolean;
+    output: string;
+    restarted: boolean;
 }
-declare function restart(): Promise<{ message?: string; changed?: boolean }>;
+interface VersionInfo {
+    current: string;
+    remote: string;
+    source: string;
+    repository: string;
+}
+declare function restart(): Promise<{
+    message?: string;
+    changed?: boolean;
+}>;
+declare function version(): Promise<VersionInfo>;
 declare function update(options?: UpdateOptions): Promise<UpdateResult>;
 interface CQItem {
-	type: string;
-	params: Record<string, string>;
+    type: string;
+    params: Record<string, string>;
 }
 interface CQParams {
-	[key: string]: string | number | boolean;
+    [key: string]: string | number | boolean;
 }
 declare let utils: {
-	buildCQTag: (type: string, params: CQParams, prefix?: string) => string;
-	parseCQText: (text: string, prefix?: string) => (string | CQItem)[];
-	image: (url: string) => string;
-	video: (url: string) => string;
+    userList: typeof userList;
+    sleep: typeof sleep;
+    version: typeof version;
+    restart: typeof restart;
+    update: typeof update;
+    buildCQTag: (type: string, params: CQParams, prefix?: string) => string;
+    parseCQText: (text: string, prefix?: string) => (string | CQItem)[];
+    image: (url: string) => string;
+    video: (url: string) => string;
 };
 declare let console: {
-	log(...args: any[]): void;
-	info(...args: any[]): void;
-	error(...args: any[]): void;
-	debug(...args: any[]): void;
+    log(...args: any[]): void;
+    info(...args: any[]): void;
+    error(...args: any[]): void;
+    debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlUser, SillyGirlUserBindings, userList, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console };
+export { Adapter, Bucket, Container, form, sender, utils, console, };
 `
 
 func defaultScript(title string) string {
@@ -746,23 +860,15 @@ func defaultScript(title string) string {
 * @title ` + title + `
 * @desc 🐒这个人很懒什么都没有留下
 * @author ` + sillyGirl.GetString("author", "佚名") + `
-* @version v1.0.0
+* @version v1.0.1
 */
 
 const {
   sender: s,
   Bucket,
-  QingLong,
-  SmallCat,
-  DaiDai,
-  userList,
-  sillyGirlCreateSchema,
-  SillyGirlPluginConfig,
+  Container,
   form,
-  pushAdmin,
-  restart,
-  update,
-  utils: { buildCQTag, image, video },
+  utils: { buildCQTag, image, video, userList, sleep, version, restart, update },
 } = require("sillygirl");
 `
 }
@@ -772,7 +878,7 @@ func defaultPythonScript(title string) string {
 * @title ` + title + `
 * @desc 这个人很懒什么都没有留下
 * @author ` + sillyGirl.GetString("author", "佚名") + `
-* @version v1.0.0
+* @version v1.0.1
 """
 
 import asyncio

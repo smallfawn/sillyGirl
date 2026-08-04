@@ -222,10 +222,10 @@ const helper = require("schema-helper-retry");
 if (typeof helper.schemaTitle !== "string") {
   throw new Error("schema helper dependency is unavailable");
 }
-const { sillyGirlCreateSchema, SillyGirlPluginConfig } = require("sillygirl");
-new SillyGirlPluginConfig(sillyGirlCreateSchema.object({
-  token: sillyGirlCreateSchema.string().setTitle(helper.schemaTitle)
-}));
+const { form } = require("sillygirl");
+new form({
+  token: form.string().title(helper.schemaTitle)
+});
 `
 	if err := os.WriteFile(pluginPath, []byte(plugin), 0644); err != nil {
 		t.Fatal(err)
@@ -291,11 +291,11 @@ import schema_helper_retry
 if schema_helper_retry.SCHEMA_TITLE != "Dependency Token":
     raise RuntimeError("schema helper dependency is unavailable")
 
-from sillygirl import sillyGirlCreateSchema, SillyGirlPluginConfig
+from sillygirl import form
 
-SillyGirlPluginConfig(sillyGirlCreateSchema.object({
-    "token": sillyGirlCreateSchema.string().setTitle(schema_helper_retry.SCHEMA_TITLE)
-}))
+form({
+    "token": form.string().title(schema_helper_retry.SCHEMA_TITLE)
+})
 `
 	if err := os.WriteFile(pluginPath, []byte(plugin), 0644); err != nil {
 		t.Fatal(err)

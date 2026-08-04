@@ -27,7 +27,7 @@ var setupLock sync.Mutex
 var loginAttemptLock sync.Mutex
 var loginAttempts = map[string]*loginAttemptState{}
 
-const adminJWTExpireSeconds = 86400
+const adminJWTExpireSeconds = 3 * 24 * 60 * 60
 const adminPasswordHashCost = bcrypt.DefaultCost
 const loginAttemptWindow = 15 * time.Minute
 const maxLoginAttempts = 5
@@ -511,13 +511,20 @@ func parseAdminJWT(token string) (*adminJWTClaims, error) {
 	if claims.JTI == "" || claims.Sub == "" {
 		return nil, errors.New("JWT 缺少会话信息")
 	}
-	if claims.Exp <= time.Now().Unix() {
+	if jwtClaimsExpired(time.Now().Unix(), claims.Iat, claims.Exp, adminJWTExpireSeconds) {
 		return nil, errors.New("JWT 已过期")
 	}
 	if currentName := strings.TrimSpace(sillyGirl.GetString("name")); currentName != "" && claims.Sub != currentName {
 		return nil, errors.New("JWT 用户不匹配")
 	}
 	return claims, nil
+}
+
+func jwtClaimsExpired(now, issuedAt, expiresAt, maxAgeSeconds int64) bool {
+	if expiresAt <= now {
+		return true
+	}
+	return issuedAt <= 0 || maxAgeSeconds <= 0 || issuedAt+maxAgeSeconds <= now
 }
 
 func signAdminJWTPart(unsigned string) string {

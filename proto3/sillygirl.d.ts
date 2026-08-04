@@ -33,6 +33,13 @@ declare class Sender {
     reply(content: string): Promise<string>;
     doAction(options: Record<string, any>): Promise<any>;
     getEvent(): Promise<Record<string, any>>;
+    pushAdmin(content: string, options?: PushAdminOptions): Promise<{
+        platform: string;
+        bot_id: string;
+        user_id: string;
+        message_id?: string;
+        error?: string;
+    }[]>;
 }
 declare class Bucket {
     private name;
@@ -56,12 +63,12 @@ declare class Bucket {
     watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
     getName(): Promise<string>;
 }
-interface SillyGirlUserBindings {
+export interface SillyGirlUserBindings {
     qq: string;
     telegram: string;
     smallcat_openids: string[];
 }
-interface SillyGirlUser {
+export interface SillyGirlUser {
     id: string;
     username: string;
     nickname: string;
@@ -69,54 +76,53 @@ interface SillyGirlUser {
     authorized: boolean;
     bindings: SillyGirlUserBindings;
 }
+/** Read ordinary users and this plugin's authorization state. */
 declare function userList(): Promise<SillyGirlUser[]>;
 interface SillyGirlSchemaNode {
     __schemaNode: boolean;
     schema: Record<string, any>;
-    setTitle(value: string): SillyGirlSchemaNode;
-    setDescription(value: string): SillyGirlSchemaNode;
-    setDefault(value: any): SillyGirlSchemaNode;
-    setEnum(value: any[]): SillyGirlSchemaNode;
-    setEnumNames(value: string[]): SillyGirlSchemaNode;
-    setRequired(value: string[] | boolean): SillyGirlSchemaNode;
-    setFormat(value: string): SillyGirlSchemaNode;
-    setMin(value: number): SillyGirlSchemaNode;
-    setMax(value: number): SillyGirlSchemaNode;
-    setMinLength(value: number): SillyGirlSchemaNode;
-    setMaxLength(value: number): SillyGirlSchemaNode;
-    setPattern(value: string): SillyGirlSchemaNode;
-    setWidget(value: string): SillyGirlSchemaNode;
+    title(value: string): SillyGirlSchemaNode;
+    description(value: string): SillyGirlSchemaNode;
+    default(value: any): SillyGirlSchemaNode;
+    options(value: any[] | Record<string, any>): SillyGirlSchemaNode;
+    required(value: string[] | boolean): SillyGirlSchemaNode;
+    format(value: string): SillyGirlSchemaNode;
+    min(value: number): SillyGirlSchemaNode;
+    max(value: number): SillyGirlSchemaNode;
+    minLength(value: number): SillyGirlSchemaNode;
+    maxLength(value: number): SillyGirlSchemaNode;
+    pattern(value: string): SillyGirlSchemaNode;
+    widget(value: string): SillyGirlSchemaNode;
     toJSON(): Record<string, any>;
 }
-declare function pluginConfigDefaults(schema: any): any;
 declare class SchemaNode implements SillyGirlSchemaNode {
     __schemaNode: boolean;
     schema: Record<string, any>;
     constructor(type: string, extra?: Record<string, any>);
-    setTitle(value: string): this;
-    setDescription(value: string): this;
-    setDefault(value: any): this;
-    setEnum(value: any[]): this;
-    setEnumNames(value: string[]): this;
-    setRequired(value: string[] | boolean): this;
-    setFormat(value: string): this;
-    setMin(value: number): this;
-    setMax(value: number): this;
-    setMinLength(value: number): this;
-    setMaxLength(value: number): this;
-    setPattern(value: string): this;
-    setWidget(value: string): this;
+    title(value: string): this;
+    description(value: string): this;
+    default(value: any): this;
+    options(value: any[] | Record<string, any>): SchemaNode;
+    required(value: string[] | boolean): this;
+    format(value: string): this;
+    min(value: number): this;
+    max(value: number): this;
+    minLength(value: number): this;
+    maxLength(value: number): this;
+    pattern(value: string): this;
+    widget(value: string): this;
     toJSON(): Record<string, any>;
 }
-declare const sillyGirlCreateSchema: {
+declare const formHelpers: {
     string: () => SchemaNode;
     number: () => SchemaNode;
     integer: () => SchemaNode;
     boolean: () => SchemaNode;
     array: (item?: any) => SchemaNode;
     object: (props?: Record<string, any>) => SchemaNode;
+    select: (options: any[] | Record<string, any>) => SchemaNode;
 };
-declare class SillyGirlPluginConfig {
+declare class PluginConfigFormInstance {
     uuid: string;
     jsonSchema: Record<string, any>;
     userConfig: Record<string, any>;
@@ -132,7 +138,44 @@ declare class SillyGirlPluginConfig {
         error: string;
     }>;
 }
-declare function form(schema: any): SillyGirlPluginConfig;
+interface PluginConfigFormFactory {
+    (fields: Record<string, SillyGirlSchemaNode>): PluginConfigFormInstance;
+    new (fields: Record<string, SillyGirlSchemaNode>): PluginConfigFormInstance;
+    string: typeof formHelpers.string;
+    number: typeof formHelpers.number;
+    integer: typeof formHelpers.integer;
+    boolean: typeof formHelpers.boolean;
+    array: typeof formHelpers.array;
+    object: typeof formHelpers.object;
+    select: typeof formHelpers.select;
+    defaults(fields: Record<string, SillyGirlSchemaNode>): any;
+}
+declare const form: PluginConfigFormFactory;
+type ContainerKind = "smallcat" | "qinglong" | "daidai";
+interface ContainerPanelInfo {
+    index: number;
+    id: string;
+    name: string;
+    address: string;
+    status: string;
+    message: string;
+}
+interface ContainerPanelList {
+    type: ContainerKind;
+    key: ContainerKind;
+    label: string;
+    total: number;
+    list: ContainerPanelInfo[];
+}
+declare class Container {
+    QingLong: typeof QingLong;
+    SmallCat: typeof SmallCat;
+    DaiDai: typeof DaiDai;
+    constructor(_options?: Record<string, any>);
+    getList(kind?: ContainerKind | string): Promise<Record<ContainerKind, ContainerPanelList> | ContainerPanelList>;
+    count(kind: ContainerKind | string): Promise<number>;
+    get(kind: ContainerKind | string, id: number | string): Promise<ContainerPanelInfo | undefined>;
+}
 declare class QingLong {
     id: number;
     uuid: string;
@@ -295,13 +338,6 @@ declare class Adapter {
     sender(options: any): Promise<Sender>;
 }
 declare let sender: Sender;
-declare function pushAdmin(content: string, options?: PushAdminOptions): Promise<{
-    platform: string;
-    bot_id: string;
-    user_id: string;
-    message_id?: string;
-    error?: string;
-}[]>;
 declare function sleep(ms?: number): Promise<unknown>;
 interface UpdateOptions {
     releaseRepo?: string;
@@ -340,6 +376,11 @@ interface CQParams {
     [key: string]: string | number | boolean;
 }
 declare let utils: {
+    userList: typeof userList;
+    sleep: typeof sleep;
+    version: typeof version;
+    restart: typeof restart;
+    update: typeof update;
     buildCQTag: (type: string, params: CQParams, prefix?: string) => string;
     parseCQText: (text: string, prefix?: string) => (string | CQItem)[];
     image: (url: string) => string;
@@ -351,4 +392,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlUser, SillyGirlUserBindings, userList, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, version, restart, update, utils, console, };
+export { Adapter, Bucket, Container, form, sender, utils, console, };

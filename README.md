@@ -61,7 +61,7 @@ docker compose logs -f
 /**
  * @title HelloWorld
  * @rule raw ^你好$
- * @version v1.0.0
+ * @version v1.0.1
  * @author custom
  */
 
@@ -74,7 +74,7 @@ Python 插件使用 Python 3.12 运行，SDK 通过 `from sillygirl import ...` 
 """
 * @title PythonHello
 * @rule raw ^py你好$
-* @version v1.0.0
+* @version v1.0.1
 * @author custom
 """
 
@@ -95,7 +95,7 @@ Python 插件要点：
 |------|------|
 | 运行版本 | 只使用 Python 3.12；Docker 镜像已内置，本地运行需要安装 Python 3.12 |
 | 运行路径 | 推荐扁平文件 `/data/plugins/插件名.py`，不要再套 `插件名/main.py` |
-| SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, QingLong, SmallCat, DaiDai, pushAdmin, restart, update` |
+| SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, Container, form, utils` |
 | 异步调用 | Python SDK 方法都是异步方法，`s.reply()`、`Bucket.get()` 等都要 `await` |
 | 运行时依赖 | 内置 `grpcio==1.83.0`、`protobuf==7.35.1`，用于和 Go 主程序 gRPC 通信 |
 | 第三方依赖 | 在注释中写 `@depe ["requests"]`，后台「依赖管理」选择 Python 后可安装/卸载 |
@@ -111,15 +111,14 @@ Python 使用存储和配置：
 """
 
 import asyncio
-from sillygirl import sender as s, Bucket, sillyGirlCreateSchema, SillyGirlPluginConfig
+from sillygirl import sender as s, Bucket, form
 
-schema = sillyGirlCreateSchema.object({
-    "token": sillyGirlCreateSchema.string()
-        .setTitle("Token")
-        .setFormat("password")
-        .setDefault(""),
+config = form({
+    "token": form.string()
+        .title("Token")
+        .format("password")
+        .default(""),
 })
-config = SillyGirlPluginConfig(schema)
 db = Bucket("python-demo")
 
 
@@ -151,7 +150,7 @@ asyncio.run(main())
 | `@rule 规则` | 普通消息插件必填 | 消息匹配规则，可写多条；支持 `raw ^正则$` 和占位参数 `[名称]` |
 | `@priority 数字` | 非必填 | 匹配优先级，数字越大越优先，默认 `0` |
 | `@admin true/false` | 非必填 | 是否仅管理员可触发，默认 `false` |
-| `@version 版本号` | 非必填 | 插件版本，默认 `v1.0.0` |
+| `@version 版本号` | 非必填 | 插件版本，默认 `v1.0.1` |
 | `@author 作者` | 非必填 | 作者名 |
 | `@desc 描述` | 非必填 | 插件说明，显示在后台或插件市场 |
 | `@depe ["依赖名"]` | 非必填 | 插件依赖声明；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
@@ -195,28 +194,29 @@ s.continue();        // 继续匹配后续插件
 推送管理员：
 
 ```js
-const { pushAdmin } = require("sillygirl");
+const { sender: s } = require("sillygirl");
 
-await pushAdmin("任务执行完成");
-await pushAdmin("只推送 QQ 管理员", { platform: "qq" });
-await pushAdmin("指定机器人推送", { platform: "qq", botId: "10001" });
+await s.pushAdmin("任务执行完成");
+await s.pushAdmin("只推送 QQ 管理员", { platform: "qq" });
+await s.pushAdmin("指定机器人推送", { platform: "qq", botId: "10001" });
 ```
 
-`pushAdmin(content, options?)` 会读取对应平台存储桶里的 `masters` 管理员列表；不传 `platform` 时会遍历所有带 `masters` 的平台。
+`s.pushAdmin(content, options?)` 会读取对应平台存储桶里的 `masters` 管理员列表；不传 `platform` 时会遍历所有带 `masters` 的平台。
 
 插件配置表单：
 
 ```js
-const schema = sillyGirlCreateSchema.object({
-  host: sillyGirlCreateSchema.string()
-    .setTitle("服务地址")
-    .setDefault("http://127.0.0.1:9090"),
-  enabled: sillyGirlCreateSchema.boolean()
-    .setTitle("启用")
-    .setDefault(false),
+const { form } = require("sillygirl");
+
+const ConfigDB = new form({
+  host: form.string()
+    .title("服务地址")
+    .default("http://127.0.0.1:9090"),
+  enabled: form.boolean()
+    .title("启用")
+    .default(false),
 });
 
-const ConfigDB = new SillyGirlPluginConfig(schema);
 ConfigDB.get();
 s.reply("当前地址：" + ConfigDB.userConfig.host);
 ```
@@ -296,7 +296,8 @@ db.keys();
 先在 Admin 面板「青龙容器」中添加青龙地址、`client_id`、`client_secret`。脚本里按页面编号创建实例：
 
 ```js
-const ql = new QingLong({ id: 1 });
+const ct = new Container();
+const ql = new ct.QingLong({ id: 1 });
 ```
 
 常用方法：
@@ -316,27 +317,29 @@ const ql = new QingLong({ id: 1 });
 示例：
 
 ```js
-const ql = new QingLong({ id: 1 });
+const ct = new Container();
+const ql = new ct.QingLong({ id: 1 });
 const envs = ql.getEnvs({ searchValue: "JD_COOKIE" });
 s.reply("匹配到 " + envs.length + " 个变量");
 ```
 
-注意：`new QingLong({ id: 1 })` 只接受对象参数，不支持 `new QingLong(1)`。
+注意：`new ct.QingLong({ id: 1 })` 只接受对象参数，不支持 `new ct.QingLong(1)`。
 
 ### 普通用户列表
 
-顶层 `userList()` 返回普通用户、绑定信息以及当前插件的 SmallCat 读取授权状态；授权状态由运行时自动绑定到当前插件，脚本不需要也不能传入其他插件 UUID。
+`utils.userList()` 返回普通用户、绑定信息以及当前插件的 SmallCat 读取授权状态；授权状态由运行时自动绑定到当前插件，脚本不需要也不能传入其他插件 UUID。
 
 ```js
-const { userList, SmallCat } = require("sillygirl");
+const { Container, utils } = require("sillygirl");
+const ct = new Container();
 
-const users = await userList();
+const users = await utils.userList();
 const authorizedOpenids = users
   .filter((user) => !user.disabled && user.authorized)
   .flatMap((user) => user.bindings.smallcat_openids);
 
 // SmallCat.userList() 保持为 SmallCat 账号列表接口。
-const accounts = await new SmallCat({ id: 1 }).userList();
+const accounts = await new ct.SmallCat({ id: 1 }).userList();
 ```
 
 每项包含 `id`、`username`、`nickname`、`disabled`、`authorized`，以及 `bindings.qq`、`bindings.telegram`、`bindings.smallcat_openids`。未授权、用户已禁用、插件已关闭或插件已禁用时，`authorized` 为 `false`，`smallcat_openids` 固定为空数组。
@@ -346,7 +349,8 @@ const accounts = await new SmallCat({ id: 1 }).userList();
 先在 Admin 面板「smallcat」中添加地址和 `api_auth`。脚本里按页面编号创建实例：
 
 ```js
-const sc = new SmallCat({ id: 1 });
+const ct = new Container();
+const sc = new ct.SmallCat({ id: 1 });
 ```
 
 常用方法：
@@ -377,7 +381,8 @@ const sc = new SmallCat({ id: 1 });
 示例：
 
 ```js
-const sc = new SmallCat({ id: 1 });
+const ct = new Container();
+const sc = new ct.SmallCat({ id: 1 });
 const qr = sc.createQr(1);
 if (!qr.status) {
   s.reply("生成二维码失败：" + qr.message);
@@ -428,7 +433,8 @@ smallcat 返回值保持原始 API 响应，不额外改写。
 先在 Admin 面板「呆呆面板」中添加地址、`app_key`、`app_secret`。脚本里按页面编号创建实例：
 
 ```js
-const dd = new DaiDai({ id: 1 });
+const ct = new Container();
+const dd = new ct.DaiDai({ id: 1 });
 ```
 
 常用方法：
@@ -448,12 +454,13 @@ const dd = new DaiDai({ id: 1 });
 示例：
 
 ```js
-const dd = new DaiDai({ id: 1 });
+const ct = new Container();
+const dd = new ct.DaiDai({ id: 1 });
 const envs = dd.getEnvs({ keyword: "JD_COOKIE" });
 s.reply("呆呆面板变量数量：" + envs.length);
 ```
 
-注意：`new DaiDai({ id: 1 })` 只接受对象参数，不支持 `new DaiDai(1)`。
+注意：`new ct.DaiDai({ id: 1 })` 只接受对象参数，不支持 `new ct.DaiDai(1)`。
 
 ### Cron
 
@@ -475,15 +482,15 @@ task.remove(ret.id);
 | 管理面板 | Vue 管理后台，支持脚本、插件市场、配置、存储、任务等管理 |
 | 脚本插件 | 支持 JS/Python 代码高亮、文件管理和在线编辑；JS 支持格式化 |
 | 插件市场 | 支持管理插件源，从 GitHub 仓库 `plugins/` 目录导入插件 |
-| 插件配置 | 支持 `sillyGirlCreateSchema` / `new SillyGirlPluginConfig(schema)` / `form(schema)` 声明式配置表单 |
+| 插件配置 | 支持 `new form({ key: form.string().title("标题").default("") })` 链式配置表单 |
 | 依赖管理 | 支持按 NodeJS/Python 筛选；NodeJS 使用 pnpm 管理共享依赖，Python 使用 pipx 管理共享依赖；依赖从插件注释 `@depe ["包名"]` 读取 |
 | NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
 | Python 运行 | `/data/plugins/插件名.py` 走 Python 3.12 运行时，Docker 镜像已内置 Python、pipx、`grpcio==1.83.0` 和 `protobuf==7.35.1` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
 | 搬运 | 可按平台和群号把消息交给指定插件脚本处理，业务过滤和转发由脚本自行实现 |
-| 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new QingLong({ id })` 调用 |
-| smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new SmallCat({ id })` 调用 |
-| 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new DaiDai({ id })` 调用 |
+| 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new ct.QingLong({ id })` 调用 |
+| smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new ct.SmallCat({ id })` 调用 |
+| 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new ct.DaiDai({ id })` 调用 |
 | 适配器 | 内置微信 ClawBot、QQ/OneBot、Telegram Bot、钉钉 Stream、QQ 官方频道 Webhook、Web、Pagermaid 适配器 |
 | 定时任务 | 支持 Cron 表达式、`node 插件名.js` 和 `python 插件名.py` 脚本触发 |
 | Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub 镜像 |

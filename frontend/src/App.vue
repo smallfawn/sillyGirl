@@ -24,6 +24,7 @@ import Modal from 'ant-design-vue/es/modal';
 import Pagination from 'ant-design-vue/es/pagination';
 import Popconfirm from 'ant-design-vue/es/popconfirm';
 import Progress from 'ant-design-vue/es/progress';
+import Radio from 'ant-design-vue/es/radio';
 import Row from 'ant-design-vue/es/row';
 import Segmented from 'ant-design-vue/es/segmented';
 import Select from 'ant-design-vue/es/select';
@@ -39,6 +40,7 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN';
 import QRCode from 'qrcode';
 import {
   Antenna,
+  ArrowUp,
   Bot,
   CircleCheck,
   CircleX,
@@ -46,7 +48,6 @@ import {
   CloudDownload,
   Database,
   Download,
-  DoorOpen,
   Edit3,
   FileCode2,
   FolderOpen,
@@ -72,7 +73,7 @@ import {
   Menu as MenuIcon,
   Wand2,
 } from 'lucide-vue-next';
-import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
+import { ApiError, clearAuthToken, del, get, getAuthToken, post, put, readStorage, saveStorage, setAuthToken } from './api';
 import type { AdminUserRow, CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
 import { timestamp } from './utils';
 
@@ -1620,7 +1621,6 @@ const plugins = reactive({
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
   uninstalling: {} as Record<string, boolean>,
-  opening: {} as Record<string, boolean>,
   requestId: 0,
   detailOpen: false,
   detail: null as PluginInfo | null,
@@ -1793,6 +1793,8 @@ async function uninstallPlugin(row: PluginInfo) {
     if (pluginConfigs.selected?.uuid === row.id) {
       pluginConfigs.modalOpen = false;
       pluginConfigs.selected = null;
+      pluginConfigs.marketRow = null;
+      pluginConfigs.configurable = false;
     }
     message.success(firstMessage || '插件已卸载');
     await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
@@ -1800,29 +1802,6 @@ async function uninstallPlugin(row: PluginInfo) {
     message.error(error instanceof Error ? error.message : '插件卸载失败');
   } finally {
     plugins.uninstalling[row.id] = false;
-  }
-}
-async function togglePluginOpen(row: PluginInfo) {
-  if (!pluginInstalled(row)) {
-    message.warning('请先安装插件');
-    return;
-  }
-  plugins.opening[row.id] = true;
-  try {
-    const res = await put<ApiEnvelope<{ uuid: string; open: boolean }>>('/api/admin/plugin/open', {
-      uuid: row.id,
-      open: !row.open,
-    });
-    const data = apiData(res);
-    row.open = data.open;
-    if (plugins.detail?.id === row.id) {
-      plugins.detail.open = data.open;
-    }
-    message.success(data.open ? '插件已开放到 Home 页面' : '已取消 Home 页面开放');
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : '修改开放状态失败');
-  } finally {
-    plugins.opening[row.id] = false;
   }
 }
 function pluginStatusLabel(row: PluginInfo) {
@@ -1839,12 +1818,20 @@ function pluginInstalled(row: PluginInfo) {
   return row.status === 1 || row.status === 2 || row.status === 6;
 }
 
+function pluginUpgradable(row: PluginInfo) {
+  return row.status === 1;
+}
+
 function pluginCanOpen(row: PluginInfo) {
   return pluginInstalled(row) && row.uses_smallcat === true;
 }
 
 function pluginCanConfigure(row: PluginInfo) {
   return pluginInstalled(row) && row.config_registered === true;
+}
+
+function pluginCanManage(row: PluginInfo) {
+  return pluginCanConfigure(row) || pluginCanOpen(row);
 }
 
 type NodeDependencyPlugin = {
@@ -2087,8 +2074,11 @@ async function removeNodeDependency(row: NodeDependencyRow) {
 const pluginConfigs = reactive({
   rows: [] as any[],
   selected: null as any,
+  marketRow: null as PluginInfo | null,
   form: {} as Record<string, any>,
   text: {} as Record<string, string>,
+  configurable: false,
+  openToUsers: false,
   loading: false,
   saving: false,
   modalOpen: false,
@@ -2098,22 +2088,31 @@ const schemaFields = computed(() => {
   const props = pluginConfigs.selected?.schema?.properties || {};
   return Object.entries(props).map(([key, prop]) => ({ key, prop: prop as any }));
 });
+const pluginOpenAvailable = computed(() => Boolean(
+  pluginConfigs.marketRow && pluginCanOpen(pluginConfigs.marketRow),
+));
+const pluginSettingsCanSave = computed(() => Boolean(
+  pluginConfigs.selected && (pluginConfigs.configurable || pluginOpenAvailable.value),
+));
 async function loadPluginConfigs() {
   pluginConfigs.loading = true;
   try {
     const res = await get<ApiEnvelope<any[]>>('/api/admin/plugin/configs');
     pluginConfigs.rows = apiData(res) || [];
-    if (pluginConfigs.selected) {
+    if (pluginConfigs.selected && pluginConfigs.configurable) {
       const next = pluginConfigs.rows.find((item) => item.uuid === pluginConfigs.selected?.uuid);
-      if (next) openPluginConfig(next);
+      if (next) openPluginConfig(next, pluginConfigs.marketRow, true);
       else pluginConfigs.selected = null;
     }
   } finally {
     pluginConfigs.loading = false;
   }
 }
-function openPluginConfig(row: any) {
+function openPluginConfig(row: any, marketRow: PluginInfo | null = null, configurable = true) {
   pluginConfigs.selected = row;
+  pluginConfigs.marketRow = marketRow;
+  pluginConfigs.configurable = configurable;
+  pluginConfigs.openToUsers = Boolean(marketRow?.open);
   const values = { ...(row.user_config || {}) };
   for (const [key, prop] of Object.entries(row.schema?.properties || {}) as Array<[string, any]>) {
     if (values[key] === undefined && prop.default !== undefined) values[key] = prop.default;
@@ -2135,28 +2134,88 @@ function fieldType(prop: any) {
   if (Array.isArray(prop?.enum)) return 'enum';
   return prop?.type || 'string';
 }
+type PluginPanelKind = 'smallcat' | 'qinglong' | 'daidai';
+function pluginPanelKind(field: { key: string; prop?: any }): PluginPanelKind | null {
+  const widget = String(field.prop?.['ui:widget'] || '').toLowerCase();
+  if (widget === 'smallcat-panel') return 'smallcat';
+  if (widget === 'qinglong-panel') return 'qinglong';
+  if (widget === 'daidai-panel') return 'daidai';
+  const key = String(field.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const title = String(field.prop?.title || '');
+  if (key === 'smallcatid' || /smallcat.*编号/i.test(title)) return 'smallcat';
+  if (key === 'qinglongid' || key === 'qlid' || /青龙.*编号/.test(title)) return 'qinglong';
+  if (key === 'daidaiid' || key === 'ddid' || /呆呆.*编号/.test(title)) return 'daidai';
+  return null;
+}
+function pluginPanelChoices(field: { key: string; prop?: any }) {
+  const kind = pluginPanelKind(field);
+  let available = 0;
+  if (kind === 'smallcat') available = Math.max(smallcat.total, smallcat.rows.length);
+  if (kind === 'qinglong') available = Math.max(qinglong.total, qinglong.rows.length);
+  if (kind === 'daidai') available = Math.max(daidai.total, daidai.rows.length);
+  return Array.from({ length: Math.max(available, 0) }, (_, index) => index + 1);
+}
+function pluginPanelEmptyText(field: { key: string; prop?: any }) {
+  const labels: Record<PluginPanelKind, string> = { smallcat: 'SmallCat', qinglong: '青龙', daidai: '呆呆' };
+  const kind = pluginPanelKind(field);
+  return kind ? `暂无已配置的${labels[kind]}容器，请先到容器管理中添加` : '';
+}
+function pluginConfigFieldVisible(field: { key: string; prop: any }) {
+  const properties = pluginConfigs.selected?.schema?.properties || {};
+  if (Object.prototype.hasOwnProperty.call(properties, 'sync_panel')) {
+    const syncPanel = String(pluginConfigs.form.sync_panel || '');
+    if (field.key === 'qinglong_id') return syncPanel === 'qinglong';
+    if (field.key === 'daidai_id') return syncPanel === 'daidai';
+  }
+  if (!Object.prototype.hasOwnProperty.call(properties, 'account_mode')) return true;
+  const title = String(field.prop?.title || '');
+  const description = String(field.prop?.description || '');
+  const isManualOnly = field.key === 'openid'
+    || field.key === 'manual_openids'
+    || field.key === 'accounts_json'
+    || /手动\s*openid/i.test(title)
+    || /仅手动填写模式生效/.test(description);
+  return !isManualOnly || pluginConfigs.form.account_mode === 'manual';
+}
 async function savePluginConfig() {
   if (!pluginConfigs.selected) return;
   const value = { ...pluginConfigs.form };
-  for (const field of schemaFields.value) {
-    const type = fieldType(field.prop);
-    if ((type === 'object' || type === 'array') && pluginConfigs.text[field.key] !== undefined) {
-      try {
-        value[field.key] = JSON.parse(pluginConfigs.text[field.key] || (type === 'array' ? '[]' : '{}'));
-      } catch {
-        message.error(`${field.prop.title || field.key} JSON 格式错误`);
-        return;
+  if (pluginConfigs.configurable) {
+    for (const field of schemaFields.value) {
+      const type = fieldType(field.prop);
+      if ((type === 'object' || type === 'array') && pluginConfigs.text[field.key] !== undefined) {
+        try {
+          value[field.key] = JSON.parse(pluginConfigs.text[field.key] || (type === 'array' ? '[]' : '{}'));
+        } catch {
+          message.error(`${field.prop.title || field.key} JSON 格式错误`);
+          return;
+        }
       }
     }
   }
   pluginConfigs.saving = true;
   try {
-    await putPluginConfig(pluginConfigs.selected.uuid, value);
-    message.success('插件配置已保存');
+    if (pluginConfigs.configurable) {
+      await putPluginConfig(pluginConfigs.selected.uuid, value);
+    }
+    const marketRow = pluginConfigs.marketRow;
+    if (marketRow && pluginCanOpen(marketRow) && Boolean(marketRow.open) !== pluginConfigs.openToUsers) {
+      const res = await put<ApiEnvelope<{ uuid: string; open: boolean }>>('/api/admin/plugin/open', {
+        uuid: marketRow.id,
+        open: pluginConfigs.openToUsers,
+      });
+      const data = apiData(res);
+      marketRow.open = data.open;
+      if (plugins.detail?.id === marketRow.id) plugins.detail.open = data.open;
+    }
+    message.success('插件设置已保存');
     pluginConfigs.modalOpen = false;
-    await loadPluginConfigs();
+    pluginConfigs.selected = null;
+    pluginConfigs.marketRow = null;
+    pluginConfigs.configurable = false;
+    await Promise.all([loadPluginConfigs(), loadPlugins(plugins.current, plugins.pageSize)]);
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '插件配置保存失败');
+    message.error(error instanceof Error ? error.message : '插件设置保存失败');
   } finally {
     pluginConfigs.saving = false;
   }
@@ -2275,21 +2334,38 @@ function clearClawbotLoginPoll() {
 }
 async function openMarketPluginConfig(row: PluginInfo) {
   if (!pluginInstalled(row)) {
-    message.info('请先安装插件后再配置');
+    message.info('请先安装插件后再设置');
     return;
   }
   pluginConfigs.opening = row.id;
   try {
     await loadPluginConfigs();
     const config = pluginConfigs.rows.find((item) => item.uuid === row.id);
-    if (!config) {
-      message.info('该插件没有可配置项');
-      return;
+    const properties = config?.schema?.properties || {};
+    const panelKinds = new Set<PluginPanelKind>();
+    for (const [key, prop] of Object.entries(properties)) {
+      const kind = pluginPanelKind({ key, prop });
+      if (kind) panelKinds.add(kind);
     }
-    openPluginConfig(config);
+    if (pluginCanOpen(row)) panelKinds.add('smallcat');
+    await Promise.all([
+      panelKinds.has('smallcat') ? loadSmallcatPanels() : Promise.resolve(),
+      panelKinds.has('qinglong') ? loadQinglongPanels() : Promise.resolve(),
+      panelKinds.has('daidai') ? loadDaidaiPanels() : Promise.resolve(),
+    ]);
+    const selected = config || {
+      uuid: row.id,
+      plugin: row.title || row.id,
+      title: row.title || row.id,
+      file: row.address || row.id,
+      registered: row.has_form === true ? false : true,
+      schema: { type: 'object', properties: {} },
+      user_config: {},
+    };
+    openPluginConfig(selected, row, Boolean(config));
     pluginConfigs.modalOpen = true;
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '插件配置加载失败');
+    message.error(error instanceof Error ? error.message : '插件设置加载失败');
   } finally {
     pluginConfigs.opening = '';
   }
@@ -2575,6 +2651,7 @@ async function setBotEnabled(row: { platform: string; label: string; enabled?: b
 }
 
 const settings = reactive({ form: {} as any, githubProxyOptions: [] as string[] });
+const systemBackup = reactive({ downloading: false });
 const storageBackendOptions = [
   { label: 'BoltDB', value: 'boltdb' },
   { label: 'Redis', value: 'redis' },
@@ -2647,6 +2724,51 @@ async function saveSettings() {
   nodeDeps.registry = currentDependencyTool.value.registry || nodeDeps.registry;
   message.success('设置已保存');
   loadUser();
+}
+
+function systemBackupFilename(contentDisposition: string) {
+  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.replace(/^"|"$/g, ''));
+    } catch (_) {
+      // Fall through to the plain filename value.
+    }
+  }
+  const fallbackTime = new Date().toISOString().replace(/[:.]/g, '-');
+  return contentDisposition.match(/filename="?([^";]+)"?/i)?.[1] || `sillygirl-backup-${fallbackTime}.zip`;
+}
+
+async function downloadSystemBackup() {
+  systemBackup.downloading = true;
+  try {
+    const headers = new Headers();
+    const token = getAuthToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch('/api/admin/backup', {
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.message || `备份下载失败（HTTP ${response.status}）`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = systemBackupFilename(response.headers.get('content-disposition') || '');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    message.success('备份已生成并开始下载');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '备份下载失败');
+  } finally {
+    systemBackup.downloading = false;
+  }
 }
 
 const messageBuckets = {
@@ -3692,30 +3814,29 @@ function smallcatOpenids(record?: AdminUserRow) {
                     </div>
                     <div class="plugin-card-actions">
                       <Button
-                        v-if="pluginCanOpen(record)"
-                        class="plugin-card-open"
-                        :class="{ 'is-open': record.open }"
-                        shape="circle"
-                        :loading="plugins.opening[record.id]"
-                        :title="record.open ? '取消 Home 页面开放' : '开放到 Home 页面'"
-                        :aria-label="`${record.open ? '取消开放' : '开放'}${record.title || record.id}`"
-                        @click="togglePluginOpen(record)"
-                      >
-                        <template #icon><DoorOpen :size="18" /></template>
-                      </Button>
-                      <Button
-                        v-if="pluginCanConfigure(record)"
+                        v-if="pluginCanManage(record)"
                         class="plugin-card-settings"
                         shape="circle"
                         :loading="pluginConfigs.opening === record.id"
-                        title="插件配置"
-                        :aria-label="`${record.title || record.id}插件配置`"
+                        title="插件设置"
+                        :aria-label="`${record.title || record.id}插件设置`"
                         @click="openMarketPluginConfig(record)"
                       >
                         <template #icon><Settings :size="18" /></template>
                       </Button>
+                      <Button
+                        v-if="pluginUpgradable(record)"
+                        class="plugin-card-upgrade"
+                        shape="circle"
+                        :loading="plugins.installing[record.id]"
+                        :title="`升级 ${record.title || record.id}`"
+                        :aria-label="`升级 ${record.title || record.id}`"
+                        @click="installPlugin(record)"
+                      >
+                        <template #icon><ArrowUp :size="20" /></template>
+                      </Button>
                       <Popconfirm
-                        v-if="pluginInstalled(record)"
+                        v-else-if="pluginInstalled(record)"
                         :title="`确认卸载「${record.title || record.id}」？`"
                         ok-text="确认卸载"
                         cancel-text="取消"
@@ -3790,6 +3911,21 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Form.Item label="系统调试模式"><Switch v-model:checked="settings.form.debug" /></Form.Item>
                 <Form.Item label="未监听群允许管理员触发"><Switch v-model:checked="settings.form.listen_admin" /></Form.Item>
                 <Button type="primary" @click="saveSettings"><template #icon><Save :size="16" /></template>保存设置</Button>
+                <Typography.Title :level="5" class="settings-backup-title">数据备份</Typography.Title>
+                <Card size="small" class="settings-backup-card">
+                  <Typography.Paragraph class="settings-backup-description">
+                    下载包含全部存储桶、用户与 BOT 配置、插件配置及脚本源文件的 ZIP 备份。运行时依赖、缓存、PID 和锁文件不会打包。
+                  </Typography.Paragraph>
+                  <Alert
+                    type="warning"
+                    show-icon
+                    message="备份包含账号绑定、Token 和密钥等敏感配置，请妥善保管。"
+                    style="margin-bottom: 14px"
+                  />
+                  <Button :loading="systemBackup.downloading" @click="downloadSystemBackup">
+                    <template #icon><Download :size="16" /></template>下载备份
+                  </Button>
+                </Card>
               </Form>
             </section>
 
@@ -4154,71 +4290,109 @@ function smallcatOpenids(record?: AdminUserRow) {
 
       <Modal
         v-model:open="pluginConfigs.modalOpen"
-        :title="`${pluginConfigs.selected?.plugin || pluginConfigs.selected?.title || '插件'} 配置`"
+        :title="`${pluginConfigs.selected?.plugin || pluginConfigs.selected?.title || '插件'} 设置`"
         width="720px"
-        ok-text="保存配置"
+        ok-text="保存"
         cancel-text="取消"
         :confirm-loading="pluginConfigs.saving"
-        :ok-button-props="{ disabled: !pluginConfigs.selected || pluginConfigs.selected.registered === false }"
+        :ok-button-props="{ disabled: !pluginSettingsCanSave }"
         @ok="savePluginConfig"
       >
         <Spin :spinning="pluginConfigs.loading">
-          <div v-if="pluginConfigs.selected" class="config-form plugin-config-modal-form">
-            <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
-            <Alert
-              v-if="pluginConfigs.selected.registered === false"
-              type="warning"
-              show-icon
-              style="margin-top: 16px"
-              message="该插件检测到配置代码，但安装时没有成功导出配置表单。请确认 new SillyGirlPluginConfig(schema) 或 form(schema) 在脚本顶层执行，且脚本初始化没有报错。"
-            />
-            <Form layout="vertical" style="margin-top: 16px">
-              <template v-for="field in schemaFields" :key="field.key">
-                <Form.Item :label="field.prop.title || field.key" :html-for="`plugin-config-${field.key}`" :extra="field.prop.description">
-                  <Select
-                    v-if="fieldType(field.prop) === 'enum'"
-                    :id="`plugin-config-${field.key}`"
-                    v-model:value="pluginConfigs.form[field.key]"
-                    :options="fieldOptions(field.prop)"
-                  />
-                  <Switch
-                    v-else-if="fieldType(field.prop) === 'boolean'"
-                    :id="`plugin-config-${field.key}`"
-                    v-model:checked="pluginConfigs.form[field.key]"
-                  />
-                  <InputNumber
-                    v-else-if="fieldType(field.prop) === 'number' || fieldType(field.prop) === 'integer'"
-                    :id="`plugin-config-${field.key}`"
-                    v-model:value="pluginConfigs.form[field.key]"
-                    style="width: 100%"
-                    :min="field.prop.minimum"
-                    :max="field.prop.maximum"
-                  />
-                  <Input.TextArea
-                    v-else-if="fieldType(field.prop) === 'object' || fieldType(field.prop) === 'array'"
-                    :id="`plugin-config-${field.key}`"
-                    :name="field.key"
-                    v-model:value="pluginConfigs.text[field.key]"
-                    :rows="6"
-                    class="mono"
-                  />
-                  <Input.Password
-                    v-else-if="field.prop.format === 'password' || field.prop['ui:widget'] === 'password'"
-                    :id="`plugin-config-${field.key}`"
-                    :name="field.key"
-                    v-model:value="pluginConfigs.form[field.key]"
-                  />
-                  <Input.TextArea
-                    v-else-if="field.prop.format === 'textarea' || field.prop['ui:widget'] === 'textarea'"
-                    :id="`plugin-config-${field.key}`"
-                    :name="field.key"
-                    v-model:value="pluginConfigs.form[field.key]"
-                    :rows="4"
-                  />
-                  <Input v-else :id="`plugin-config-${field.key}`" :name="field.key" v-model:value="pluginConfigs.form[field.key]" />
-                </Form.Item>
-              </template>
-            </Form>
+          <div v-if="pluginConfigs.selected" class="plugin-settings-modal-body">
+            <section v-if="pluginOpenAvailable" class="plugin-user-open-setting">
+              <div class="plugin-user-open-copy">
+                <Typography.Text strong>是否开放为普通用户</Typography.Text>
+                <Typography.Text type="secondary">
+                  开启后普通用户可在 Home 页面看到该插件，并自行决定是否授权其读取 SmallCat 账号列表。
+                </Typography.Text>
+              </div>
+              <Switch
+                id="plugin-open-to-users"
+                v-model:checked="pluginConfigs.openToUsers"
+                aria-label="是否开放为普通用户"
+              />
+            </section>
+            <div
+              v-if="pluginConfigs.configurable || pluginConfigs.selected.registered === false"
+              class="config-form plugin-config-modal-form"
+            >
+              <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
+              <Alert
+                v-if="pluginConfigs.selected.registered === false"
+                type="warning"
+                show-icon
+                style="margin-top: 16px"
+                message="该插件检测到配置代码，但安装时没有成功导出配置表单。请确认 new form({...}) 在脚本顶层执行，且脚本初始化没有报错。"
+              />
+              <Form v-if="pluginConfigs.configurable" layout="vertical" style="margin-top: 16px">
+                <template v-for="field in schemaFields" :key="field.key">
+                  <Form.Item
+                    v-if="pluginConfigFieldVisible(field)"
+                    :label="field.prop.title || field.key"
+                    :html-for="`plugin-config-${field.key}`"
+                    :extra="field.prop.description"
+                  >
+                    <template v-if="pluginPanelKind(field)">
+                      <Radio.Group
+                        :id="`plugin-config-${field.key}`"
+                        v-model:value="pluginConfigs.form[field.key]"
+                        class="plugin-panel-id-picker"
+                        button-style="solid"
+                        :aria-label="field.prop.title || field.key"
+                      >
+                        <Radio.Button v-for="id in pluginPanelChoices(field)" :key="id" :value="id">{{ id }}</Radio.Button>
+                      </Radio.Group>
+                      <div v-if="!pluginPanelChoices(field).length" class="plugin-panel-empty">
+                        {{ pluginPanelEmptyText(field) }}
+                      </div>
+                    </template>
+                    <Select
+                      v-else-if="fieldType(field.prop) === 'enum'"
+                      :id="`plugin-config-${field.key}`"
+                      v-model:value="pluginConfigs.form[field.key]"
+                      :options="fieldOptions(field.prop)"
+                    />
+                    <Switch
+                      v-else-if="fieldType(field.prop) === 'boolean'"
+                      :id="`plugin-config-${field.key}`"
+                      v-model:checked="pluginConfigs.form[field.key]"
+                    />
+                    <InputNumber
+                      v-else-if="fieldType(field.prop) === 'number' || fieldType(field.prop) === 'integer'"
+                      :id="`plugin-config-${field.key}`"
+                      v-model:value="pluginConfigs.form[field.key]"
+                      style="width: 100%"
+                      :min="field.prop.minimum"
+                      :max="field.prop.maximum"
+                    />
+                    <Input.TextArea
+                      v-else-if="fieldType(field.prop) === 'object' || fieldType(field.prop) === 'array'"
+                      :id="`plugin-config-${field.key}`"
+                      :name="field.key"
+                      v-model:value="pluginConfigs.text[field.key]"
+                      :rows="6"
+                      class="mono"
+                    />
+                    <Input.Password
+                      v-else-if="field.prop.format === 'password' || field.prop['ui:widget'] === 'password'"
+                      :id="`plugin-config-${field.key}`"
+                      :name="field.key"
+                      v-model:value="pluginConfigs.form[field.key]"
+                    />
+                    <Input.TextArea
+                      v-else-if="field.prop.format === 'textarea' || field.prop['ui:widget'] === 'textarea'"
+                      :id="`plugin-config-${field.key}`"
+                      :name="field.key"
+                      v-model:value="pluginConfigs.form[field.key]"
+                      :rows="4"
+                    />
+                    <Input v-else :id="`plugin-config-${field.key}`" :name="field.key" v-model:value="pluginConfigs.form[field.key]" />
+                  </Form.Item>
+                </template>
+              </Form>
+            </div>
+            <Empty v-else description="该插件没有其他配置项" />
           </div>
         </Spin>
       </Modal>
