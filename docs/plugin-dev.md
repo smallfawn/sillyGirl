@@ -135,6 +135,54 @@ await restart()
 update_result = await update({"restart": True})
 ```
 
+### 普通用户列表
+
+顶层 `userList()` 提供普通用户及当前插件的授权和绑定状态。`authorized` 只表示当前插件的 `smallcat:read` 授权，运行时会从当前插件上下文判定，不接受插件 UUID 参数。
+
+```js
+const { userList, SmallCat } = require("sillygirl");
+
+const users = await userList();
+const openids = users
+  .filter((user) => !user.disabled && user.authorized)
+  .flatMap((user) => user.bindings.smallcat_openids);
+
+const accounts = await new SmallCat({ id: 1 }).userList();
+```
+
+```python
+from sillygirl import userList, SmallCat
+
+users = await userList()
+openids = [
+    openid
+    for user in users
+    if not user["disabled"] and user["authorized"]
+    for openid in user["bindings"]["smallcat_openids"]
+]
+
+accounts = await SmallCat({"id": 1}).userList()
+```
+
+`userList()` 的每个用户包含：
+
+```json
+{
+  "id": "USER_ID",
+  "username": "ACCOUNT",
+  "nickname": "昵称",
+  "disabled": false,
+  "authorized": true,
+  "bindings": {
+    "qq": "10001",
+    "telegram": "20002",
+    "smallcat_openids": ["OPENID"]
+  }
+}
+```
+
+未授权或已禁用用户仍会出现在列表中用于判断状态，但 `bindings.smallcat_openids` 会被运行时清空。插件关闭、禁用或未声明使用 SmallCat 时，所有用户的 `authorized` 都为 `false`；插件只能读取当前有效授权用户的 SmallCat openid。
+
 ### Bucket 存储
 
 ```python

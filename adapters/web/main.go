@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -24,20 +25,28 @@ var webUsers sync.Map
 var (
 	webCQImageFileURLPattern = regexp.MustCompile(`file=[^\[\]]*,url`)
 	webCQImagePattern        = regexp.MustCompile(`\[CQ:image,file=([^\[\]]+)\]`)
+	webRIDPattern            = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$`)
+)
+
+const (
+	webUserTTL         = 30 * time.Second
+	webCleanupInterval = 15 * time.Second
+	webPollTimeout     = 4 * time.Second
+	webMessageMaxBytes = 32 * 1024
 )
 
 func Broadcast2WebUser(content, class string) {
 	webUsers.Range(func(key, value interface{}) bool {
 		wu := value.(*WebUser)
-		if wu.ActivedAt.Add(10 * time.Second).After(time.Now()) {
-
-			wu.GetCarry() <- WebMessage{
+		if wu.GetActivedAt().Add(webUserTTL).After(time.Now()) {
+			wu.Enqueue(WebMessage{
 				UserID:  key.(string),
 				Content: content,
 				Type:    class,
-			}
+			})
 		} else {
 			webUsers.Delete(key)
+			webAdmins.Delete(key)
 		}
 		return true
 	})
@@ -67,9 +76,31 @@ func (wu *WebUser) GetActivedAt() time.Time {
 	return wu.ActivedAt
 }
 
+func (wu *WebUser) Enqueue(message WebMessage) {
+	carry := wu.GetCarry()
+	select {
+	case carry <- message:
+		return
+	default:
+	}
+	// Keep the newest replies without blocking a bot handler or leaking a
+	// goroutine when a browser stops polling.
+	select {
+	case <-carry:
+	default:
+	}
+	select {
+	case carry <- message:
+	default:
+	}
+}
+
 var webAdmins sync.Map
 
-var adapter *core.Factory
+var (
+	adapter     *core.Factory
+	adapterOnce sync.Once
+)
 
 var GetUserNumber = func() int {
 	i := 0
@@ -81,7 +112,7 @@ var GetUserNumber = func() int {
 }
 
 func initWebBot() {
-	if adapter == nil {
+	adapterOnce.Do(func() {
 		adapter = &core.Factory{}
 		adapter.Init("web", "default", nil)
 		adapter.SetIsAdmin(func(s string) bool {
@@ -92,16 +123,28 @@ func initWebBot() {
 			return false
 		})
 		adapter.SetReplyHandler(func(msg map[string]interface{}) string {
+			userValue, ok := msg[core.USER_ID]
+			if !ok {
+				return ""
+			}
+			userID := strings.TrimSpace(fmt.Sprint(userValue))
+			if userID == "" {
+				return ""
+			}
+			content := ""
+			if contentValue, ok := msg[core.CONETNT]; ok {
+				content = fmt.Sprint(contentValue)
+			}
 			message := WebMessage{
-				UserID:  msg[core.USER_ID].(string),
+				UserID:  userID,
 				Images:  []string{},
 				Type:    "chat",
-				Content: msg[core.CONETNT].(string),
+				Content: content,
 			}
 			sendWebMessage(&message)
 			return ""
 		})
-	}
+	})
 }
 
 func init() {
@@ -110,61 +153,117 @@ func init() {
 		time.Sleep(time.Second)
 		initWebBot()
 	}()
-	core.GinApi(core.GET, "/api/web_chat", func(ctx *gin.Context) {
-		initWebBot()
-		rid := ctx.Query("rid")
-		ctt := ctx.Query("ctt")
-		token, _ := ctx.Cookie("token")
-		_, err := core.CheckAuth(token)
-		isAdmin := err == nil
-		v, ok := webAdmins.Load(rid)
-		if ok {
-			if v.(bool) != isAdmin {
-				webAdmins.Store(rid, isAdmin)
-			}
-		} else {
-			webAdmins.Store(rid, isAdmin)
+	go cleanupWebUsers()
+	core.GinApi(core.GET, "/api/web_chat", receiveWebChat)
+	core.GinApi(core.POST, "/api/web_chat", receiveWebChat)
+}
+
+func receiveWebChat(ctx *gin.Context) {
+	initWebBot()
+	rid, content, legacySend, err := webChatRequest(ctx)
+	if err != nil {
+		core.ApiError(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !webRIDPattern.MatchString(rid) {
+		core.ApiError(ctx, http.StatusBadRequest, "web_chat rid 格式不正确")
+		return
+	}
+	_, authErr := core.CheckAuthRequest(ctx)
+	isAdmin := authErr == nil
+	if !isAdmin && !core.MakeBucket("sillyGirl").GetBool("web_chat_public") {
+		core.ApiError(ctx, http.StatusUnauthorized, "web_chat 未开启匿名访问")
+		return
+	}
+	webAdmins.Store(rid, isAdmin)
+	wu := loadWebUser(rid)
+	wu.Active()
+	if content != "" {
+		if len([]byte(content)) > webMessageMaxBytes {
+			core.ApiError(ctx, http.StatusRequestEntityTooLarge, "web_chat 消息不能超过 32KB")
+			return
 		}
-		if ctt != "" {
-			if !isAdmin && !core.MakeBucket("sillyGirl").GetBool("web_chat_public") {
-				core.ApiError(ctx, http.StatusUnauthorized, "web_chat 未开启匿名消息发送")
-				return
-			}
-			adapter.Receive(map[string]interface{}{
-				core.USER_ID: rid,
-				core.CONETNT: ctt,
-			})
+		adapter.Receive(map[string]interface{}{
+			core.USER_ID: rid,
+			core.CONETNT: content,
+		})
+		if !legacySend {
+			core.ApiOK(ctx, []WebMessage{})
+			return
 		}
-		var wu *WebUser
-		if v, ok := webUsers.Load(rid); ok {
-			wu = v.(*WebUser)
-		} else {
-			wu = &WebUser{
-				Carry: make(chan WebMessage, 1000),
-			}
-			webUsers.Store(rid, wu)
+	}
+	core.ApiOK(ctx, pollWebMessages(ctx, wu, content == "" || legacySend))
+}
+
+func webChatRequest(ctx *gin.Context) (rid, content string, legacySend bool, err error) {
+	if ctx.Request.Method == http.MethodPost {
+		ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, webMessageMaxBytes+4096)
+		payload := struct {
+			RID     string `json:"rid"`
+			Content string `json:"ctt"`
+		}{}
+		if decodeErr := json.NewDecoder(ctx.Request.Body).Decode(&payload); decodeErr != nil {
+			return "", "", false, fmt.Errorf("请求体不是有效 JSON")
 		}
-		wu.Active()
-		msgs := []WebMessage{}
-		for {
-			select {
-			case msg := <-wu.GetCarry():
-				msgs = append(msgs, msg)
-			case <-time.After(time.Millisecond * 1):
-				goto HELL
-			}
+		payload.RID = strings.TrimSpace(payload.RID)
+		payload.Content = strings.TrimSpace(payload.Content)
+		if payload.Content == "" {
+			return "", "", false, fmt.Errorf("web_chat 消息不能为空")
 		}
-	HELL:
-		if len(msgs) == 0 && ctt == "" {
-			select {
-			case msg := <-wu.GetCarry():
-				msgs = append(msgs, msg)
-			case <-time.After(time.Second * 4):
-				break
-			}
+		return payload.RID, payload.Content, false, nil
+	}
+	rid = strings.TrimSpace(ctx.Query("rid"))
+	content = strings.TrimSpace(ctx.Query("ctt"))
+	return rid, content, content != "", nil
+}
+
+func loadWebUser(rid string) *WebUser {
+	created := &WebUser{Carry: make(chan WebMessage, 1000)}
+	value, _ := webUsers.LoadOrStore(rid, created)
+	return value.(*WebUser)
+}
+
+func pollWebMessages(ctx *gin.Context, wu *WebUser, wait bool) []WebMessage {
+	msgs := drainWebMessages(wu.GetCarry())
+	if len(msgs) != 0 || !wait {
+		return msgs
+	}
+	timer := time.NewTimer(webPollTimeout)
+	defer timer.Stop()
+	select {
+	case msg := <-wu.GetCarry():
+		msgs = append(msgs, msg)
+		msgs = append(msgs, drainWebMessages(wu.GetCarry())...)
+	case <-ctx.Request.Context().Done():
+	case <-timer.C:
+	}
+	return msgs
+}
+
+func drainWebMessages(carry <-chan WebMessage) []WebMessage {
+	msgs := []WebMessage{}
+	for {
+		select {
+		case msg := <-carry:
+			msgs = append(msgs, msg)
+		default:
+			return msgs
 		}
-		core.ApiOK(ctx, msgs)
-	})
+	}
+}
+
+func cleanupWebUsers() {
+	ticker := time.NewTicker(webCleanupInterval)
+	defer ticker.Stop()
+	for now := range ticker.C {
+		webUsers.Range(func(key, value interface{}) bool {
+			if value.(*WebUser).GetActivedAt().Add(webUserTTL).Before(now) {
+				webUsers.Delete(key)
+				webAdmins.Delete(key)
+			}
+			return true
+		})
+	}
 }
 
 var sendWebMessage = func(message *WebMessage) {
@@ -184,7 +283,5 @@ var sendWebMessage = func(message *WebMessage) {
 	} else {
 		wu = v.(*WebUser)
 	}
-	go func() {
-		wu.GetCarry() <- *message
-	}()
+	wu.Enqueue(*message)
 }

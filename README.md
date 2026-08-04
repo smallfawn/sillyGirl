@@ -323,6 +323,24 @@ s.reply("匹配到 " + envs.length + " 个变量");
 
 注意：`new QingLong({ id: 1 })` 只接受对象参数，不支持 `new QingLong(1)`。
 
+### 普通用户列表
+
+顶层 `userList()` 返回普通用户、绑定信息以及当前插件的 SmallCat 读取授权状态；授权状态由运行时自动绑定到当前插件，脚本不需要也不能传入其他插件 UUID。
+
+```js
+const { userList, SmallCat } = require("sillygirl");
+
+const users = await userList();
+const authorizedOpenids = users
+  .filter((user) => !user.disabled && user.authorized)
+  .flatMap((user) => user.bindings.smallcat_openids);
+
+// SmallCat.userList() 保持为 SmallCat 账号列表接口。
+const accounts = await new SmallCat({ id: 1 }).userList();
+```
+
+每项包含 `id`、`username`、`nickname`、`disabled`、`authorized`，以及 `bindings.qq`、`bindings.telegram`、`bindings.smallcat_openids`。未授权、用户已禁用、插件已关闭或插件已禁用时，`authorized` 为 `false`，`smallcat_openids` 固定为空数组。
+
 ### SmallCat
 
 先在 Admin 面板「smallcat」中添加地址和 `api_auth`。脚本里按页面编号创建实例：

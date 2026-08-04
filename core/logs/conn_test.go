@@ -17,7 +17,6 @@ package logs
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -32,8 +31,9 @@ func connTCPListener(t *testing.T, n int, ln net.Listener, connChan chan<- net.C
 	for i := 0; i < n; i++ {
 		conn, err := ln.Accept()
 		if err != nil {
-			t.Log("Error accepting connection: ", err.Error())
-			os.Exit(1)
+			t.Errorf("Error accepting connection: %v", err)
+			close(connChan)
+			return
 		}
 
 		// Send accepted connection to channel
@@ -43,21 +43,13 @@ func connTCPListener(t *testing.T, n int, ln net.Listener, connChan chan<- net.C
 	close(connChan)
 }
 
-func TestConn(t *testing.T) {
-	log := NewLogger(1000)
-	log.SetLogger("conn", `{"net":"tcp","addr":":7020"}`)
-	log.Informational("informational")
-}
-
-// need to rewrite this test, it's not stable
 func TestReconnect(t *testing.T) {
 	// Setup connection listener
 	newConns := make(chan net.Conn)
 	connNum := 2
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Log("Error listening:", err.Error())
-		os.Exit(1)
+		t.Fatal("Error listening:", err)
 	}
 	go connTCPListener(t, connNum, ln, newConns)
 	addr := ln.Addr().String()
@@ -74,7 +66,10 @@ func TestReconnect(t *testing.T) {
 	log.Informational("informational 1")
 
 	// Refuse first connection
-	first := <-newConns
+	first, ok := <-newConns
+	if !ok || first == nil {
+		t.Fatal("listener closed before the first connection")
+	}
 	first.Close()
 
 	// Send another log after conn closed
@@ -82,7 +77,10 @@ func TestReconnect(t *testing.T) {
 
 	// Check if there was a second connection attempt
 	select {
-	case second := <-newConns:
+	case second, ok := <-newConns:
+		if !ok || second == nil {
+			t.Fatal("listener closed before the reconnect")
+		}
 		second.Close()
 	case <-time.After(time.Second):
 		t.Error("Did not reconnect")

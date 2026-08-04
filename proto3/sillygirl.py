@@ -219,6 +219,11 @@ class Bucket:
             asyncio.get_event_loop().create_task(watch_loop())
 
 
+async def userList():
+    """Read ordinary users and this plugin's authorization state."""
+    return await Bucket("__plugin_users__").get("list", [])
+
+
 def normalize_schema(value):
     if isinstance(value, SchemaNode):
         return value.toJSON()
@@ -549,6 +554,33 @@ class QingLong:
         return result.get("data", result)
 
 
+def _smallcat_account_openid(value):
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get("openid") or value.get("openId") or value.get("open_id") or "").strip()
+
+
+def _filter_smallcat_account_payload(value, allowed):
+    if isinstance(value, list):
+        result = []
+        for item in value:
+            filtered = _filter_smallcat_account_payload(item, allowed)
+            if filtered is not None:
+                result.append(filtered)
+        return result
+    if not isinstance(value, dict):
+        return value
+    openid = _smallcat_account_openid(value)
+    if openid and openid not in allowed:
+        return None
+    result = {}
+    for key, item in value.items():
+        filtered = _filter_smallcat_account_payload(item, allowed)
+        if filtered is not None:
+            result[key] = filtered
+    return result
+
+
 class SmallCat:
     def __init__(self, options):
         self.id = _runtime_panel_index(options)
@@ -592,8 +624,19 @@ class SmallCat:
     async def rescanUser(self, options):
         return await self._post("/api/accounts/rescan", options)
 
+    async def authorizedUsers(self):
+        return await Bucket("__plugin_smallcat_authorized__").get(
+            "records",
+            {"enforced": False, "scope": "smallcat:read", "openids": [], "users": []},
+        )
+
     async def userList(self):
-        return await self.request("GET", "/api/accounts")
+        authorization = await self.authorizedUsers()
+        payload = await self.request("GET", "/api/accounts")
+        if not authorization or not authorization.get("enforced"):
+            return payload
+        allowed = {str(item or "").strip() for item in authorization.get("openids", []) if str(item or "").strip()}
+        return _filter_smallcat_account_payload(payload, allowed)
 
     async def checkUsers(self, options):
         return await self._post("/api/accounts/status", options)

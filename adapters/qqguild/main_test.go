@@ -250,6 +250,22 @@ func TestCacheCleanupDeletesExpiredEntries(t *testing.T) {
 	}
 }
 
+func TestNormalizeConnectionMode(t *testing.T) {
+	tests := map[string]string{
+		"":          modeWebhook,
+		"webhook":   modeWebhook,
+		"invalid":   modeWebhook,
+		"websocket": modeWebsocket,
+		" WS ":      modeWebsocket,
+		"wss":       modeWebsocket,
+	}
+	for input, want := range tests {
+		if got := normalizeConnectionMode(input); got != want {
+			t.Fatalf("normalizeConnectionMode(%q) = %q; want %q", input, got, want)
+		}
+	}
+}
+
 func signedWebhookRequest(t *testing.T, secret string, body []byte) *http.Request {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, webhookPath, bytes.NewReader(body))

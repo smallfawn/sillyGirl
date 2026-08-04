@@ -284,9 +284,14 @@ func addNodePluginLocked(path, name, class string) error {
 				cmd.Env = append(cmd.Env, "NODE_PATH="+nodePath)
 			}
 		}
+		grpcAddress, grpcErr := grpcClientAddress()
+		if grpcErr != nil {
+			console.Error("gRPC 插件运行时未就绪：%v", grpcErr)
+			return nil
+		}
 		cmd.Env = append(cmd.Env, "RUNTIME_ID="+RUNTIME_ID)
 		cmd.Env = append(cmd.Env, "PLUGIN_ID="+uuid)
-		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_ADDR="+grpcClientAddress())
+		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_ADDR="+grpcAddress)
 		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_TOKEN="+grpcRuntimeMetadataToken())
 		cmd.Env = append(cmd.Env, sillyGirlRuntimeEnv()...)
 		if class == NODE || class == PYTHON {
@@ -300,21 +305,15 @@ func addNodePluginLocked(path, name, class string) error {
 		// 获取标准输出和标准错误输出的管道
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			// fmt.Printf("获取标准输出管道失败：%v\n", err)
-			// os.Exit(1)
+			console.Error("获取插件标准输出管道失败：%v", err)
+			return nil
 		}
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
-			// fmt.Printf("获取标准错误输出管道失败：%v\n", err)
-			// os.Exit(1)
+			_ = stdout.Close()
+			console.Error("获取插件标准错误输出管道失败：%v", err)
+			return nil
 		}
-
-		// file, err := os.Create("output.log")
-		// if err != nil {
-		// 	fmt.Printf("创建文件失败：%v\n", err)
-		// 	os.Exit(1)
-		// }
-		// defer file.Close()
 		var wg sync.WaitGroup
 		wg.Add(2)
 		// 处理标准输出
@@ -351,26 +350,37 @@ func addNodePluginLocked(path, name, class string) error {
 
 			}
 		}()
-		processes.Store(cmd, s)
+		registerRuntimePlugin(RUNTIME_ID, uuid)
 		register := createSenderRegister(RUNTIME_ID)
 		if (plt) != "*" {
 			cmd.Env = append(cmd.Env, "SENDER_ID="+register(s))
-			err = cmd.Start()
-			if err != nil {
-
-			}
-			defer deleteSenderRegister(RUNTIME_ID)
-			defer processes.Delete(cmd)
-			err = cmd.Wait()
-			if err != nil {
-				fmt.Println("命令执行失败：", err)
+			if err := cmd.Start(); err != nil {
+				_ = stdout.Close()
+				_ = stderr.Close()
+				wg.Wait()
+				deleteSenderRegister(RUNTIME_ID)
+				console.Error("插件进程启动失败：%v", err)
 				return nil
 			}
-		} else {
-			err = cmd.Start()
-			if err != nil {
-
+			processes.Store(cmd, s)
+			defer deleteSenderRegister(RUNTIME_ID)
+			defer processes.Delete(cmd)
+			if err := cmd.Wait(); err != nil {
+				console.Error("插件进程执行失败：%v", err)
+				wg.Wait()
+				return nil
 			}
+			wg.Wait()
+		} else {
+			if err := cmd.Start(); err != nil {
+				_ = stdout.Close()
+				_ = stderr.Close()
+				wg.Wait()
+				deleteSenderRegister(RUNTIME_ID)
+				console.Error("插件进程启动失败：%v", err)
+				return nil
+			}
+			processes.Store(cmd, s)
 			processes.Range(func(key, value any) bool {
 				p := key.(*exec.Cmd)
 				if p == cmd {
@@ -392,7 +402,10 @@ func addNodePluginLocked(path, name, class string) error {
 			go func() {
 				defer deleteSenderRegister(RUNTIME_ID)
 				defer processes.Delete(cmd)
-				err = cmd.Wait()
+				if err := cmd.Wait(); err != nil {
+					console.Error("插件后台进程执行失败：%v", err)
+				}
+				wg.Wait()
 			}()
 		}
 		return nil
@@ -503,6 +516,20 @@ declare class Bucket {
 	watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
 	getName(): Promise<string>;
 }
+interface SillyGirlUserBindings {
+	qq: string;
+	telegram: string;
+	smallcat_openids: string[];
+}
+interface SillyGirlUser {
+	id: string;
+	username: string;
+	nickname: string;
+	disabled: boolean;
+	authorized: boolean;
+	bindings: SillyGirlUserBindings;
+}
+declare function userList(): Promise<SillyGirlUser[]>;
 declare class QingLong {
 	id: number;
 	uuid: string;
@@ -534,6 +561,7 @@ declare class SmallCat {
 	checkQr(uuid: string): Promise<any>;
 	addUser(options: Record<string, any>): Promise<any>;
 	rescanUser(options: Record<string, any>): Promise<any>;
+	authorizedUsers(): Promise<any>;
 	userList(): Promise<any>;
 	checkUsers(options: Record<string, any>): Promise<any>;
 	setUserRemark(options: Record<string, any>): Promise<any>;
@@ -710,7 +738,7 @@ declare let console: {
 	error(...args: any[]): void;
 	debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlUser, SillyGirlUserBindings, userList, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console };
 `
 
 func defaultScript(title string) string {
@@ -727,6 +755,7 @@ const {
   QingLong,
   SmallCat,
   DaiDai,
+  userList,
   sillyGirlCreateSchema,
   SillyGirlPluginConfig,
   form,

@@ -62,6 +62,16 @@ type adminNormalUserRow struct {
 	StorageKey string             `json:"storage_key"`
 }
 
+type adminNormalUserPayload struct {
+	Username        string   `json:"username"`
+	Password        string   `json:"password"`
+	Nickname        string   `json:"nickname"`
+	Disabled        *bool    `json:"disabled"`
+	QQ              string   `json:"qq"`
+	Telegram        string   `json:"telegram"`
+	SmallcatOpenIDs []string `json:"smallcat_openids"`
+}
+
 type userJWTClaims struct {
 	Sub string `json:"sub"`
 	UID string `json:"uid"`
@@ -80,6 +90,64 @@ func init() {
 			"list":  rows,
 			"total": len(rows),
 		})
+	})
+
+	GinApi(POST, "/api/admin/users", RequireAuth, func(ctx *gin.Context) {
+		payload := adminNormalUserPayload{}
+		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
+			ApiFail(ctx, "请求体不是有效 JSON")
+			return
+		}
+		user, err := createNormalUser(payload.Username, payload.Password, payload.Nickname)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		bindings, err := replaceNormalUserBindings(user.Username, payload.QQ, payload.Telegram, payload.SmallcatOpenIDs)
+		if err != nil {
+			_ = deleteNormalUser(user.Username)
+			ApiFail(ctx, err.Error())
+			return
+		}
+		if payload.Disabled != nil && user.Disabled != *payload.Disabled {
+			user.Disabled = *payload.Disabled
+			user.UpdatedAt = time.Now().Unix()
+			if _, _, err := userBucket.Set(normalUserStorageKey(user.Username), utils.JsonMarshal(user)); err != nil {
+				_ = deleteNormalUser(user.Username)
+				ApiFail(ctx, err.Error())
+				return
+			}
+		}
+		ApiOK(ctx, adminNormalUserRowFor(user, bindings))
+	})
+
+	GinApi(PUT, "/api/admin/users", RequireAuth, func(ctx *gin.Context) {
+		payload := adminNormalUserPayload{}
+		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
+			ApiFail(ctx, "请求体不是有效 JSON")
+			return
+		}
+		user, bindings, err := updateNormalUserByAdmin(payload)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		ApiOK(ctx, adminNormalUserRowFor(user, bindings))
+	})
+
+	GinApi(DELETE, "/api/admin/users", RequireAuth, func(ctx *gin.Context) {
+		payload := struct {
+			Username string `json:"username"`
+		}{}
+		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
+			ApiFail(ctx, "请求体不是有效 JSON")
+			return
+		}
+		if err := deleteNormalUser(payload.Username); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		ApiOK(ctx, gin.H{"username": normalizeNormalUsername(payload.Username)})
 	})
 
 	GinApi(POST, "/api/user/register", func(ctx *gin.Context) {
@@ -487,6 +555,134 @@ func createNormalUser(username string, password string, nickname string) (*norma
 		return nil, err
 	}
 	return user, nil
+}
+
+func updateNormalUserByAdmin(payload adminNormalUserPayload) (*normalUser, normalUserBindings, error) {
+	username := normalizeNormalUsername(payload.Username)
+	if err := validateNormalUsername(username); err != nil {
+		return nil, normalUserBindings{}, err
+	}
+	user, err := loadNormalUser(username)
+	if err != nil {
+		return nil, normalUserBindings{}, err
+	}
+	bindings, err := normalizedReplacementBindings(payload.QQ, payload.Telegram, payload.SmallcatOpenIDs)
+	if err != nil {
+		return nil, normalUserBindings{}, err
+	}
+	nickname := strings.TrimSpace(payload.Nickname)
+	if nickname == "" {
+		nickname = user.Username
+	}
+	if len([]rune(nickname)) > 64 {
+		return nil, normalUserBindings{}, errors.New("昵称不能超过 64 位")
+	}
+	passwordHash := user.PasswordHash
+	if payload.Password != "" {
+		if err := validateNormalPassword(payload.Password); err != nil {
+			return nil, normalUserBindings{}, err
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(payload.Password), adminPasswordHashCost)
+		if err != nil {
+			return nil, normalUserBindings{}, err
+		}
+		passwordHash = string(hash)
+	}
+	user.Nickname = nickname
+	user.PasswordHash = passwordHash
+	if payload.Disabled != nil {
+		user.Disabled = *payload.Disabled
+	}
+	user.UpdatedAt = time.Now().Unix()
+	bindings.UpdatedAt = user.UpdatedAt
+	if _, _, err := userBucket.Set(normalUserStorageKey(username), utils.JsonMarshal(user)); err != nil {
+		return nil, normalUserBindings{}, err
+	}
+	if _, _, err := userBucket.Set(normalUserBindingsStorageKey(username), utils.JsonMarshal(bindings)); err != nil {
+		return nil, normalUserBindings{}, err
+	}
+	return user, bindings, nil
+}
+
+func replaceNormalUserBindings(username, qq, telegram string, openids []string) (normalUserBindings, error) {
+	if _, err := loadNormalUser(username); err != nil {
+		return normalUserBindings{}, err
+	}
+	bindings, err := normalizedReplacementBindings(qq, telegram, openids)
+	if err != nil {
+		return normalUserBindings{}, err
+	}
+	bindings.UpdatedAt = time.Now().Unix()
+	if _, _, err := userBucket.Set(normalUserBindingsStorageKey(username), utils.JsonMarshal(bindings)); err != nil {
+		return normalUserBindings{}, err
+	}
+	return bindings, nil
+}
+
+func normalizedReplacementBindings(qq, telegram string, openids []string) (normalUserBindings, error) {
+	bindings := normalUserBindings{
+		QQ:       strings.TrimSpace(qq),
+		Telegram: strings.TrimSpace(telegram),
+	}
+	if bindings.QQ != "" && !userQQBindingPattern.MatchString(bindings.QQ) {
+		return normalUserBindings{}, errors.New("QQ 号格式不正确")
+	}
+	if bindings.Telegram != "" && !userTGBindingPattern.MatchString(bindings.Telegram) {
+		return normalUserBindings{}, errors.New("Telegram ID 格式不正确")
+	}
+	if len(openids) > 100 {
+		return normalUserBindings{}, errors.New("smallcat openid 最多绑定 100 个")
+	}
+	for _, openid := range openids {
+		openid = strings.TrimSpace(openid)
+		if len([]rune(openid)) > 256 {
+			return normalUserBindings{}, errors.New("smallcat openid 不能超过 256 位")
+		}
+		bindings.SmallcatOpenIDs = appendUniqueOpenID(bindings.SmallcatOpenIDs, openid)
+	}
+	return normalizeNormalUserBindings(bindings), nil
+}
+
+func deleteNormalUser(username string) error {
+	username = normalizeNormalUsername(username)
+	if err := validateNormalUsername(username); err != nil {
+		return err
+	}
+	user, err := loadNormalUser(username)
+	if err != nil {
+		return err
+	}
+	authorizationPrefix := strings.TrimSpace(user.ID) + ":"
+	authorizationKeys := []string{}
+	pluginUserAuthorizations.Foreach(func(keyBytes, _ []byte) error {
+		key := string(keyBytes)
+		if strings.HasPrefix(key, authorizationPrefix) {
+			authorizationKeys = append(authorizationKeys, key)
+		}
+		return nil
+	})
+	for _, key := range authorizationKeys {
+		if _, _, err := pluginUserAuthorizations.Set(key, ""); err != nil {
+			return err
+		}
+	}
+	if _, _, err := userBucket.Set(normalUserBindingsStorageKey(username), ""); err != nil {
+		return err
+	}
+	if _, _, err := userBucket.Set(normalUserStorageKey(username), ""); err != nil {
+		return err
+	}
+	return nil
+}
+
+func adminNormalUserRowFor(user *normalUser, bindings normalUserBindings) adminNormalUserRow {
+	return adminNormalUserRow{
+		publicNormalUser: toPublicNormalUser(user),
+		Bindings:         normalizeNormalUserBindings(bindings),
+		UpdatedAt:        user.UpdatedAt,
+		Disabled:         user.Disabled,
+		StorageKey:       normalUserStorageKey(user.Username),
+	}
 }
 
 func verifyNormalUser(username string, password string) (*normalUser, error) {

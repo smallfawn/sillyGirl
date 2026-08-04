@@ -57,7 +57,7 @@ func init() {
 	GinApi(GET, "/api/admin/smallcat/panels", RequireAuth, func(ctx *gin.Context) {
 		panels := getSmallcatPanels()
 		refreshSmallcatPanelsStatus(panels)
-		ApiList(ctx, panels, len(panels))
+		ApiList(ctx, redactSmallcatPanels(panels), len(panels))
 	})
 
 	GinApi(POST, "/api/admin/smallcat/panel/test", RequireAuth, func(ctx *gin.Context) {
@@ -66,6 +66,7 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
+		hydrateSmallcatPanelAPIAuth(&panel)
 		if err := validateSmallcatPanelInput(&panel); err != nil {
 			ApiFail(ctx, err.Error())
 			return
@@ -75,7 +76,33 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
+		result.APIAuth = ""
 		ApiOK(ctx, result)
+	})
+
+	GinApi(POST, "/api/admin/smallcat/panel/accounts", RequireAuth, func(ctx *gin.Context) {
+		payload := struct {
+			ID string `json:"id"`
+		}{}
+		if err := ctx.BindJSON(&payload); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		payload.ID = strings.TrimSpace(payload.ID)
+		panel := storedSmallcatPanelByID(payload.ID)
+		if panel == nil {
+			ApiFail(ctx, "smallcat 不存在")
+			return
+		}
+		openids, err := fetchSmallcatAccountOpenIDs(panel)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		ApiOK(ctx, gin.H{
+			"openids": openids,
+			"total":   len(openids),
+		})
 	})
 
 	GinApi(POST, "/api/admin/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
@@ -84,6 +111,7 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
+		hydrateSmallcatPanelAPIAuth(&panel)
 		if err := validateSmallcatPanelInput(&panel); err != nil {
 			ApiFail(ctx, err.Error())
 			return
@@ -123,12 +151,18 @@ func init() {
 		panel.LastCheckedAt = now
 		panel.Status = "online"
 		panel.Message = result.Message
+		panel.Group = result.Group
+		panel.Namespace = result.Namespace
+		panel.AccountLimit = result.AccountLimit
+		panel.AccountUsed = result.AccountUsed
+		panel.CreditBalance = result.CreditBalance
 		if index >= 0 {
 			panels[index] = panel
 		} else {
 			panels = append(panels, panel)
 		}
 		saveSmallcatPanels(panels)
+		panel.APIAuth = ""
 		ApiOK(ctx, panel)
 	})
 
@@ -185,6 +219,38 @@ func saveSmallcatPanels(panels []SmallcatPanel) {
 	sillyGirl.Set(smallcatPanelsStorageKey, utils.JsonMarshal(panels))
 }
 
+func hydrateSmallcatPanelAPIAuth(panel *SmallcatPanel) {
+	if panel == nil || strings.TrimSpace(panel.APIAuth) != "" || strings.TrimSpace(panel.ID) == "" {
+		return
+	}
+	if stored := storedSmallcatPanelByID(panel.ID); stored != nil {
+		panel.APIAuth = stored.APIAuth
+	}
+}
+
+func redactSmallcatPanels(panels []SmallcatPanel) []SmallcatPanel {
+	result := make([]SmallcatPanel, len(panels))
+	copy(result, panels)
+	for index := range result {
+		result[index].APIAuth = ""
+	}
+	return result
+}
+
+func storedSmallcatPanelByID(id string) *SmallcatPanel {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	for _, panel := range getSmallcatPanels() {
+		if panel.ID == id {
+			matched := panel
+			return &matched
+		}
+	}
+	return nil
+}
+
 func validateSmallcatPanelInput(panel *SmallcatPanel) error {
 	panel.Name = strings.TrimSpace(panel.Name)
 	panel.Address = normalizeSmallcatAddress(panel.Address)
@@ -226,6 +292,9 @@ func testSmallcatPanel(panel SmallcatPanel) (*SmallcatPanel, error) {
 	panel.Message = "验证通过"
 	panel.LastCheckedAt = int(time.Now().Unix())
 	applySmallcatAuthStatus(&panel, raw)
+	if err := refreshSmallcatAccountUsage(&panel); err != nil {
+		panel.Message = "账号数量读取失败：" + err.Error()
+	}
 	_ = refreshSmallcatCreditBalance(&panel)
 	return &panel, nil
 }
@@ -262,9 +331,151 @@ func refreshSmallcatPanelStatus(panel *SmallcatPanel) {
 	panel.Status = "online"
 	panel.Message = "验证通过"
 	applySmallcatAuthStatus(panel, raw)
+	if err := refreshSmallcatAccountUsage(panel); err != nil {
+		panel.Message = "账号数量读取失败：" + err.Error()
+	}
 	if err := refreshSmallcatCreditBalance(panel); err != nil && panel.Message == "验证通过" {
 		panel.Message = "积分读取失败：" + err.Error()
 	}
+}
+
+// refreshSmallcatAccountUsage follows the official client implementation:
+// /api/auth/validate only validates AUTH and currently reports quota.count as
+// zero, while /api/accounts returns the real items and quota. The item count is
+// authoritative because it is also what the SmallCat console displays.
+func refreshSmallcatAccountUsage(panel *SmallcatPanel) error {
+	value, err := fetchSmallcatAccounts(panel)
+	if err != nil {
+		return err
+	}
+	used, limit, ok := smallcatAccountUsage(value)
+	if !ok {
+		return errors.New("账号接口返回缺少 items/count")
+	}
+	panel.AccountUsed = used
+	if limit != "" {
+		panel.AccountLimit = limit
+	}
+	return nil
+}
+
+func fetchSmallcatAccounts(panel *SmallcatPanel) (any, error) {
+	raw, err := requestSmallcatJSONWithTimeout(panel, http.MethodGet, "/api/accounts", nil, nil, 4*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	if err := smallcatEnvelopeError(raw, "账号列表读取失败"); err != nil {
+		return nil, err
+	}
+	return decodeSmallcatJSONValue(raw), nil
+}
+
+func fetchSmallcatAccountOpenIDs(panel *SmallcatPanel) ([]string, error) {
+	value, err := fetchSmallcatAccounts(panel)
+	if err != nil {
+		return nil, err
+	}
+	return smallcatAccountOpenIDs(value), nil
+}
+
+func smallcatAccountOpenIDs(value any) []string {
+	value = unwrapSmallcatResponseData(value)
+	if object, ok := value.(map[string]any); ok {
+		if items, found := smallcatMapLookup(object, "items", "accounts", "list"); found {
+			value = items
+		}
+	}
+	rows, ok := value.([]any)
+	if !ok {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(rows))
+	openids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		object, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		openid := strings.TrimSpace(smallcatStringValue(smallcatMapValue(object, "openid", "open_id", "wxOpenid", "userKey")))
+		if openid == "" {
+			continue
+		}
+		if _, exists := seen[openid]; exists {
+			continue
+		}
+		seen[openid] = struct{}{}
+		openids = append(openids, openid)
+	}
+	return openids
+}
+
+func smallcatAccountUsage(value any) (used string, limit string, ok bool) {
+	value = unwrapSmallcatResponseData(value)
+	switch typed := value.(type) {
+	case []any:
+		return strconv.Itoa(len(typed)), "", true
+	case map[string]any:
+		limit = smallcatStringValue(smallcatMapValue(typed, "limit", "account_limit", "max_accounts"))
+		if items, found := smallcatMapLookup(typed, "items", "accounts", "list"); found {
+			switch rows := items.(type) {
+			case []any:
+				return strconv.Itoa(len(rows)), limit, true
+			case []map[string]any:
+				return strconv.Itoa(len(rows)), limit, true
+			}
+		}
+		if count, found := smallcatMapLookup(typed, "count", "used", "account_used", "current_accounts", "accounts_count"); found {
+			return smallcatStringValue(count), limit, true
+		}
+		if quota, found := smallcatMapLookup(typed, "quota"); found {
+			quotaUsed, quotaLimit, quotaOK := smallcatAccountUsage(quota)
+			if limit == "" {
+				limit = quotaLimit
+			}
+			if quotaOK {
+				return quotaUsed, limit, true
+			}
+		}
+	}
+	return "", limit, false
+}
+
+func unwrapSmallcatResponseData(value any) any {
+	for depth := 0; depth < 3; depth++ {
+		object, ok := value.(map[string]any)
+		if !ok {
+			break
+		}
+		data, found := smallcatMapLookup(object, "data")
+		if !found || data == nil {
+			break
+		}
+		if text, ok := data.(string); ok {
+			decoded := decodeSmallcatJSONValue(json.RawMessage(strings.TrimSpace(text)))
+			if decoded == nil {
+				break
+			}
+			data = decoded
+		}
+		value = data
+	}
+	return value
+}
+
+func smallcatMapValue(value map[string]any, keys ...string) any {
+	item, _ := smallcatMapLookup(value, keys...)
+	return item
+}
+
+func smallcatMapLookup(value map[string]any, keys ...string) (any, bool) {
+	for _, wanted := range keys {
+		for key, item := range value {
+			if strings.EqualFold(strings.TrimSpace(key), wanted) {
+				return item, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func refreshSmallcatCreditBalance(panel *SmallcatPanel) error {
@@ -309,10 +520,13 @@ func applySmallcatAuthStatus(panel *SmallcatPanel, raw json.RawMessage) {
 	))
 	panel.Namespace = smallcatStringValue(firstSmallcatValue(value, "namespace"))
 	panel.AccountLimit = smallcatStringValue(firstSmallcatValue(value, "limit", "account_limit", "max_accounts"))
+	// Do not consume quota.count from /api/auth/validate here. The current
+	// SmallCat server intentionally builds that response with count=0; the real
+	// account count is refreshed from /api/accounts below.
 	panel.AccountUsed = smallcatStringValue(firstSmallcatValue(value, "used", "account_used", "current_accounts", "accounts_count"))
 	if quota := firstSmallcatValue(value, "quota"); quota != nil {
 		panel.AccountLimit = firstNonEmpty(panel.AccountLimit, smallcatStringValue(firstSmallcatValue(quota, "limit", "max", "total")))
-		panel.AccountUsed = firstNonEmpty(panel.AccountUsed, smallcatStringValue(firstSmallcatValue(quota, "used", "current", "count")))
+		panel.AccountUsed = firstNonEmpty(panel.AccountUsed, smallcatStringValue(firstSmallcatValue(quota, "used", "current")))
 	}
 }
 

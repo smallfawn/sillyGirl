@@ -414,6 +414,14 @@ func authTokenFromRequest(c *gin.Context) string {
 	return strings.TrimSpace(token)
 }
 
+// CheckAuthRequest validates an administrator session from either the Bearer
+// header or the legacy token cookie. Adapters with optional public endpoints
+// use it to distinguish an authenticated administrator without forcing a
+// RequireAuth middleware response.
+func CheckAuthRequest(c *gin.Context) (*Auth, error) {
+	return CheckAuth(authTokenFromRequest(c))
+}
+
 func createAdminJWTSession(ctx *gin.Context, username string) (string, error) {
 	now := time.Now().Unix()
 	sessionToken := utils.GenUUID()

@@ -32,7 +32,7 @@ import Spin from 'ant-design-vue/es/spin';
 import Statistic from 'ant-design-vue/es/statistic';
 import Switch from 'ant-design-vue/es/switch';
 import Table from 'ant-design-vue/es/table';
-import Tabs from 'ant-design-vue/es/tabs';
+import Tabs, { TabPane } from 'ant-design-vue/es/tabs';
 import Tag from 'ant-design-vue/es/tag';
 import Typography from 'ant-design-vue/es/typography';
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
@@ -46,6 +46,7 @@ import {
   CloudDownload,
   Database,
   Download,
+  DoorOpen,
   Edit3,
   FileCode2,
   FolderOpen,
@@ -167,16 +168,17 @@ const webChat = reactive({
 const webChatRid = loadWebChatRid();
 let webChatMessageID = 0;
 let webChatPollGeneration = 0;
+let webChatPollController: AbortController | null = null;
 
 function loadWebChatRid() {
   const key = 'sillygirl_web_chat_rid';
-  const current = localStorage.getItem(key)?.trim();
+  const current = sessionStorage.getItem(key)?.trim();
   if (current) return current;
   const suffix = typeof crypto?.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const rid = `admin-${suffix}`;
-  localStorage.setItem(key, rid);
+  sessionStorage.setItem(key, rid);
   return rid;
 }
 
@@ -213,19 +215,24 @@ function appendWebChatMessages(rows: WebChatMessage[], own = false) {
 
 async function pollWebChat(generation: number) {
   if (!webChat.open || !user.value || generation !== webChatPollGeneration) return;
+  const controller = new AbortController();
+  webChatPollController = controller;
   webChat.polling = true;
   try {
     const res = await get<ApiEnvelope<WebChatMessage[]>>(
       `/api/web_chat?rid=${encodeURIComponent(webChatRid)}`,
+      { signal: controller.signal },
     );
     if (generation !== webChatPollGeneration) return;
     webChat.error = '';
     appendWebChatMessages(webChatRows(res));
   } catch (error) {
     if (generation !== webChatPollGeneration) return;
+    if (error instanceof DOMException && error.name === 'AbortError') return;
     webChat.error = error instanceof Error ? error.message : 'Web Bot 连接失败';
     await new Promise((resolve) => window.setTimeout(resolve, 1200));
   } finally {
+    if (webChatPollController === controller) webChatPollController = null;
     if (generation === webChatPollGeneration) webChat.polling = false;
   }
   if (webChat.open && user.value && generation === webChatPollGeneration) {
@@ -234,6 +241,8 @@ async function pollWebChat(generation: number) {
 }
 
 function toggleWebChat() {
+  webChatPollController?.abort();
+  webChatPollController = null;
   webChat.open = !webChat.open;
   webChat.unread = 0;
   webChat.error = '';
@@ -254,10 +263,7 @@ async function sendWebChat() {
   webChat.error = '';
   appendWebChatMessages([{ t: 'chat', c: content }], true);
   try {
-    const res = await get<ApiEnvelope<WebChatMessage[]>>(
-      `/api/web_chat?rid=${encodeURIComponent(webChatRid)}&ctt=${encodeURIComponent(content)}`,
-    );
-    appendWebChatMessages(webChatRows(res));
+    await post<ApiEnvelope<WebChatMessage[]>>('/api/web_chat', { rid: webChatRid, ctt: content });
   } catch (error) {
     webChat.error = error instanceof Error ? error.message : '消息发送失败';
   } finally {
@@ -267,6 +273,8 @@ async function sendWebChat() {
 }
 
 function stopWebChat() {
+  webChatPollController?.abort();
+  webChatPollController = null;
   webChat.open = false;
   webChat.polling = false;
   webChatPollGeneration += 1;
@@ -326,8 +334,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-      local: info.local || '1.0.2',
-      remote: info.remote || info.local || '1.0.2',
+      local: info.local || '1.0.3',
+      remote: info.remote || info.local || '1.0.3',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -1105,7 +1113,36 @@ async function removeMaster(row: Master) {
   loadMasters();
 }
 
-const normalUsers = reactive({ rows: [] as AdminUserRow[], total: 0, loading: false });
+type NormalUserForm = {
+  username: string;
+  password: string;
+  nickname: string;
+  qq: string;
+  telegram: string;
+  smallcat_openids: string[];
+  disabled: boolean;
+};
+
+const emptyNormalUserForm = (): NormalUserForm => ({
+  username: '',
+  password: '',
+  nickname: '',
+  qq: '',
+  telegram: '',
+  smallcat_openids: [],
+  disabled: false,
+});
+
+const normalUsers = reactive({
+  rows: [] as AdminUserRow[],
+  total: 0,
+  loading: false,
+  modalOpen: false,
+  editing: null as AdminUserRow | null,
+  saving: false,
+  deleting: {} as Record<string, boolean>,
+  form: emptyNormalUserForm(),
+});
 async function loadNormalUsers() {
   normalUsers.loading = true;
   try {
@@ -1115,6 +1152,70 @@ async function loadNormalUsers() {
     normalUsers.total = data?.total || normalUsers.rows.length;
   } finally {
     normalUsers.loading = false;
+  }
+}
+function openNormalUser(row?: AdminUserRow) {
+  normalUsers.editing = row || null;
+  normalUsers.form = row
+    ? {
+        username: row.username,
+        password: '',
+        nickname: row.nickname || '',
+        qq: row.bindings?.qq || '',
+        telegram: row.bindings?.telegram || '',
+        smallcat_openids: smallcatOpenids(row),
+        disabled: !!row.disabled,
+      }
+    : emptyNormalUserForm();
+  normalUsers.modalOpen = true;
+}
+async function saveNormalUser() {
+  const form = normalUsers.form;
+  const username = form.username.trim();
+  if (!username) {
+    message.warning('请输入账号');
+    return;
+  }
+  if (!normalUsers.editing && form.password.length < 6) {
+    message.warning('密码至少 6 位');
+    return;
+  }
+  normalUsers.saving = true;
+  try {
+    const payload = {
+      username,
+      password: form.password,
+      nickname: form.nickname.trim(),
+      qq: form.qq.trim(),
+      telegram: form.telegram.trim(),
+      smallcat_openids: [...new Set(form.smallcat_openids.map((item) => String(item).trim()).filter(Boolean))],
+      disabled: !!form.disabled,
+    };
+    if (normalUsers.editing) {
+      await put('/api/admin/users', payload);
+      message.success('账号已更新');
+    } else {
+      await post('/api/admin/users', payload);
+      message.success('账号已新增');
+    }
+    normalUsers.modalOpen = false;
+    await loadNormalUsers();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '保存账号失败');
+  } finally {
+    normalUsers.saving = false;
+  }
+}
+async function removeNormalUser(row: AdminUserRow) {
+  normalUsers.deleting[row.id] = true;
+  try {
+    await del('/api/admin/users', { username: row.username });
+    message.success('账号已删除');
+    await loadNormalUsers();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '删除账号失败');
+  } finally {
+    normalUsers.deleting[row.id] = false;
   }
 }
 
@@ -1336,6 +1437,10 @@ const smallcat = reactive({
   form: {} as SmallcatPanel,
   testing: false,
   saving: false,
+	accountLoadingID: '',
+	accountsOpen: false,
+	accountPanelName: '',
+	accountOpenids: [] as string[],
 });
 async function loadSmallcatPanels() {
   smallcat.loading = true;
@@ -1387,6 +1492,26 @@ async function removeSmallcatPanel(row: SmallcatPanel) {
   await del('/api/admin/smallcat/panel', row);
   message.success('已删除');
   loadSmallcatPanels();
+}
+
+async function showSmallcatOpenids(row: SmallcatPanel) {
+  const id = `${row.id || ''}`.trim();
+  if (!id) {
+    message.error('smallcat ID 缺失');
+    return;
+  }
+  smallcat.accountLoadingID = id;
+  try {
+    const res = await post<ApiEnvelope<{ openids: string[]; total: number }>>('/api/admin/smallcat/panel/accounts', { id });
+    const data = apiData(res);
+    smallcat.accountOpenids = Array.isArray(data?.openids) ? data.openids : [];
+    smallcat.accountPanelName = `${row.name || row.address || 'smallcat'}`;
+    smallcat.accountsOpen = true;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : 'OpenID 列表读取失败');
+  } finally {
+    smallcat.accountLoadingID = '';
+  }
 }
 
 const daidai = reactive({
@@ -1495,6 +1620,8 @@ const plugins = reactive({
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
   uninstalling: {} as Record<string, boolean>,
+  opening: {} as Record<string, boolean>,
+  requestId: 0,
   detailOpen: false,
   detail: null as PluginInfo | null,
 });
@@ -1524,6 +1651,9 @@ function pluginClassTags(row: PluginInfo) {
     .split(/[,，\s]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+function pluginDependencies(row: PluginInfo) {
+  return [...new Set((row.dependencies || []).map((item) => String(item).trim()).filter(Boolean))];
 }
 function pluginTriggerText(row: PluginInfo) {
   const rule = String(row.rule || '').trim();
@@ -1567,7 +1697,8 @@ async function loadPluginSources() {
     plugins.sources = [];
   }
 }
-async function loadPlugins(current = 1, pageSize = 12) {
+async function loadPlugins(current = 1, pageSize = 12, refresh = false) {
+  const requestId = ++plugins.requestId;
   plugins.loading = true;
   try {
     plugins.current = current;
@@ -1578,14 +1709,16 @@ async function loadPlugins(current = 1, pageSize = 12) {
       activeKey: plugins.tab,
       keyword: plugins.keyword,
       class: plugins.klass,
+      init: refresh ? 'true' : 'false',
     });
     const res = await get<ApiEnvelope<any>>(`/api/plugins/list.json?${params.toString()}`);
+    if (requestId !== plugins.requestId) return;
     const data = apiData(res) || {};
     plugins.rows = data.data || data.list || [];
     plugins.total = data.total || 0;
     plugins.meta = data;
   } finally {
-    plugins.loading = false;
+    if (requestId === plugins.requestId) plugins.loading = false;
   }
 }
 async function addPluginSource() {
@@ -1669,6 +1802,29 @@ async function uninstallPlugin(row: PluginInfo) {
     plugins.uninstalling[row.id] = false;
   }
 }
+async function togglePluginOpen(row: PluginInfo) {
+  if (!pluginInstalled(row)) {
+    message.warning('请先安装插件');
+    return;
+  }
+  plugins.opening[row.id] = true;
+  try {
+    const res = await put<ApiEnvelope<{ uuid: string; open: boolean }>>('/api/admin/plugin/open', {
+      uuid: row.id,
+      open: !row.open,
+    });
+    const data = apiData(res);
+    row.open = data.open;
+    if (plugins.detail?.id === row.id) {
+      plugins.detail.open = data.open;
+    }
+    message.success(data.open ? '插件已开放到 Home 页面' : '已取消 Home 页面开放');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '修改开放状态失败');
+  } finally {
+    plugins.opening[row.id] = false;
+  }
+}
 function pluginStatusLabel(row: PluginInfo) {
   if (row.status === 1) return '可更新';
   if (row.status === 2 || row.status === 6) return '已安装';
@@ -1681,6 +1837,14 @@ function pluginStatusColor(row: PluginInfo) {
 }
 function pluginInstalled(row: PluginInfo) {
   return row.status === 1 || row.status === 2 || row.status === 6;
+}
+
+function pluginCanOpen(row: PluginInfo) {
+  return pluginInstalled(row) && row.uses_smallcat === true;
+}
+
+function pluginCanConfigure(row: PluginInfo) {
+  return pluginInstalled(row) && row.config_registered === true;
 }
 
 type NodeDependencyPlugin = {
@@ -2018,6 +2182,7 @@ type BotSettingsForm = {
   dingtalk_client_secret: string;
   dingtalk_debug: boolean;
   qqguild_enable: boolean;
+  qqguild_mode: 'webhook' | 'websocket';
   qqguild_app_id: string;
   qqguild_app_secret: string;
   qqguild_sandbox: boolean;
@@ -2070,6 +2235,7 @@ const botSettings = reactive({
     dingtalk_client_secret: '',
     dingtalk_debug: false,
     qqguild_enable: true,
+    qqguild_mode: 'webhook',
     qqguild_app_id: '',
     qqguild_app_secret: '',
     qqguild_sandbox: false,
@@ -2240,6 +2406,7 @@ const botSettingsKeys = [
   'dingtalk.client_secret',
   'dingtalk.debug',
   'qqguild.enable',
+  'qqguild.mode',
   'qqguild.app_id',
   'qqguild.app_secret',
   'qqguild.sandbox',
@@ -2298,6 +2465,7 @@ async function loadBots() {
       dingtalk_client_secret: data['dingtalk.client_secret'] || '',
       dingtalk_debug: boolSetting(data['dingtalk.debug']),
       qqguild_enable: boolSetting(data['qqguild.enable'], true),
+      qqguild_mode: data['qqguild.mode'] === 'websocket' ? 'websocket' : 'webhook',
       qqguild_app_id: data['qqguild.app_id'] || '',
       qqguild_app_secret: data['qqguild.app_secret'] || '',
       qqguild_sandbox: boolSetting(data['qqguild.sandbox']),
@@ -2352,6 +2520,7 @@ async function saveBots() {
       'dingtalk.client_secret': v.dingtalk_client_secret || '',
       'dingtalk.debug': !!v.dingtalk_debug,
       'qqguild.enable': !!v.qqguild_enable,
+      'qqguild.mode': v.qqguild_mode === 'websocket' ? 'websocket' : 'webhook',
       'qqguild.app_id': v.qqguild_app_id || '',
       'qqguild.app_secret': v.qqguild_app_secret || '',
       'qqguild.sandbox': !!v.qqguild_sandbox,
@@ -2568,7 +2737,7 @@ watch([page, user], ([p]) => {
   if (p === 'dependencies') loadNodeDependencies();
   if (p === 'plugins') {
     loadPluginSources();
-    loadPlugins();
+    loadPlugins(1, 12, true);
     loadPluginConfigs();
   }
   if (p === 'storage') {
@@ -2873,9 +3042,34 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <Form.Item label="启用 QQ 官方频道" html-for="bot-qqguild-enable">
                     <Switch id="bot-qqguild-enable" v-model:checked="botSettings.form.qqguild_enable" />
                   </Form.Item>
-                  <Form.Item label="Webhook 回调地址" html-for="bot-qqguild-webhook" extra="把该地址填入 QQ 开放平台机器人事件回调；HTTPS 由反向代理提供。">
+                  <fieldset class="bot-mode-fieldset">
+                    <legend id="bot-qqguild-mode-label">接入模式</legend>
+                    <Segmented
+                      v-model:value="botSettings.form.qqguild_mode"
+                      block
+                      role="radiogroup"
+                      aria-labelledby="bot-qqguild-mode-label"
+                      :options="[
+                        { label: 'Webhook', value: 'webhook' },
+                        { label: 'WebSocket', value: 'websocket' },
+                      ]"
+                    />
+                  </fieldset>
+                  <Form.Item
+                    v-if="botSettings.form.qqguild_mode === 'webhook'"
+                    label="Webhook 回调地址"
+                    html-for="bot-qqguild-webhook"
+                    extra="把该地址填入 QQ 开放平台机器人事件回调；HTTPS 由反向代理提供。"
+                  >
                     <Input id="bot-qqguild-webhook" :value="qqGuildWebhookURL" readonly />
                   </Form.Item>
+                  <Alert
+                    v-else
+                    type="info"
+                    show-icon
+                    message="WebSocket 主动连接 QQ Gateway，不需要公网回调地址。"
+                    style="margin-bottom: 18px"
+                  />
                   <Form.Item label="AppID" html-for="bot-qqguild-app-id">
                     <Input id="bot-qqguild-app-id" v-model:value="botSettings.form.qqguild_app_id" name="qqguild-app-id" placeholder="请输入机器人 AppID" />
                   </Form.Item>
@@ -3169,7 +3363,10 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <Typography.Text strong>普通用户</Typography.Text>
                   <Tag>{{ normalUsers.total }}</Tag>
                 </div>
-                <Button @click="loadNormalUsers"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                <Space>
+                  <Button type="primary" @click="openNormalUser()"><template #icon><Plus :size="16" /></template>新增账号</Button>
+                  <Button @click="loadNormalUsers"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                </Space>
               </div>
               <Table
                 row-key="id"
@@ -3224,6 +3421,26 @@ function smallcatOpenids(record?: AdminUserRow) {
                     <Tag :color="record.disabled ? 'default' : 'green'">{{ record.disabled ? '禁用' : '正常' }}</Tag>
                   </template>
                 </Table.Column>
+                <Table.Column title="操作" fixed="right" :width="130">
+                  <template #default="{ record }">
+                    <Space size="small">
+                      <Button type="text" title="编辑账号" :aria-label="`编辑账号 ${record.username}`" @click="openNormalUser(record)">
+                        <Edit3 :size="16" />
+                      </Button>
+                      <Popconfirm
+                        :title="`确认删除账号「${record.username}」？`"
+                        description="账号、openid/QQ/TGID 绑定和插件授权将一并删除。"
+                        ok-text="确认删除"
+                        cancel-text="取消"
+                        @confirm="removeNormalUser(record)"
+                      >
+                        <Button type="text" danger :loading="normalUsers.deleting[record.id]" title="删除账号" :aria-label="`删除账号 ${record.username}`">
+                          <Trash2 :size="16" />
+                        </Button>
+                      </Popconfirm>
+                    </Space>
+                  </template>
+                </Table.Column>
               </Table>
             </section>
 
@@ -3263,7 +3480,9 @@ function smallcatOpenids(record?: AdminUserRow) {
               </Table>
 
               <template v-else>
-                <Tabs v-model:active-key="msgState.active" :items="Object.entries(messageBuckets).map(([key, item]) => ({ key, label: item.label }))" />
+                <Tabs v-model:active-key="msgState.active">
+                  <TabPane v-for="([key, item]) in Object.entries(messageBuckets)" :key="key" :tab="item.label" />
+                </Tabs>
                 <Table row-key="key" :data-source="msgState.rows">
                   <Table.Column title="号码" data-index="key" :width="220" />
                   <Table.Column title="平台" data-index="platform" :width="140" />
@@ -3385,11 +3604,6 @@ function smallcatOpenids(record?: AdminUserRow) {
                   </template>
                 </Table.Column>
                 <Table.Column title="地址" data-index="address" ellipsis />
-                <Table.Column title="API AUTH" data-index="api_auth" :width="180">
-                  <template #default="{ text }">
-                    <Typography.Text code>{{ maskSecret(text) }}</Typography.Text>
-                  </template>
-                </Table.Column>
                 <Table.Column title="状态" data-index="status" :width="120">
                   <template #default="{ record }">
                     <Tag :color="record.status === 'online' ? 'green' : 'default'">{{ record.status === 'online' ? '验证通过' : '未检测' }}</Tag>
@@ -3413,9 +3627,10 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Table.Column title="最后检测" data-index="last_checked_at" :width="180">
                   <template #default="{ text }">{{ timestamp(text) }}</template>
                 </Table.Column>
-                <Table.Column title="操作" :width="210">
+                <Table.Column title="操作" :width="300">
                   <template #default="{ record }">
                     <Button type="text" @click="testSmallcatPanel(record)">检测</Button>
+                    <Button type="text" :loading="smallcat.accountLoadingID === record.id" @click="showSmallcatOpenids(record)">获取 OpenID</Button>
                     <Button type="text" @click="openSmallcatPanel(record)">编辑</Button>
                     <Popconfirm title="确认删除这个 smallcat？" @confirm="removeSmallcatPanel(record)">
                       <Button type="text" danger><Trash2 :size="16" /></Button>
@@ -3426,7 +3641,13 @@ function smallcatOpenids(record?: AdminUserRow) {
             </section>
 
             <section v-if="page === 'plugins'" class="panel">
-              <Tabs v-model:active-key="plugins.tab" :items="[{ key: 'all', label: `全部 ${plugins.meta.all ?? ''}` }, { key: 'tab1', label: `已安装 ${plugins.meta.tab1 ?? ''}` }, { key: 'tab2', label: `未安装 ${plugins.meta.tab2 ?? ''}` }, { key: 'tab3', label: `可更新 ${plugins.meta.tab3 ?? ''}` }]" />
+              <Tabs v-model:active-key="plugins.tab">
+                <TabPane key="all" :tab="`全部 ${plugins.meta.all ?? ''}`" />
+                <TabPane key="private" :tab="`非公开 ${plugins.meta.private ?? ''}`" />
+                <TabPane key="tab1" :tab="`已安装 ${plugins.meta.tab1 ?? ''}`" />
+                <TabPane key="tab2" :tab="`未安装 ${plugins.meta.tab2 ?? ''}`" />
+                <TabPane key="tab3" :tab="`可更新 ${plugins.meta.tab3 ?? ''}`" />
+              </Tabs>
               <div class="toolbar-left" style="margin-bottom: 12px">
                 <Input id="plugin-market-search" v-model:value="plugins.keyword" name="plugin-market-search" allow-clear style="width: 260px" placeholder="搜索插件或来源" @press-enter="loadPlugins()" />
                 <Select
@@ -3442,7 +3663,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Button type="primary" @click="openPluginSourceManager">
                   <template #icon><Settings :size="16" /></template>管理插件源
                 </Button>
-                <Button @click="loadPlugins()"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                <Button @click="loadPlugins(1, 12, true)"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
               </div>
               <Spin :spinning="plugins.loading">
                 <div v-if="plugins.rows.length" class="plugin-market-grid">
@@ -3471,11 +3692,23 @@ function smallcatOpenids(record?: AdminUserRow) {
                     </div>
                     <div class="plugin-card-actions">
                       <Button
+                        v-if="pluginCanOpen(record)"
+                        class="plugin-card-open"
+                        :class="{ 'is-open': record.open }"
+                        shape="circle"
+                        :loading="plugins.opening[record.id]"
+                        :title="record.open ? '取消 Home 页面开放' : '开放到 Home 页面'"
+                        :aria-label="`${record.open ? '取消开放' : '开放'}${record.title || record.id}`"
+                        @click="togglePluginOpen(record)"
+                      >
+                        <template #icon><DoorOpen :size="18" /></template>
+                      </Button>
+                      <Button
+                        v-if="pluginCanConfigure(record)"
                         class="plugin-card-settings"
                         shape="circle"
-                        :disabled="!pluginInstalled(record)"
                         :loading="pluginConfigs.opening === record.id"
-                        :title="pluginInstalled(record) ? '插件配置' : '安装后可配置'"
+                        title="插件配置"
                         :aria-label="`${record.title || record.id}插件配置`"
                         @click="openMarketPluginConfig(record)"
                       >
@@ -3708,6 +3941,64 @@ function smallcatOpenids(record?: AdminUserRow) {
         </Form>
       </Modal>
 
+      <Modal
+        v-model:open="normalUsers.modalOpen"
+        :title="normalUsers.editing ? `编辑账号：${normalUsers.editing.username}` : '新增账号'"
+        width="620px"
+        ok-text="保存"
+        cancel-text="取消"
+        :confirm-loading="normalUsers.saving"
+        @ok="saveNormalUser"
+      >
+        <Form layout="vertical">
+          <Form.Item label="账号" html-for="normal-user-username" required extra="3-32 位字母、数字、下划线、横线或点；创建后不可修改。">
+            <Input
+              id="normal-user-username"
+              v-model:value="normalUsers.form.username"
+              name="normal-user-username"
+              :disabled="!!normalUsers.editing"
+              autocomplete="username"
+              placeholder="请输入登录账号"
+            />
+          </Form.Item>
+          <Form.Item
+            :label="normalUsers.editing ? '新密码' : '密码'"
+            html-for="normal-user-password"
+            :required="!normalUsers.editing"
+            :extra="normalUsers.editing ? '留空则保留原密码。' : '至少 6 位。'"
+          >
+            <Input.Password
+              id="normal-user-password"
+              v-model:value="normalUsers.form.password"
+              name="normal-user-password"
+              autocomplete="new-password"
+              placeholder="请输入密码"
+            />
+          </Form.Item>
+          <Form.Item label="昵称" html-for="normal-user-nickname">
+            <Input id="normal-user-nickname" v-model:value="normalUsers.form.nickname" name="normal-user-nickname" maxlength="64" placeholder="留空则使用账号名" />
+          </Form.Item>
+          <Form.Item label="smallcat openid 列表" extra="可输入多个 openid，按回车确认；保存时自动去重。">
+            <Select
+              v-model:value="normalUsers.form.smallcat_openids"
+              mode="tags"
+              :token-separators="[',', ';', ' ']"
+              :options="[]"
+              placeholder="输入 openid 后按回车"
+            />
+          </Form.Item>
+          <Form.Item label="绑定 QQ" html-for="normal-user-qq">
+            <Input id="normal-user-qq" v-model:value="normalUsers.form.qq" name="normal-user-qq" inputmode="numeric" placeholder="5-12 位 QQ 号；留空解除绑定" />
+          </Form.Item>
+          <Form.Item label="绑定 TGID" html-for="normal-user-tgid">
+            <Input id="normal-user-tgid" v-model:value="normalUsers.form.telegram" name="normal-user-tgid" placeholder="Telegram 用户 ID；留空解除绑定" />
+          </Form.Item>
+          <Form.Item label="禁用账号" html-for="normal-user-disabled">
+            <Switch id="normal-user-disabled" v-model:checked="normalUsers.form.disabled" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       <Modal :open="!!replies.editing" title="回复规则" @cancel="replies.editing = null" @ok="saveReply">
         <Form layout="vertical"><Form.Item label="关键词/正则"><Input v-model:value="replies.form.keyword" /></Form.Item><Form.Item label="回复内容"><Input.TextArea v-model:value="replies.form.value" :rows="6" /></Form.Item><Form.Item label="限定用户/群号"><Input v-model:value="replies.form.number" /></Form.Item><Form.Item label="平台"><Select v-model:value="replies.form.platforms" mode="tags" /></Form.Item><Form.Item label="优先级"><InputNumber v-model:value="replies.form.priority" style="width: 100%" /></Form.Item></Form>
       </Modal>
@@ -3834,6 +4125,21 @@ function smallcatOpenids(record?: AdminUserRow) {
               <dt>作者</dt>
               <dd>{{ plugins.detail.author }}</dd>
             </template>
+            <template v-if="pluginDependencies(plugins.detail).length">
+              <dt>所需依赖</dt>
+              <dd>
+                <Space wrap size="small">
+                  <Tag
+                    v-for="dependency in pluginDependencies(plugins.detail)"
+                    :key="dependency"
+                    color="blue"
+                    class="mono"
+                  >
+                    {{ dependency }}
+                  </Tag>
+                </Space>
+              </dd>
+            </template>
             <template v-if="plugins.detail.status === 1">
               <dt>版本</dt>
               <dd>当前 {{ plugins.detail.current_version || '-' }} / 最新 {{ plugins.detail.latest_version || plugins.detail.version || '-' }}</dd>
@@ -3946,13 +4252,31 @@ function smallcatOpenids(record?: AdminUserRow) {
             <Input v-model:value="smallcat.form.address" placeholder="http://127.0.0.1:18787" />
           </Form.Item>
           <Form.Item label="API AUTH" required>
-            <Input.Password v-model:value="smallcat.form.api_auth" />
+			<Input.Password v-model:value="smallcat.form.api_auth" :placeholder="smallcat.form.id ? '留空保持原 AUTH 不变' : '请输入 API AUTH'" />
           </Form.Item>
           <Button @click="testSmallcatPanel()" :loading="smallcat.testing">
             <template #icon><RefreshCw :size="16" /></template>检测连接
           </Button>
         </Form>
       </Modal>
+
+	  <Modal
+		:open="smallcat.accountsOpen"
+		:title="`${smallcat.accountPanelName} · OpenID 列表（${smallcat.accountOpenids.length}）`"
+		width="680px"
+		:footer="null"
+		@cancel="smallcat.accountsOpen = false"
+	  >
+		<Empty v-if="!smallcat.accountOpenids.length" description="暂无账号" />
+		<Space v-else direction="vertical" size="small" style="width: 100%">
+		  <Typography.Text
+			v-for="(openid, index) in smallcat.accountOpenids"
+			:key="openid"
+			code
+			:copyable="true"
+		  >{{ index + 1 }}. {{ openid }}</Typography.Text>
+		</Space>
+	  </Modal>
 
       <Modal :open="!!daidai.editing" title="呆呆面板" width="720px" :confirm-loading="daidai.saving" @cancel="daidai.editing = null" @ok="saveDaidaiPanel">
         <Form layout="vertical">

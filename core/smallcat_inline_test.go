@@ -100,4 +100,45 @@ func TestSmallCatInlineEndpointWrappers(t *testing.T) {
 			}
 		}
 	}
+
+	for name, source := range runtimes {
+		if !strings.Contains(source, "authorizedUsers(") || !strings.Contains(source, pluginSmallcatRuntimeBucket) {
+			t.Errorf("%s: SmallCat.userList authorization bridge is missing", name)
+		}
+		getCode := smallCatSourceBlock(t, source, "getCode(", "getSession(")
+		if strings.Contains(getCode, "authorizedUsers") {
+			t.Errorf("%s: SmallCat.getCode must not request an extra read authorization", name)
+		}
+	}
+	for name, source := range typings {
+		if !strings.Contains(source, "authorizedUsers(") {
+			t.Errorf("%s: SmallCat.authorizedUsers typing is missing", name)
+		}
+	}
+}
+
+func TestTopLevelUserListRuntimeExports(t *testing.T) {
+	runtimes := map[string]string{
+		"node preload":  nodeRuntimePreloadScript,
+		"node module":   readSmallCatSource(t, "proto3/sillygirl.js", "exports.userList", "function normalizeSchema"),
+		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "async def userList", "def normalize_schema"),
+	}
+	for name, source := range runtimes {
+		if !strings.Contains(source, "userList") || !strings.Contains(source, pluginUserRuntimeBucket) || !strings.Contains(source, pluginUserRuntimeListKey) {
+			t.Errorf("%s: top-level userList runtime bridge is missing", name)
+		}
+	}
+	for name, source := range map[string]string{
+		"grpc plugin typings": typeat,
+		"node typings":        readSmallCatSource(t, "proto3/sillygirl.d.ts", "interface SillyGirlUserBindings", "interface SillyGirlSchemaNode"),
+	} {
+		if !strings.Contains(source, "userList(): Promise<SillyGirlUser[]>") {
+			t.Errorf("%s: top-level userList typing is missing", name)
+		}
+		for _, field := range []string{"authorized", "qq", "telegram", "smallcat_openids"} {
+			if !strings.Contains(source, field) {
+				t.Errorf("%s: userList field %s is missing", name, field)
+			}
+		}
+	}
 }

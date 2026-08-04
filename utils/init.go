@@ -147,7 +147,11 @@ func KillPeer() error {
 	if err != nil {
 		return err
 	}
-	if id != 0 {
+	// A stale PID file may contain our own PID after the OS reuses a recently
+	// exited process ID. Killing that PID would terminate the new process during
+	// startup (especially visible when `go test` launches package binaries in
+	// quick succession).
+	if id != 0 && id != os.Getpid() {
 		return KillProcess(id)
 	}
 	return nil
@@ -263,9 +267,9 @@ func FetchCookieValue(ps ...string) string {
 }
 
 func Contains(strs []string, str ...string) bool {
-	for _, o := range strs {
-		for _, str_ := range strs {
-			if str_ == o {
+	for _, candidate := range str {
+		for _, item := range strs {
+			if item == candidate {
 				return true
 			}
 		}
@@ -358,28 +362,6 @@ func IsZeroOrEmpty(str string) bool {
 	return str == "0" || str == "" || str == "nil"
 }
 
-// func Unique(strs ...interface{}) []string {
-// 	m := make(map[string]bool)
-// 	var result []string
-// 	for _, arg := range strs {
-// 		switch arg := arg.(type) {
-// 		case []string:
-// 			for _, v := range arg {
-// 				if _, ok := m[v]; !ok {
-// 					m[v] = true
-// 					result = append(result, v)
-// 				}
-// 			}
-// 		case string:
-// 			if _, ok := m[arg]; !ok {
-// 				m[arg] = true
-// 				result = append(result, arg)
-// 			}
-// 		}
-// 	}
-// 	return result
-// }
-
 func Unique(strs ...interface{}) []string {
 	var result []string
 	for _, arg := range strs {
@@ -393,8 +375,9 @@ func Unique(strs ...interface{}) []string {
 			}
 		case []interface{}:
 			for _, v := range arg {
-				if !contains(result, v.(string)) && !contains(toAppend, v.(string)) {
-					toAppend = append(toAppend, v.(string))
+				text, ok := v.(string)
+				if ok && !contains(result, text) && !contains(toAppend, text) {
+					toAppend = append(toAppend, text)
 				}
 			}
 		case string:

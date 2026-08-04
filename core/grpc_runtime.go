@@ -12,6 +12,31 @@ import (
 )
 
 var senderRegisters sync.Map
+var runtimePluginIDs sync.Map
+
+func registerRuntimePlugin(runtimeID string, pluginID string) {
+	if runtimeID == "" || pluginID == "" {
+		return
+	}
+	runtimePluginIDs.Store(runtimeID, pluginID)
+}
+
+func pluginIDFromRuntimeContext(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	runtimeIDs := md.Get("runtime_id")
+	if len(runtimeIDs) == 0 {
+		return ""
+	}
+	value, ok := runtimePluginIDs.Load(runtimeIDs[0])
+	if !ok {
+		return ""
+	}
+	pluginID, _ := value.(string)
+	return pluginID
+}
 
 func getRegisterSenderByCtx(ctx context.Context, uuid string) (common.Sender, error) {
 	// if uuid == "" { //临时---====+++测试
@@ -93,6 +118,7 @@ func deleteSenderRegister(runtime_id string) {
 	}
 
 	senderRegisters.Delete(runtime_id)
+	runtimePluginIDs.Delete(runtime_id)
 }
 
 func getSenderRegisterByCtx(ctx context.Context) (string, func(common.Sender) string, error) {

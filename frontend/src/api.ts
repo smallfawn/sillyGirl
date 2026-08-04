@@ -113,8 +113,8 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
   return data as T;
 }
 
-export function get<T>(url: string) {
-  return request<T>(url);
+export function get<T>(url: string, options: RequestInit = {}) {
+  return request<T>(url, options);
 }
 
 export function post<T>(url: string, data?: unknown) {

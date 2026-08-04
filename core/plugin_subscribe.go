@@ -46,6 +46,7 @@ type RequestPluginResult struct {
 	Tab1    int                `json:"tab1"`
 	Tab2    int                `json:"tab2"`
 	Tab3    int                `json:"tab3"`
+	Private int                `json:"private"`
 	All     int                `json:"all"`
 	Tab     string             `json:"tab"`
 	Time    time.Time          `json:"time"`
@@ -166,13 +167,19 @@ func initWebPluginList() {
 			if current == 1 && init != "false" {
 				initPluginList()
 			}
+			privatePlugins := localPrivatePlugins(plugin_list, Functions)
+			rr.Private = len(privatePlugins)
+			marketPlugins := plugin_list
+			if activeKey == "private" {
+				marketPlugins = privatePlugins
+			}
 			var list []*common.Function
 			if keyword == "" {
 				if len(origins) == 0 {
-					list = append(list, plugin_list...)
+					list = append(list, marketPlugins...)
 
 				} else {
-					for _, f := range plugin_list {
+					for _, f := range marketPlugins {
 						if Contains(origins, f.Organization) {
 							list = append(list, f)
 						}
@@ -180,13 +187,13 @@ func initWebPluginList() {
 				}
 			} else {
 				if len(origins) == 0 {
-					for _, f := range plugin_list {
+					for _, f := range marketPlugins {
 						if strings.Contains(f.Title, keyword) || strings.Contains(f.Organization, keyword) {
 							list = append(list, f)
 						}
 					}
 				} else {
-					for _, f := range plugin_list {
+					for _, f := range marketPlugins {
 						if strings.Contains(f.Title, keyword) || strings.Contains(f.Organization, keyword) {
 							if Contains(origins, f.Organization) {
 								list = append(list, f)
@@ -256,6 +263,10 @@ func initWebPluginList() {
 			rr.Tab1 = len(tab1)
 			rr.Tab2 = len(tab2)
 			rr.Tab3 = len(tab3)
+			if activeKey == "private" {
+				rr.All = len(plugin_list)
+				rr.Tab1, rr.Tab2, rr.Tab3 = pluginMarketCounts(plugin_list, fc)
+			}
 			if activeKey == "tab1" {
 				list = tab1
 			} else if activeKey == "tab2" {
@@ -300,6 +311,8 @@ func initWebPluginList() {
 			for i := range rr.Data {
 				rr.Data[i].Icon = pluginIconOrDefault(rr.Data[i].Icon)
 				rr.Data[i].HasForm = false
+				rr.Data[i].ConfigRegistered = getPluginConfigRecord(rr.Data[i].UUID) != nil
+				rr.Data[i].UsesSmallCat = false
 				rr.Data[i].Running = false
 				for j := range fc {
 					if rr.Data[i].UUID == fc[j].UUID {
@@ -320,11 +333,13 @@ func initWebPluginList() {
 						if fc[j].HasForm {
 							rr.Data[i].HasForm = true
 						}
+						rr.Data[i].UsesSmallCat = fc[j].UsesSmallCat
 						if fc[j].Running {
 							rr.Data[i].Running = true
 						}
 						rr.Data[i].Debug = plugin_debug.GetString(rr.Data[i].UUID) == "b:true"
 						rr.Data[i].Disable = fc[j].Disable
+						rr.Data[i].Open = fc[j].Open && fc[j].UsesSmallCat
 					}
 				}
 				rr.Data[i].Description = parseReply2(rr.Data[i].Description)
@@ -336,6 +351,62 @@ func initWebPluginList() {
 
 		ApiOK(ctx, GetPublicResponse())
 	})
+}
+
+func pluginMarketCounts(market []*common.Function, installed []*common.Function) (installedCount, missingCount, updateCount int) {
+	for _, item := range market {
+		if item == nil || item.UUID == "" {
+			continue
+		}
+		found := false
+		for _, current := range installed {
+			if current == nil || current.UUID != item.UUID {
+				continue
+			}
+			found = true
+			installedCount++
+			if current.Version != item.Version {
+				updateCount++
+			}
+			break
+		}
+		if !found {
+			missingCount++
+		}
+	}
+	return
+}
+
+func localPrivatePlugins(remote []*common.Function, installed []*common.Function) []*common.Function {
+	remoteIDs := map[string]struct{}{}
+	for _, plugin := range remote {
+		if plugin != nil && plugin.UUID != "" {
+			remoteIDs[plugin.UUID] = struct{}{}
+		}
+	}
+	local := []*common.Function{}
+	for _, plugin := range installed {
+		if plugin == nil || plugin.UUID == "" || (plugin.Type != NODE && plugin.Type != PYTHON) {
+			continue
+		}
+		if _, exists := remoteIDs[plugin.UUID]; exists {
+			continue
+		}
+		item := *plugin
+		item.Status = 2
+		item.CurrentVersion = plugin.Version
+		item.LatestVersion = plugin.Version
+		item.Organization = "本地插件"
+		item.Address = ""
+		item.Messages = nil
+		item.Dependencies = append([]string(nil), plugin.Dependencies...)
+		item.Classes = append([]string(nil), plugin.Classes...)
+		local = append(local, &item)
+	}
+	sort.SliceStable(local, func(i, j int) bool {
+		return firstNonEmpty(local[i].Title, local[i].UUID) < firstNonEmpty(local[j].Title, local[j].UUID)
+	})
+	return local
 }
 
 func listPluginSources() []*common.Function {

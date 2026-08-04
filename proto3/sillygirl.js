@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.sillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
+exports.userList = userList;
 exports.form = form;
 exports.pluginConfigDefaults = pluginConfigDefaults;
 exports.pushAdmin = pushAdmin;
@@ -553,6 +554,9 @@ class Bucket {
     }
 }
 exports.Bucket = Bucket;
+async function userList() {
+    return await new Bucket("__plugin_users__").get("list", []);
+}
 function normalizeSchema(value) {
     if (value && value.__schemaNode && value.schema)
         return value.schema;
@@ -833,6 +837,28 @@ class QingLong {
     }
 }
 exports.QingLong = QingLong;
+function smallcatAccountOpenID(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return "";
+    return String(value.openid ?? value.openId ?? value.open_id ?? "").trim();
+}
+function filterSmallcatAccountPayload(value, allowed) {
+    if (Array.isArray(value)) {
+        return value.map((item) => filterSmallcatAccountPayload(item, allowed)).filter((item) => item !== undefined);
+    }
+    if (!value || typeof value !== "object")
+        return value;
+    const openid = smallcatAccountOpenID(value);
+    if (openid && !allowed.has(openid))
+        return undefined;
+    const result = {};
+    for (const [key, item] of Object.entries(value)) {
+        const filtered = filterSmallcatAccountPayload(item, allowed);
+        if (filtered !== undefined)
+            result[key] = filtered;
+    }
+    return result;
+}
 class SmallCat {
     id = 0;
     uuid = "";
@@ -899,8 +925,21 @@ class SmallCat {
     rescanUser(options) {
         return this.post("/api/accounts/rescan", options);
     }
-    userList() {
-        return this.request("GET", "/api/accounts");
+    async authorizedUsers() {
+        return await new Bucket("__plugin_smallcat_authorized__").get("records", {
+            enforced: false,
+            scope: "smallcat:read",
+            openids: [],
+            users: [],
+        });
+    }
+    async userList() {
+        const authorization = await this.authorizedUsers();
+        const payload = await this.request("GET", "/api/accounts");
+        if (!authorization?.enforced)
+            return payload;
+        const allowed = new Set((authorization.openids || []).map((item) => String(item || "").trim()).filter(Boolean));
+        return filterSmallcatAccountPayload(payload, allowed);
     }
     checkUsers(options) {
         return this.post("/api/accounts/status", options);

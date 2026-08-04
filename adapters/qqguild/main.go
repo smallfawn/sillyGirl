@@ -24,7 +24,10 @@ import (
 	"github.com/tencent-connect/botgo/interaction/signature"
 	"github.com/tencent-connect/botgo/interaction/webhook"
 	"github.com/tencent-connect/botgo/openapi/options"
+	"github.com/tencent-connect/botgo/sessions/manager"
 	"github.com/tencent-connect/botgo/token"
+	botwebsocket "github.com/tencent-connect/botgo/websocket"
+	"golang.org/x/oauth2"
 )
 
 const (
@@ -36,9 +39,12 @@ const (
 	cacheCleanupEvery = time.Minute
 	tokenRetryInitial = 3 * time.Second
 	tokenRetryMax     = time.Minute
+	modeWebhook       = "webhook"
+	modeWebsocket     = "websocket"
 )
 
 var settings = core.MakeBucket(platform)
+var websocketIntents dto.Intent
 
 type messageAPI interface {
 	PostMessage(context.Context, string, *dto.MessageToCreate, ...options.Option) (*dto.Message, error)
@@ -70,16 +76,17 @@ var runtime = struct {
 	cancel      context.CancelFunc
 	credentials *token.QQBotCredentials
 	bot         *bot
+	mode        string
 }{}
 
 func init() {
-	_ = event.RegisterHandlers(
+	websocketIntents = event.RegisterHandlers(
 		event.ATMessageEventHandler(handleATMessage),
 		event.MessageEventHandler(handleGuildMessage),
 		event.DirectMessageEventHandler(handleDirectMessage),
 	)
 	core.GinApi(core.POST, webhookPath, receiveWebhook)
-	for _, key := range []string{"enable", "app_id", "app_secret", "sandbox", "debug"} {
+	for _, key := range []string{"enable", "app_id", "app_secret", "mode", "sandbox", "debug"} {
 		key := key
 		storage.Watch(settings, key, func(old, new, key string) *storage.Final {
 			go restart()
@@ -102,8 +109,10 @@ func restart() {
 	runtime.generation++
 	generation := runtime.generation
 	runtime.credentials = nil
+	runtime.mode = ""
 	appID := strings.TrimSpace(settings.GetString("app_id"))
 	appSecret := strings.TrimSpace(settings.GetString("app_secret"))
+	mode := normalizeConnectionMode(settings.GetString("mode"))
 	if !core.AdapterConfigEnabled(platform) {
 		runtime.Unlock()
 		core.Logs.Info("qqguild机器人未启动：qqguild.enable=false")
@@ -117,12 +126,13 @@ func restart() {
 	ctx, cancel := context.WithCancel(context.Background())
 	runtime.cancel = cancel
 	runtime.credentials = &token.QQBotCredentials{AppID: appID, AppSecret: appSecret}
+	runtime.mode = mode
 	runtime.Unlock()
 
-	go run(ctx, generation, appID, appSecret)
+	go run(ctx, generation, appID, appSecret, mode)
 }
 
-func run(ctx context.Context, generation uint64, appID, appSecret string) {
+func run(ctx context.Context, generation uint64, appID, appSecret, mode string) {
 	credentials := &token.QQBotCredentials{AppID: appID, AppSecret: appSecret}
 	tokenSource := token.NewQQBotTokenSource(credentials)
 	// OpenAPI obtains a fresh token from tokenSource before every request. An
@@ -140,11 +150,21 @@ func run(ctx context.Context, generation uint64, appID, appSecret string) {
 		return
 	}
 
-	var api messageAPI
+	api := botgo.NewOpenAPI(appID, tokenSource).WithTimeout(10 * time.Second).SetDebug(settings.GetBool("debug", false))
 	if settings.GetBool("sandbox", false) {
 		api = botgo.NewSandboxOpenAPI(appID, tokenSource).WithTimeout(10 * time.Second).SetDebug(settings.GetBool("debug", false))
-	} else {
-		api = botgo.NewOpenAPI(appID, tokenSource).WithTimeout(10 * time.Second).SetDebug(settings.GetBool("debug", false))
+	}
+	var websocketAP *dto.WebsocketAP
+	if mode == modeWebsocket {
+		if err := retryToken(ctx, tokenRetryInitial, tokenRetryMax, func() error {
+			var err error
+			websocketAP, err = api.WS(ctx, nil, "")
+			return err
+		}, func(err error) {
+			core.Logs.Warn("qqguild获取 WebSocket 接入点失败，稍后重试：%v", err)
+		}); err != nil {
+			return
+		}
 	}
 	b := &bot{
 		appID:   appID,
@@ -166,20 +186,29 @@ func run(ctx context.Context, generation uint64, appID, appSecret string) {
 	}
 	runtime.bot = b
 	runtime.Unlock()
-	core.Logs.Info("qqguild机器人(%s) Webhook 已就绪：%s", appID, webhookPath)
+	defer func() {
+		runtime.Lock()
+		if runtime.bot == b {
+			runtime.bot = nil
+		}
+		runtime.Unlock()
+		b.adapter.Destroy()
+	}()
 
-	<-ctx.Done()
-	runtime.Lock()
-	if runtime.bot == b {
-		runtime.bot = nil
+	if mode == modeWebsocket {
+		core.Logs.Info("qqguild机器人(%s) WebSocket 正在连接：%s", appID, websocketAP.URL)
+		if err := runWebsocketGateway(ctx, websocketAP, tokenSource, websocketIntents); err != nil && ctx.Err() == nil {
+			core.Logs.Warn("qqguild WebSocket 已停止：%v", err)
+		}
+		return
 	}
-	runtime.Unlock()
-	b.adapter.Destroy()
+	core.Logs.Info("qqguild机器人(%s) Webhook 已就绪：%s", appID, webhookPath)
+	<-ctx.Done()
 }
 
 func receiveWebhook(c *gin.Context) {
-	credentials := currentCredentials()
-	if credentials == nil || !core.AdapterConfigEnabled(platform) {
+	credentials, mode := currentCredentialsAndMode()
+	if credentials == nil || mode != modeWebhook || !core.AdapterConfigEnabled(platform) {
 		c.String(http.StatusServiceUnavailable, "qqguild adapter is not ready")
 		return
 	}
@@ -261,10 +290,169 @@ func currentBot() *bot {
 	return runtime.bot
 }
 
-func currentCredentials() *token.QQBotCredentials {
+func currentCredentialsAndMode() (*token.QQBotCredentials, string) {
 	runtime.RLock()
 	defer runtime.RUnlock()
-	return runtime.credentials
+	return runtime.credentials, runtime.mode
+}
+
+func normalizeConnectionMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "ws", "wss", modeWebsocket:
+		return modeWebsocket
+	default:
+		return modeWebhook
+	}
+}
+
+type websocketGatewayRunner struct {
+	sync.Mutex
+	clients map[uint32]botwebsocket.WebSocket
+}
+
+func runWebsocketGateway(ctx context.Context, ap *dto.WebsocketAP, tokenSource oauth2.TokenSource, intents dto.Intent) error {
+	if ap == nil || strings.TrimSpace(ap.URL) == "" {
+		return errors.New("WebSocket 接入点为空")
+	}
+	if err := manager.CheckSessionLimit(ap); err != nil {
+		return err
+	}
+	shards := ap.Shards
+	if shards == 0 {
+		shards = 1
+	}
+	if intents == dto.IntentNone {
+		return errors.New("WebSocket intents 为空")
+	}
+	gatewayCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	runner := &websocketGatewayRunner{clients: map[uint32]botwebsocket.WebSocket{}}
+	fatal := make(chan error, 1)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for shardID := uint32(0); shardID < shards; shardID++ {
+		wg.Add(1)
+		go func(shardID uint32) {
+			defer wg.Done()
+			if err := runner.runShard(gatewayCtx, ap, tokenSource, intents, shardID, shards); err != nil && gatewayCtx.Err() == nil {
+				select {
+				case fatal <- err:
+				default:
+				}
+			}
+		}(shardID)
+	}
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	var result error
+	select {
+	case <-ctx.Done():
+		result = ctx.Err()
+	case result = <-fatal:
+	case <-done:
+		result = errors.New("WebSocket sessions 已全部停止")
+	}
+	cancel()
+	runner.closeAll()
+	<-done
+	return result
+}
+
+func (runner *websocketGatewayRunner) runShard(ctx context.Context, ap *dto.WebsocketAP, tokenSource oauth2.TokenSource, intents dto.Intent, shardID, shardCount uint32) error {
+	if delay := time.Duration(shardID) * manager.CalcInterval(ap.SessionStartLimit.MaxConcurrency); delay > 0 {
+		if !waitContext(ctx, delay) {
+			return ctx.Err()
+		}
+	}
+	session := dto.Session{
+		URL:         ap.URL,
+		TokenSource: tokenSource,
+		Intent:      intents,
+		Shards: dto.ShardConfig{
+			ShardID:    shardID,
+			ShardCount: shardCount,
+		},
+	}
+	for ctx.Err() == nil {
+		client := botwebsocket.ClientImpl.New(session)
+		if err := client.Connect(); err != nil {
+			if manager.CanNotIdentify(err) {
+				return err
+			}
+			if !waitContext(ctx, tokenRetryInitial) {
+				return ctx.Err()
+			}
+			continue
+		}
+		runner.setClient(shardID, client)
+		var err error
+		if session.ID == "" {
+			err = client.Identify()
+		} else {
+			err = client.Resume()
+		}
+		if err == nil {
+			err = client.Listening()
+		} else {
+			client.Close()
+		}
+		session = *client.Session()
+		runner.deleteClient(shardID, client)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil && manager.CanNotIdentify(err) {
+			return err
+		}
+		if err != nil && manager.CanNotResume(err) {
+			session.ID = ""
+			session.LastSeq = 0
+		}
+		if !waitContext(ctx, tokenRetryInitial) {
+			return ctx.Err()
+		}
+	}
+	return ctx.Err()
+}
+
+func (runner *websocketGatewayRunner) setClient(shardID uint32, client botwebsocket.WebSocket) {
+	runner.Lock()
+	runner.clients[shardID] = client
+	runner.Unlock()
+}
+
+func (runner *websocketGatewayRunner) deleteClient(shardID uint32, client botwebsocket.WebSocket) {
+	runner.Lock()
+	if runner.clients[shardID] == client {
+		delete(runner.clients, shardID)
+	}
+	runner.Unlock()
+}
+
+func (runner *websocketGatewayRunner) closeAll() {
+	runner.Lock()
+	clients := make([]botwebsocket.WebSocket, 0, len(runner.clients))
+	for _, client := range runner.clients {
+		clients = append(clients, client)
+	}
+	runner.clients = map[uint32]botwebsocket.WebSocket{}
+	runner.Unlock()
+	for _, client := range clients {
+		client.Close()
+	}
+}
+
+func waitContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func handleATMessage(_ *dto.WSPayload, data *dto.WSATMessageData) error {

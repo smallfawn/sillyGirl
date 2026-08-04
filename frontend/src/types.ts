@@ -84,6 +84,10 @@ export type PluginInfo = {
   running?: boolean;
   debug?: boolean;
   public?: boolean;
+  open?: boolean;
+  has_form?: boolean;
+  config_registered?: boolean;
+  uses_smallcat?: boolean;
   module?: boolean;
   on_start?: boolean;
   create_at?: string;

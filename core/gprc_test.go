@@ -15,3 +15,17 @@ func TestGrpcListenAddressHonorsOverride(t *testing.T) {
 		t.Fatalf("grpcListenAddress() = %q", got)
 	}
 }
+
+func TestGrpcDialAddressNormalizesWildcardListeners(t *testing.T) {
+	tests := map[string]string{
+		":54321":          "127.0.0.1:54321",
+		"0.0.0.0:54321":   "127.0.0.1:54321",
+		"[::]:54321":      "127.0.0.1:54321",
+		"127.0.0.1:54321": "127.0.0.1:54321",
+	}
+	for input, want := range tests {
+		if got := grpcDialAddress(input); got != want {
+			t.Errorf("grpcDialAddress(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

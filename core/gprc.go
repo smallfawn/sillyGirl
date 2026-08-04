@@ -7,8 +7,8 @@ import (
 	"log"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/smallfawn/sillyGirl/proto3/srpc"
 	"github.com/smallfawn/sillyGirl/utils"
@@ -22,34 +22,52 @@ const grpcRuntimeTokenHeader = "sillygirl-runtime-token"
 
 var grpcRuntimeToken = initialGrpcRuntimeToken()
 
+var grpcRuntimeEndpoint = struct {
+	ready   chan struct{}
+	once    sync.Once
+	mu      sync.RWMutex
+	address string
+	err     error
+}{ready: make(chan struct{})}
+
 // protoc --go_out=. -I. --go-grpc_out=.  bucket.proto
 func init() {
-	go func() {
-		lis, err := net.Listen("tcp", grpcListenAddress())
-		if err != nil {
-			log.Printf("gRPC runtime listen failed: %v", err)
-			return
-		}
-		s := grpc.NewServer(
-			grpc.UnaryInterceptor(grpcUnaryAuthInterceptor),
-			grpc.StreamInterceptor(grpcStreamAuthInterceptor),
-		)
-		srpc.RegisterSillyGirlServiceServer(s, &SillyGirlService{})
-		// log.Printf("grpc server listening at %v", lis.Addr())
-		if err := s.Serve(lis); err != nil {
-			log.Printf("gRPC runtime serve failed: %v", err)
-		}
-	}()
+	go serveGrpcRuntime()
+}
+
+func serveGrpcRuntime() {
+	lis, err := net.Listen("tcp", grpcListenAddress())
+	if err != nil {
+		publishGrpcRuntimeEndpoint("", err)
+		log.Printf("gRPC runtime listen failed: %v", err)
+		return
+	}
+	publishGrpcRuntimeEndpoint(grpcDialAddress(lis.Addr().String()), nil)
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(grpcUnaryAuthInterceptor),
+		grpc.StreamInterceptor(grpcStreamAuthInterceptor),
+	)
+	srpc.RegisterSillyGirlServiceServer(s, &SillyGirlService{})
+	if err := s.Serve(lis); err != nil {
+		log.Printf("gRPC runtime serve failed: %v", err)
+	}
+}
+
+func publishGrpcRuntimeEndpoint(address string, err error) {
+	grpcRuntimeEndpoint.mu.Lock()
+	grpcRuntimeEndpoint.address = address
+	grpcRuntimeEndpoint.err = err
+	grpcRuntimeEndpoint.mu.Unlock()
+	grpcRuntimeEndpoint.once.Do(func() { close(grpcRuntimeEndpoint.ready) })
 }
 
 func grpcListenAddress() string {
 	address := strings.TrimSpace(os.Getenv("SILLYGIRL_GRPC_ADDR"))
 	if address == "" {
-		name := strings.ToLower(filepath.Base(os.Args[0]))
-		if strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".test.exe") {
-			return "127.0.0.1:0"
-		}
-		return "127.0.0.1:50051"
+		// gRPC is an internal plugin-runtime transport. An ephemeral loopback
+		// port lets multiple SillyGirl instances run on one host without one
+		// instance's plugins accidentally connecting to another instance.
+		return "127.0.0.1:0"
 	}
 	return address
 }
@@ -62,8 +80,20 @@ func initialGrpcRuntimeToken() string {
 	return utils.GenUUID()
 }
 
-func grpcClientAddress() string {
-	address := grpcListenAddress()
+func grpcClientAddress() (string, error) {
+	<-grpcRuntimeEndpoint.ready
+	grpcRuntimeEndpoint.mu.RLock()
+	defer grpcRuntimeEndpoint.mu.RUnlock()
+	if grpcRuntimeEndpoint.err != nil {
+		return "", grpcRuntimeEndpoint.err
+	}
+	if grpcRuntimeEndpoint.address == "" {
+		return "", errors.New("gRPC runtime address is empty")
+	}
+	return grpcRuntimeEndpoint.address, nil
+}
+
+func grpcDialAddress(address string) string {
 	if strings.HasPrefix(address, ":") {
 		return "127.0.0.1" + address
 	}

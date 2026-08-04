@@ -14,6 +14,7 @@ var (
 	optionalRuleParamPattern = regexp.MustCompile(`\[([^\s\[\]]+)\]`)
 	multiSpacePattern        = regexp.MustCompile("\x20{2,}")
 	classTokenPattern        = regexp.MustCompile(`\S+`)
+	smallCatCallPattern      = regexp.MustCompile(`\b(?:new\s+)?SmallCat\s*[.(]`)
 )
 
 func pluginParse(script string, uuid string) (*common.Function, []func()) {
@@ -34,6 +35,8 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var origin = "自定义"
 	var crons = map[string]string{}
 	var hasForm bool
+	var usesSmallCat = smallCatCallPattern.MatchString(script)
+	var usesSmallCatDeclared *bool
 	var carry bool
 	var classes = []string{}
 	ks := map[string]bool{}
@@ -131,33 +134,41 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 			onStart = strings.TrimSpace(res[2]) == "true"
 		case "web":
 			web = strings.TrimSpace(res[2]) == "true"
+		case "smallcat":
+			declared := strings.TrimSpace(res[2]) == "true"
+			usesSmallCatDeclared = &declared
 		}
+	}
+	if usesSmallCatDeclared != nil {
+		usesSmallCat = *usesSmallCatDeclared
 	}
 	if !hasForm {
 		hasForm = strings.Contains(script, "form(") || strings.Contains(script, "SillyGirlPluginConfig") || strings.Contains(script, "sillyGirlCreateSchema")
 	}
 	return &common.Function{
-		Rules:       rules,
-		Admin:       admin,
-		Priority:    priority,
-		Disable:     disable,
-		UUID:        uuid,
-		Title:       title,
-		Public:      public,
-		Description: description,
-		Icon:        pluginIconOrDefault(icon),
-		Version:     version,
-		Author:      author,
-		Class:       strings.Join(classes, " "),
-		Module:      module,
-		OnStart:     onStart || web,
-		Web:         web,
-		Origin:      origin,
-		Cron:        crons,
-		Running:     onStart || web,
-		HasForm:     hasForm,
-		Carry:       carry,
-		Classes:     classes,
+		Rules:        rules,
+		Admin:        admin,
+		Priority:     priority,
+		Disable:      disable,
+		UUID:         uuid,
+		Title:        title,
+		Public:       public,
+		Open:         plugin_open.GetBool(uuid),
+		Description:  description,
+		Icon:         pluginIconOrDefault(icon),
+		Version:      version,
+		Author:       author,
+		Class:        strings.Join(classes, " "),
+		Module:       module,
+		OnStart:      onStart || web,
+		Web:          web,
+		Origin:       origin,
+		Cron:         crons,
+		Running:      onStart || web,
+		HasForm:      hasForm,
+		UsesSmallCat: usesSmallCat,
+		Carry:        carry,
+		Classes:      classes,
 	}, cbs
 }
 

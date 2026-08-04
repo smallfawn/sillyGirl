@@ -120,6 +120,7 @@ const nodeRuntimePreloadScript = `
       SillyGirlPluginConfig,
       form,
       pluginConfigDefaults: collectSchemaDefaults,
+      userList: async function () { return []; },
       sender: dummy,
       restart: async function () { return {}; },
       update: async function () { return {}; },
@@ -139,6 +140,7 @@ const nodeRuntimePreloadScript = `
     globalThis.SillyGirlPluginConfig = SillyGirlPluginConfig;
     globalThis.form = form;
     globalThis.pluginConfigDefaults = collectSchemaDefaults;
+    globalThis.userList = sg.userList;
     globalThis.sender = sg.sender;
     globalThis.restart = sg.restart;
     globalThis.update = sg.update;
@@ -326,6 +328,10 @@ const nodeRuntimePreloadScript = `
     return new SillyGirlPluginConfig(schema);
   }
 
+  async function userList() {
+    return await new Bucket("__plugin_users__").get("list", []);
+  }
+
   class QingLong {
     constructor(options) {
       this.id = 0;
@@ -381,6 +387,26 @@ const nodeRuntimePreloadScript = `
     async systemNotify(title, content) { const r = await this.request("PUT", "/system/notify", { title, content }); return r.data ?? r; }
   }
 
+  function smallcatAccountOpenID(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+    return String(value.openid ?? value.openId ?? value.open_id ?? "").trim();
+  }
+
+  function filterSmallcatAccountPayload(value, allowed) {
+    if (Array.isArray(value)) {
+      return value.map((item) => filterSmallcatAccountPayload(item, allowed)).filter((item) => item !== undefined);
+    }
+    if (!value || typeof value !== "object") return value;
+    const openid = smallcatAccountOpenID(value);
+    if (openid && !allowed.has(openid)) return undefined;
+    const result = {};
+    for (const [key, item] of Object.entries(value)) {
+      const filtered = filterSmallcatAccountPayload(item, allowed);
+      if (filtered !== undefined) result[key] = filtered;
+    }
+    return result;
+  }
+
   class SmallCat {
     constructor(options) {
       this.id = 0;
@@ -422,7 +448,21 @@ const nodeRuntimePreloadScript = `
     checkQr(uuid) { return this.request("GET", "/api/qr/status", undefined, { uuid }); }
     addUser(options) { return this.post("/api/accounts/add", options); }
     rescanUser(options) { return this.post("/api/accounts/rescan", options); }
-    userList() { return this.request("GET", "/api/accounts"); }
+    async authorizedUsers() {
+      return await new Bucket("__plugin_smallcat_authorized__").get("records", {
+        enforced: false,
+        scope: "smallcat:read",
+        openids: [],
+        users: [],
+      });
+    }
+    async userList() {
+      const authorization = await this.authorizedUsers();
+      const payload = await this.request("GET", "/api/accounts");
+      if (!authorization || !authorization.enforced) return payload;
+      const allowed = new Set((authorization.openids || []).map((item) => String(item || "").trim()).filter(Boolean));
+      return filterSmallcatAccountPayload(payload, allowed);
+    }
     checkUsers(options) { return this.post("/api/accounts/status", options); }
     setUserRemark(options) { return this.post("/api/accounts/remark", options); }
     setUserDisabled(options) { return this.post("/api/accounts/disable", options); }
@@ -543,6 +583,7 @@ const nodeRuntimePreloadScript = `
   sg.SillyGirlPluginConfig = sg.SillyGirlPluginConfig || SillyGirlPluginConfig;
   sg.form = sg.form || form;
   sg.pluginConfigDefaults = sg.pluginConfigDefaults || collectSchemaDefaults;
+  sg.userList = sg.userList || userList;
   globalThis.QingLong = sg.QingLong;
   globalThis.SmallCat = sg.SmallCat;
   globalThis.DaiDai = sg.DaiDai;
@@ -550,6 +591,7 @@ const nodeRuntimePreloadScript = `
   globalThis.SillyGirlPluginConfig = sg.SillyGirlPluginConfig;
   globalThis.form = sg.form;
   globalThis.pluginConfigDefaults = sg.pluginConfigDefaults;
+  globalThis.userList = sg.userList;
   globalThis.restart = sg.restart;
   globalThis.update = sg.update;
 })();

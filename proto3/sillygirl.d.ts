@@ -56,6 +56,20 @@ declare class Bucket {
     watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
     getName(): Promise<string>;
 }
+interface SillyGirlUserBindings {
+    qq: string;
+    telegram: string;
+    smallcat_openids: string[];
+}
+interface SillyGirlUser {
+    id: string;
+    username: string;
+    nickname: string;
+    disabled: boolean;
+    authorized: boolean;
+    bindings: SillyGirlUserBindings;
+}
+declare function userList(): Promise<SillyGirlUser[]>;
 interface SillyGirlSchemaNode {
     __schemaNode: boolean;
     schema: Record<string, any>;
@@ -162,6 +176,7 @@ declare class SmallCat {
     checkQr(uuid: string): Promise<any>;
     addUser(options: Record<string, any>): Promise<any>;
     rescanUser(options: Record<string, any>): Promise<any>;
+    authorizedUsers(): Promise<any>;
     userList(): Promise<any>;
     checkUsers(options: Record<string, any>): Promise<any>;
     setUserRemark(options: Record<string, any>): Promise<any>;
@@ -336,4 +351,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, version, restart, update, utils, console, };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, SillyGirlUser, SillyGirlUserBindings, userList, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, version, restart, update, utils, console, };

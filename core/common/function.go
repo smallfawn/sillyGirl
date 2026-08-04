@@ -22,6 +22,7 @@ type Function struct {
 	Description    string                   `json:"desc"`
 	Rule           string                   `json:"rule,omitempty"`
 	Public         bool                     `json:"public"`
+	Open           bool                     `json:"open"`
 	Icon           string                   `json:"icon"`
 	Version        string                   `json:"version"`
 	CurrentVersion string                   `json:"current_version,omitempty"`
@@ -36,16 +37,18 @@ type Function struct {
 	OnStart        bool                     `json:"on_start"`
 	Web            bool                     `json:"web"`
 	PluginPublisher
-	Running      bool        `json:"running"`
-	Downloads    int         `json:"downloads"`
-	HasForm      bool        `json:"has_form"`
-	Carry        bool        `json:"carry"`
-	Messages     interface{} `json:"messages"`
-	Classes      []string    `json:"-"`
-	Dependencies []string    `json:"dependencies,omitempty"`
-	Debug        bool        `json:"debug"`
-	Path         string      `json:"-"`
-	Reload       func()      `json:"-"`
+	Running          bool        `json:"running"`
+	Downloads        int         `json:"downloads"`
+	HasForm          bool        `json:"has_form"`
+	ConfigRegistered bool        `json:"config_registered"`
+	UsesSmallCat     bool        `json:"uses_smallcat"`
+	Carry            bool        `json:"carry"`
+	Messages         interface{} `json:"messages"`
+	Classes          []string    `json:"-"`
+	Dependencies     []string    `json:"dependencies,omitempty"`
+	Debug            bool        `json:"debug"`
+	Path             string      `json:"-"`
+	Reload           func()      `json:"-"`
 }
 
 type PluginPublisher struct {

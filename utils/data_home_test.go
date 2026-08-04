@@ -22,3 +22,13 @@ func TestGetDataHomeHonorsExplicitPath(t *testing.T) {
 		t.Fatalf("GetDataHome() = %q, want %q", got, want)
 	}
 }
+
+func TestKillPeerIgnoresCurrentProcessPID(t *testing.T) {
+	t.Setenv("SILLYGIRL_DATA_PATH", t.TempDir())
+	if err := os.WriteFile(GetPidFile(), []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := KillPeer(); err != nil {
+		t.Fatalf("KillPeer returned an error for the current PID: %v", err)
+	}
+}
