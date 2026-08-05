@@ -65,11 +65,25 @@ type OpenPlugin = {
   smallcat_account_count?: number;
 };
 
+type UserAnnouncement = {
+  enabled?: boolean;
+  content?: string;
+  format?: 'text' | 'markdown' | 'html' | string;
+};
+
+type UserProfile = {
+  user: PublicUser;
+  bindings: Bindings;
+  smallcat_panels: SmallcatPanel[];
+  announcement?: UserAnnouncement;
+};
+
 const tokenKey = 'sillygirl_user_token';
 const token = ref(localStorage.getItem(tokenKey) || '');
 const loading = ref(true);
 const user = ref<PublicUser | null>(null);
 const bindings = reactive<Bindings>({});
+const announcement = reactive<UserAnnouncement>({ enabled: false, content: '' });
 const panels = ref<SmallcatPanel[]>([]);
 const openPlugins = ref<OpenPlugin[]>([]);
 const authorizingPluginIDs = ref<Set<string>>(new Set());
@@ -103,6 +117,72 @@ const qrTypeOptions = [
 
 const selectedPanelText = computed(() => `编号 ${selectedPanel.value || 1}`);
 const smallcatOpenids = computed(() => normalizeOpenids(bindings));
+const announcementVisible = computed(() => !!announcement.enabled && !!String(announcement.content || '').trim());
+const announcementHTML = computed(() => renderAnnouncement(announcement.content || '', announcement.format || 'text'));
+
+function escapeHTML(value: string) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function inlineMarkdown(value: string) {
+  return escapeHTML(value)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+}
+
+function markdownToHTML(value: string) {
+  const lines = String(value || '').replace(/\r\n/g, '\n').split('\n');
+  const html: string[] = [];
+  let inList = false;
+  const closeList = () => {
+    if (inList) {
+      html.push('</ul>');
+      inList = false;
+    }
+  };
+  for (const line of lines) {
+    const text = line.trim();
+    if (!text) {
+      closeList();
+      html.push('<br>');
+      continue;
+    }
+    const heading = text.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    const item = text.match(/^[-*]\s+(.+)$/);
+    if (item) {
+      if (!inList) {
+        html.push('<ul>');
+        inList = true;
+      }
+      html.push(`<li>${inlineMarkdown(item[1])}</li>`);
+      continue;
+    }
+    closeList();
+    html.push(`<p>${inlineMarkdown(text)}</p>`);
+  }
+  closeList();
+  return html.join('');
+}
+
+function renderAnnouncement(content: string, format: string) {
+  const mode = String(format || 'text').toLowerCase();
+  if (mode === 'html') return String(content || '');
+  if (mode === 'markdown' || mode === 'md') return markdownToHTML(content);
+  return escapeHTML(content).replace(/\r?\n/g, '<br>');
+}
 
 function pluginIconIsImage(plugin: OpenPlugin) {
   const icon = String(plugin.icon || '').trim();
@@ -162,9 +242,10 @@ async function requestJSON<T>(url: string, options: RequestInit = {}): Promise<T
   return payload.data;
 }
 
-function fillProfile(data: { user: PublicUser; bindings: Bindings; smallcat_panels: SmallcatPanel[] }) {
+function fillProfile(data: UserProfile) {
   user.value = data.user;
   Object.assign(bindings, data.bindings || {});
+  Object.assign(announcement, data.announcement || { enabled: false, content: '' });
   bindForm.qq = bindings.qq || '';
   bindForm.telegram = bindings.telegram || '';
   panels.value = data.smallcat_panels || [];
@@ -174,7 +255,7 @@ function fillProfile(data: { user: PublicUser; bindings: Bindings; smallcat_pane
 async function loadProfile() {
   loading.value = true;
   try {
-    const data = await requestJSON<{ user: PublicUser; bindings: Bindings; smallcat_panels: SmallcatPanel[] }>('/api/user/profile');
+    const data = await requestJSON<UserProfile>('/api/user/profile');
     fillProfile(data);
   } catch (error) {
     localStorage.removeItem(tokenKey);
@@ -356,6 +437,18 @@ onMounted(() => {
           </Card>
 
           <template v-if="user">
+            <Alert
+              v-if="announcementVisible"
+              class="user-announcement"
+              type="info"
+              show-icon
+              message="公告"
+            >
+              <template #description>
+                <div class="user-announcement-content" v-html="announcementHTML"></div>
+              </template>
+            </Alert>
+
             <section class="user-summary">
               <Card :bordered="false">
                 <Space align="center">
@@ -581,6 +674,48 @@ onMounted(() => {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
   padding: 18px 0 36px;
+}
+
+.user-announcement {
+  margin-bottom: 16px;
+}
+
+.user-announcement :deep(.ant-alert-description) {
+  overflow-wrap: anywhere;
+}
+
+.user-announcement-content :deep(p) {
+  margin: 0 0 8px;
+}
+
+.user-announcement-content :deep(p:last-child),
+.user-announcement-content :deep(ul:last-child),
+.user-announcement-content :deep(h1:last-child),
+.user-announcement-content :deep(h2:last-child),
+.user-announcement-content :deep(h3:last-child),
+.user-announcement-content :deep(h4:last-child) {
+  margin-bottom: 0;
+}
+
+.user-announcement-content :deep(ul) {
+  padding-left: 20px;
+  margin: 0 0 8px;
+}
+
+.user-announcement-content :deep(h1),
+.user-announcement-content :deep(h2),
+.user-announcement-content :deep(h3),
+.user-announcement-content :deep(h4) {
+  margin: 0 0 8px;
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.user-announcement-content :deep(code) {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #e0f2fe;
+  color: #075985;
 }
 
 .user-summary {

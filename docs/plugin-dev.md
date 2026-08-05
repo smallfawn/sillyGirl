@@ -74,6 +74,8 @@ asyncio.run(main())
 
 Python 插件和 NodeJS 插件共用同一套元数据、规则匹配、配置表单、定时任务和插件市场逻辑。差别主要在运行时和 SDK 调用方式。
 
+插件市场支持直接新增本地非公开插件：点击插件市场工具栏“新增插件”会打开源码编辑器，保存时必须包含新式 `[title: xxx]`、`[name: 文件名]`、`[description: xxx]`、`[version: vx.y.z]`，并至少包含 `[rule: xxx]` 或 `[cron: xxx]`/`[on_start: true]`/`[web: true]` 之一；系统会强制写入/修正为 `[public: false]`。已安装插件卡片图标也可打开同款源码编辑器，支持格式化、保存和删除。旧式 `@title` 注释仍兼容。
+
 ### 运行环境
 
 | 项目 | 说明 |
@@ -81,7 +83,7 @@ Python 插件和 NodeJS 插件共用同一套元数据、规则匹配、配置�
 | Python 版本 | 固定使用 Python 3.12。Docker 镜像已内置；本地 `go run` 时需要机器上能执行 `python3.12`，或配置 `SILLYGIRL_PYTHON_BIN` |
 | SDK 路径 | 程序会把 `sillygirl.py`、`srpc_pb2.py`、`srpc_pb2_grpc.py` 加入 `PYTHONPATH`，插件直接 `from sillygirl import ...` |
 | gRPC 依赖 | 运行时自动准备 `grpcio==1.83.0`、`protobuf==7.35.1` |
-| 第三方依赖 | 通过 `@depe ["包名"]` 声明；安装、卸载和查看在 Admin 面板「依赖管理」里选择 Python |
+| 第三方依赖 | 通过新式 `[depe: ["包名"]]` 声明；安装、卸载和查看在 Admin 面板「依赖管理」里选择 Python；旧式 `@depe` 仍兼容 |
 | 依赖管理 | Python 依赖由 pipx 管理，统一安装到 `/data/plugins/python_packages`，所有 Python 插件共享 |
 | 文件结构 | 推荐 `/data/plugins/插件名.py` 扁平文件；插件市场按索引 `path` 写入同名 `.py` 文件 |
 
@@ -228,29 +230,27 @@ async def main():
 
 ### 依赖声明
 
-第三方 Python 包写在 `@depe`，格式是 JSON 数组：
+第三方 Python 包写在新式 `[depe: ...]`，值是 JSON 数组：
 
 ```python
 """
-* @title HTTP 示例
-* @rule raw ^请求测试$
-* @depe ["requests"]
+# [title: HTTP 示例]
+# [rule: raw ^请求测试$]
+# [depe: ["requests"]]
 """
 ```
 
 支持版本约束：
 
 ```python
-"""
-* @depe ["requests==2.32.0", "beautifulsoup4"]
-"""
+# [depe: ["requests==2.32.0", "beautifulsoup4"]]
 ```
 
 注意：
 
-- `os`、`sys`、`json`、`asyncio`、`time`、`pathlib` 等标准库不要写进 `@depe`。
+- `os`、`sys`、`json`、`asyncio`、`time`、`pathlib` 等标准库不要写进 `[depe: ...]`。
 - Python 依赖是共享安装，卸载依赖前确认没有其他插件还在使用。
-- 插件仓库的索引 `dependencies` 字段由插件注释里的 `@depe` 生成；没有索引时，SillyGirl 会保底读取脚本注释。
+- 插件仓库的索引 `dependencies` 字段由插件注释里的新式 `[depe: ...]` 生成；没有索引时，SillyGirl 会保底读取脚本注释，也兼容旧式 `@depe ...`。
 
 ### Python 定时任务
 
@@ -357,11 +357,67 @@ if (content === "你好") {
 | `version` | string | 否 | 版本号，如 `v1.0.1` |
 | `author` | string | 否 | 作者名 |
 | `desc` | string | 否 | 插件描述 |
-| `depe` | JSON array | 否 | 插件依赖声明，例如 `@depe ["ipp"]`；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
+| `depe` | JSON array | 否 | 插件依赖声明，例如 `[depe: ["ipp"]]`；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装；旧式 `@depe` 兼容 |
 | `icon` | string | 否 | 插件图标 URL，未填写时使用默认苹果图标 |
 | `public` | boolean | 否 | `true` 时允许发布到插件市场 |
 | `disable` | boolean | 否 | `true` 时禁用插件 |
 | `admin` | boolean | 否 | `true` 时仅管理员可触发 |
+
+
+### 新式方括号注释
+
+新式注释使用 `[key: value]` 元数据。NodeJS 用 `// [title: ...]`，Python 用 `# [title: ...]`；`//[title: ...]` / `#[title: ...]` 不带空格也能解析。
+
+NodeJS 新式写法：
+
+```js
+// [title: 新式插件]
+// [name: newPlugin]
+// [description: 新式说明]
+// [rule: ^新式命令$]
+// [version: v1.0.0]
+// [author: admin]
+// [class: 工具]
+// [depe: ["axios"]]
+```
+
+Python 新式写法：
+
+```python
+# [title: 新式Python插件]
+# [name: newPythonPlugin]
+# [description: 新式说明]
+# [rule: ^新式命令$]
+# [cron: 12 8 * * *]
+# [version: v1.0.0]
+# [depe: ["requests"]]
+```
+
+兼容字段包括：`title`、`name`、`description`（等同 `desc`）、`rule`、`cron`、`admin`、`priority`、`version`、`author`、`class`、`public`、`icon`、`module`、`carry`、`on_start`、`web`、`smallcat`、`depe` 等。新插件建议使用 `[title: ...]` / `[rule: ...]` / `[depe: ...]` 形式。
+
+### 旧式 `@` 注释兼容
+
+旧式 `@title ...` / `@rule ...` / `@depe ...` 仍兼容读取，但新插件不再推荐使用。
+
+```js
+/**
+ * @title 旧式插件
+ * @desc 旧式说明
+ * @rule ^旧式命令$
+ * @depe ["axios"]
+ */
+```
+
+```python
+r"""
+@title 旧式Python插件
+@desc 旧式说明
+@rule raw ^旧式命令$
+@depe ["requests"]
+"""
+```
+
+`[param: {...}]` 已废弃且不再解析；插件配置必须使用 `form`：NodeJS 顶层 `new form({...})`，Python 顶层 `form({...})`。
 
 ### 元数据示例
 
@@ -381,7 +437,7 @@ if (content === "你好") {
 
 ### Web 服务脚本
 
-`@web` 只支持 `true` 或 `false`。写 `@web true` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻脚本进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本自己决定。NodeJS 插件可以使用内置 `http` 模块或通过 `@depe` 自行声明 Web 框架；Python 插件可以使用 Python HTTP 框架或标准库自行监听。
+`[web: true]` / 旧式 `@web true` 只支持 `true` 或 `false`。写 `[web: true]` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻脚本进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本自己决定。NodeJS 插件可以使用内置 `http` 模块或通过 `[depe: ...]` 自行声明 Web 框架；Python 插件可以使用 Python HTTP 框架或标准库自行监听。旧式 `@web` / `@depe` 仍兼容。
 
 ```js
 /**
@@ -1267,3 +1323,6 @@ RegistFuncs["utils"] = {
   isWeekend: (t) => t.Weekday() === 0 || t.Weekday() === 6,
 };
 ```
+
+
+迁移旧插件时不要依赖外部兼容脚本；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`container`、`utils`、`form` 等现有能力。

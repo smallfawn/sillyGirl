@@ -88,10 +88,10 @@ Python 插件使用 Python 3.12 运行，SDK 通过 `from sillygirl import ...` 
 
 ```python
 """
-* @title PythonHello
-* @rule raw ^py你好$
-* @version v1.0.1
-* @author custom
+@title PythonHello
+@rule raw ^py你好$
+@version v1.0.1
+@author custom
 """
 
 import asyncio
@@ -114,16 +114,16 @@ Python 插件要点：
 | SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, container, form, utils` |
 | 异步调用 | Python SDK 方法都是异步方法，`s.reply()`、`Bucket.get()` 等都要 `await` |
 | 运行时依赖 | 内置 `grpcio==1.83.0`、`protobuf==7.35.1`，用于和 Go 主程序 gRPC 通信 |
-| 第三方依赖 | 在注释中写 `@depe ["requests"]`，后台「依赖管理」选择 Python 后可安装/卸载 |
+| 第三方依赖 | 新式注释写 `@depe ["requests"]`，后台「依赖管理」选择 Python 后可安装/卸载；旧式方括号 `depe` 仍兼容 |
 | 依赖位置 | Python 依赖由 pipx 管理，统一放在 `/data/plugins/python_packages` 下面供插件共享 |
 
 Python 使用存储和配置：
 
 ```python
 """
-* @title Python配置示例
-* @rule raw ^py配置$
-* @depe ["requests"]
+@title Python配置示例
+@rule raw ^py配置$
+@depe ["requests"]
 """
 
 import asyncio
@@ -147,40 +147,62 @@ async def main():
 asyncio.run(main())
 ```
 
+
+新式注释使用 `@` 元数据，可读取元数据和依赖声明，但不生成配置表单：
+
+```js
+/**
+ * @title 新式Node插件
+ * @description 说明
+ * @rule ^命令$
+ * @depe ["axios"]
+ */
+```
+
+```python
+"""
+@title 新式Python插件
+@description 说明
+@rule ^命令$
+@depe ["requests"]
+"""
+```
+
+`[param: {...}]` 已废弃；配置统一写 `form`，例如 NodeJS 顶层 `new form({...})`、Python 顶层 `form({...})`。
 元数据必填规则：
 
 | 使用场景 | 必填参数 | 说明 |
 |------|------|------|
 | 普通消息插件 | `@title`、`@rule` | `@rule` 用来匹配消息，不写规则就不会被普通消息触发 |
-| 搬运处理脚本 | `@title`、`@carry` | 搬运页的“处理脚本”只展示带 `@carry` 或 `@carry true` 的插件 |
+| 搬运处理脚本 | `@title`、`@carry` | 搬运页的“处理脚本”只展示带 `@carry true` 的插件 |
 | 启动脚本 | `@title`、`@on_start true` | 程序启动时执行一次 |
 | Web 服务脚本 | `@title`、`@web true` | 程序启动时常驻运行，脚本自己监听端口 |
-| 脚本定时任务 | `@title`、`@cron 表达式` | 写了 `@cron` 的脚本会直接显示在 Admin 面板「定时任务」 |
+| 脚本定时任务 | `@title`、`@cron 表达式` | 写了 `@cron ...` 的脚本会直接显示在 Admin 面板「定时任务」 |
 | 纯模块/工具脚本 | `@title`、`@module true` | 只作为模块或工具文件，不参与普通消息匹配 |
 
 元数据参数说明：
 
 | 参数 | 是否必填 | 说明 |
 |------|------|------|
-| `@title 名称` | 建议必填 | 插件标题，显示在管理面板和插件市场 |
+| `@title 名称` | 建议必填 | 新式插件标题，显示在管理面板和插件市场；旧式方括号注释仍兼容 |
 | `@rule 规则` | 普通消息插件必填 | 消息匹配规则，可写多条；支持 `raw ^正则$` 和占位参数 `[名称]` |
 | `@priority 数字` | 非必填 | 匹配优先级，数字越大越优先，默认 `0` |
 | `@admin true/false` | 非必填 | 是否仅管理员可触发，默认 `false` |
 | `@version 版本号` | 非必填 | 插件版本，默认 `v1.0.1` |
 | `@author 作者` | 非必填 | 作者名 |
-| `@desc 描述` | 非必填 | 插件说明，显示在后台或插件市场 |
-| `@depe ["依赖名"]` | 非必填 | 插件依赖声明；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
+| `@description 描述` | 非必填 | 插件说明，显示在后台或插件市场；`desc` 兼容 |
+| `@depe ["依赖名"]` | 非必填 | 新式插件依赖声明；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装；兼容旧式方括号 `depe` |
 | `@icon URL` | 非必填 | 插件图标 URL，未填写时使用默认苹果图标 |
 | `@public true/false` | 非必填 | 是否允许公开到插件市场，默认 `false` |
 | `@origin 来源` | 非必填 | 插件来源标记，默认 `自定义` |
 | `@class 标签` | 非必填 | 插件分类标签，可写多个 |
 | `@module true/false` | 非必填 | 是否作为模块插件；为 `true` 时不参与普通消息匹配 |
-| `@carry` 或 `@carry true/false` | 搬运脚本必填 | 是否可作为搬运处理脚本；写 `@carry` 等同于 `@carry true`，默认 `false` |
+| `@carry true/false` | 搬运脚本必填 | 是否可作为搬运处理脚本，默认 `false` |
 | `@cron 表达式` | 脚本定时任务必填 | 声明脚本定时任务，例如 `@cron 0 * * * *`；只支持直接写 Cron 表达式 |
 | `@on_start true/false` | 启动脚本必填 | 是否在程序启动时执行一次 |
 | `@web true/false` | Web 服务脚本必填 | 是否作为 Web 常驻脚本启动；端口和路由由脚本自己处理 |
 
-如果脚本已经写了 `@cron`，它会自动展示到「定时任务」列表；如果在「定时任务」里选择 `node 插件名.js` 或 `python 插件名.py` 创建任务，系统会把 Cron 表达式写回该脚本头部注释，而不是额外创建一份重复任务。
+如果脚本已经写了 `@cron ...`，它会自动展示到「定时任务」列表；如果在「定时任务」里选择 `node 插件名.js` 或 `python 插件名.py` 创建任务，系统会把 Cron 表达式写回该脚本头部注释，而不是额外创建一份重复任务。
 
 规则支持占位捕获：
 
@@ -488,11 +510,12 @@ task.remove(ret.id);
 
 | 功能 | 说明 |
 |------|------|
-| 管理面板 | Vue 管理后台，支持脚本、插件市场、配置、存储、任务等管理 |
-| 脚本插件 | 支持 JS/Python 代码高亮、文件管理和在线编辑；JS 支持格式化 |
-| 插件市场 | 支持管理插件源，从 GitHub 仓库 `plugins/` 目录导入插件 |
+| 管理面板 | Vue 管理后台，支持插件市场、配置、存储、任务等管理 |
+| 插件市场 | 支持管理插件源、从 GitHub 仓库 `plugins/` 目录导入插件；点击卡片图标打开源码编辑器，点击插件名称查看介绍，也支持新增本地非公开插件 |
 | 插件配置 | 支持 `new form({ key: form.string().title("标题").default("") })` 链式配置表单 |
-| 依赖管理 | 支持按 NodeJS/Python 筛选；NodeJS 使用 pnpm 管理共享依赖，Python 使用 pipx 管理共享依赖；依赖从插件注释 `@depe ["包名"]` 读取 |
+| 依赖管理 | 支持按 NodeJS/Python 筛选；NodeJS 使用 pnpm 管理共享依赖，Python 使用 pipx 管理共享依赖；依赖从新式 `@depe ...` 读取，并兼容旧式方括号 `//[depe: ...]` / `#[depe: ...]` |
+| 普通用户公告 | 基础设置可配置公告开关、格式和内容，开启后显示在 `/user` 页面顶部，支持纯文本、Markdown 和 HTML |
+| 网络与镜像 | 基础设置可维护 GitHub 加速、pnpm 镜像和 pipx 源，支持默认列表和自定义地址增删 |
 | NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
 | Python 运行 | `/data/plugins/插件名.py` 走 Python 3.12 运行时，Docker 镜像已内置 Python、pipx、`grpcio==1.83.0` 和 `protobuf==7.35.1` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
@@ -682,3 +705,5 @@ SillyGirl 侧配置：
 ## 许可
 
 [MIT](LICENSE)
+
+

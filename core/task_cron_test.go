@@ -27,33 +27,33 @@ func TestParseCronMetaValue(t *testing.T) {
 }
 
 func TestUpsertPluginCronAnnotation(t *testing.T) {
-	script := "/**\n * @title Demo\n */\nconsole.log('ok');\n"
+	script := "// [title: Demo]\n// [name: demo]\nconsole.log('ok');\n"
 	updated := upsertPluginCronAnnotation(script, "0 * * * *", NODE)
-	if !strings.Contains(updated, " * @cron 0 * * * *\n */") {
+	if !strings.Contains(updated, "// [cron: 0 * * * *]") {
 		t.Fatalf("cron line was not inserted into header:\n%s", updated)
 	}
 
 	updated = upsertPluginCronAnnotation(updated, "*/5 * * * *", NODE)
-	if strings.Count(updated, "@cron") != 1 || !strings.Contains(updated, "@cron */5 * * * *") {
+	if strings.Count(updated, "[cron:") != 1 || !strings.Contains(updated, "// [cron: */5 * * * *]") {
 		t.Fatalf("cron line was not updated cleanly:\n%s", updated)
 	}
 
 	updated = upsertPluginCronAnnotation(updated, "", NODE)
-	if strings.Contains(updated, "@cron") {
+	if strings.Contains(updated, "[cron:") {
 		t.Fatalf("cron line was not removed:\n%s", updated)
 	}
 }
 
 func TestUpsertPluginCronAnnotationPython(t *testing.T) {
-	script := "\"\"\"\n* @title Demo\n\"\"\"\nprint('ok')\n"
+	script := "# [title: Demo]\n# [name: demo]\nprint('ok')\n"
 	updated := upsertPluginCronAnnotation(script, "0 * * * *", PYTHON)
-	if !strings.Contains(updated, " * @cron 0 * * * *\n\"\"\"") {
+	if !strings.Contains(updated, "# [cron: 0 * * * *]") {
 		t.Fatalf("cron line was not inserted into python header:\n%s", updated)
 	}
 
 	noHeader := "print('ok')\n"
 	updated = upsertPluginCronAnnotation(noHeader, "0 * * * *", PYTHON)
-	if !strings.HasPrefix(updated, "\"\"\"\n * @cron 0 * * * *\n\"\"\"\n\n") {
+	if !strings.HasPrefix(updated, "# [cron: 0 * * * *]\n\n") {
 		t.Fatalf("python header was not created:\n%s", updated)
 	}
 }

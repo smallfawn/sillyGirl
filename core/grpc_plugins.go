@@ -856,12 +856,13 @@ export { Adapter, Bucket, container, form, sender, utils, console, };
 `
 
 func defaultScript(title string) string {
-	return `/**
-* @title ` + title + `
-* @desc 🐒这个人很懒什么都没有留下
-* @author ` + sillyGirl.GetString("author", "佚名") + `
-* @version v1.0.1
-*/
+	name := safePluginDirName(title)
+	return `// [title: ` + title + `]
+// [name: ` + name + `]
+// [description: 🐒这个人很懒什么都没有留下]
+// [author: ` + sillyGirl.GetString("author", "佚名") + `]
+// [version: v1.0.1]
+// [public: false]
 
 const {
   sender: s,
@@ -874,12 +875,13 @@ const {
 }
 
 func defaultPythonScript(title string) string {
-	return `"""
-* @title ` + title + `
-* @desc 这个人很懒什么都没有留下
-* @author ` + sillyGirl.GetString("author", "佚名") + `
-* @version v1.0.1
-"""
+	name := safePluginDirName(title)
+	return `# [title: ` + title + `]
+# [name: ` + name + `]
+# [description: 这个人很懒什么都没有留下]
+# [author: ` + sillyGirl.GetString("author", "佚名") + `]
+# [version: v1.0.1]
+# [public: false]
 
 import asyncio
 from sillygirl import sender as s

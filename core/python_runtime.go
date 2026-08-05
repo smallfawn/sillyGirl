@@ -16,7 +16,7 @@ import (
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
-const pythonRequiredVersion = "3.12"
+const pythonMinimumVersion = "3.12"
 
 // pythonConfigPreloadScript mirrors the Node config-registration preload: real
 // modules are preferred, while imports that are still absent during the first
@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import importlib.abc
 import importlib.util
+import json
+import os
 import runpy
 import sys
 import types
@@ -98,6 +100,181 @@ class _SillyGirlMissingImportFinder(importlib.abc.MetaPathFinder, importlib.abc.
 # The finder runs only after the normal import machinery found no module.
 sys.meta_path.append(_SillyGirlMissingImportFinder())
 sys.dont_write_bytecode = True
+
+
+def _is_schema_node(value):
+    return bool(getattr(value, "__schemaNode", False) and getattr(value, "schema", None) is not None)
+
+
+def _normalize_form_field(value, path="field"):
+    if _is_schema_node(value):
+        return value.schema
+    raise TypeError(f"form schema {path} must use form.string()/form.boolean()/form.select() helpers")
+
+
+def _normalize_config_schema(fields):
+    if not isinstance(fields, dict) or _is_schema_node(fields):
+        raise TypeError('new form(...) only accepts an object like {"token": form.string().title("Token")}')
+    return {
+        "type": "object",
+        "properties": {
+            key: _normalize_form_field(value, key)
+            for key, value in fields.items()
+            if not str(key).startswith("_")
+        },
+    }
+
+
+def _schema_defaults(schema):
+    schema = schema.schema if _is_schema_node(schema) else (schema or {})
+    if not isinstance(schema, dict):
+        return None
+    if "default" in schema:
+        return schema["default"]
+    if schema.get("type") == "object" or schema.get("properties"):
+        result = {}
+        for key, value in (schema.get("properties") or {}).items():
+            item = _schema_defaults(value)
+            if item is not None:
+                result[key] = item
+        return result
+    if schema.get("type") == "array":
+        return []
+    return None
+
+
+class _SchemaNode:
+    def __init__(self, node_type, extra=None):
+        setattr(self, "__schemaNode", True)
+        self.schema = {"type": node_type}
+        self.schema.update(extra or {})
+
+    def title(self, value):
+        self.schema["title"] = value
+        return self
+
+    def description(self, value):
+        self.schema["description"] = value
+        return self
+
+    def default(self, value):
+        self.schema["default"] = value
+        return self
+
+    def options(self, value):
+        return _apply_schema_options(self, value)
+
+    def required(self, value):
+        self.schema["required"] = value
+        return self
+
+    def format(self, value):
+        self.schema["format"] = value
+        return self
+
+    def min(self, value):
+        self.schema["minimum"] = value
+        return self
+
+    def max(self, value):
+        self.schema["maximum"] = value
+        return self
+
+    def minLength(self, value):
+        self.schema["minLength"] = value
+        return self
+
+    def maxLength(self, value):
+        self.schema["maxLength"] = value
+        return self
+
+    def pattern(self, value):
+        self.schema["pattern"] = value
+        return self
+
+    def widget(self, value):
+        self.schema["ui:widget"] = value
+        return self
+
+    def toJSON(self):
+        return self.schema
+
+
+def _apply_schema_options(node, options):
+    if isinstance(options, list):
+        values = []
+        names = []
+        for item in options:
+            if isinstance(item, dict):
+                value = item["value"] if "value" in item else (item.get("id") or item.get("key") or item.get("name") or item.get("label"))
+                values.append(value)
+                names.append(str(item.get("label") or item.get("name") or value))
+            else:
+                values.append(item)
+                names.append(str(item))
+        node.schema["enum"] = values
+        if any(name != str(values[index]) for index, name in enumerate(names)):
+            node.schema["enumNames"] = names
+    elif isinstance(options, dict):
+        values = list(options.keys())
+        node.schema["enum"] = values
+        node.schema["enumNames"] = [str(options[key]) for key in values]
+    return node
+
+
+class _Form:
+    def __call__(self, schema):
+        json_schema = _normalize_config_schema(schema)
+        target = os.environ.get("SILLYGIRL_CONFIG_SCHEMA_FILE", "")
+        data = json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
+        if target:
+            with open(target, "w", encoding="utf-8") as fp:
+                fp.write(data)
+        else:
+            print("__SILLYGIRL_CONFIG_SCHEMA__" + data)
+        raise SystemExit(0)
+
+    def string(self): return _SchemaNode("string")
+    def number(self): return _SchemaNode("number")
+    def integer(self): return _SchemaNode("integer")
+    def boolean(self): return _SchemaNode("boolean")
+    def array(self, item=None): return _SchemaNode("array", {} if item is None else {"items": _normalize_form_field(item, "array item")})
+    def object(self, props=None): return _SchemaNode("object", {"properties": {key: _normalize_form_field(value, key) for key, value in (props or {}).items()}})
+    def select(self, options): return _apply_schema_options(_SchemaNode("string"), options)
+    def defaults(self, fields): return _schema_defaults(_normalize_config_schema(fields))
+
+
+class _Dummy:
+    def __init__(self, *_args, **_kwargs):
+        pass
+    def __getattr__(self, _name):
+        return self
+    def __call__(self, *_args, **_kwargs):
+        return self
+    def __getitem__(self, _key):
+        return ""
+    def __setitem__(self, _key, _value):
+        return None
+    def __iter__(self):
+        return iter(())
+    def __await__(self):
+        async def _done():
+            return self
+        return _done().__await__()
+
+
+_dummy = _Dummy()
+_form = _Form()
+_sillygirl = types.ModuleType("sillygirl")
+_sillygirl.Adapter = _Dummy
+_sillygirl.Bucket = _Dummy
+_sillygirl.Sender = _Dummy
+_sillygirl.form = _form
+_sillygirl.sender = _dummy
+_sillygirl.container = _dummy
+_sillygirl.utils = _dummy
+_sillygirl.console = _dummy
+sys.modules["sillygirl"] = _sillygirl
 
 if len(sys.argv) != 2:
     raise SystemExit("usage: sillygirl-config-preload.py PLUGIN_PATH")
@@ -201,11 +378,11 @@ func resolvePythonCommand() (string, []string, error) {
 		if bin == "" {
 			return "", nil, errors.New("SILLYGIRL_PYTHON_BIN 为空")
 		}
-		if pythonCommandVersion(bin, args) == pythonRequiredVersion {
+		if isSupportedPythonVersion(pythonCommandVersion(bin, args)) {
 			cachePythonCommand(bin, args)
 			return bin, args, nil
 		}
-		return "", nil, fmt.Errorf("SILLYGIRL_PYTHON_BIN 必须指向 Python %s", pythonRequiredVersion)
+		return "", nil, fmt.Errorf("SILLYGIRL_PYTHON_BIN 必须指向 Python %s 或更高版本", pythonMinimumVersion)
 	}
 
 	candidates := [][]string{
@@ -220,12 +397,12 @@ func resolvePythonCommand() (string, []string, error) {
 		if _, err := exec.LookPath(bin); err != nil {
 			continue
 		}
-		if pythonCommandVersion(bin, args) == pythonRequiredVersion {
+		if isSupportedPythonVersion(pythonCommandVersion(bin, args)) {
 			cachePythonCommand(bin, args)
 			return bin, args, nil
 		}
 	}
-	return "", nil, errors.New("未找到 Python 3.12，请安装 Python 3.12 或使用 Docker 镜像内置运行时")
+	return "", nil, fmt.Errorf("未找到 Python %s 或更高版本，请安装 Python 或使用 Docker 镜像内置运行时", pythonMinimumVersion)
 }
 
 func cachePythonCommand(bin string, args []string) {
@@ -252,6 +429,22 @@ func pythonCommandVersion(bin string, args []string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func isSupportedPythonVersion(version string) bool {
+	parts := strings.Split(strings.TrimSpace(version), ".")
+	if len(parts) < 2 {
+		return false
+	}
+	minParts := strings.Split(pythonMinimumVersion, ".")
+	major := utils.Int(parts[0])
+	minor := utils.Int(parts[1])
+	minMajor := utils.Int(minParts[0])
+	minMinor := utils.Int(minParts[1])
+	if major != minMajor {
+		return major > minMajor
+	}
+	return minor >= minMinor
 }
 
 func pythonPluginPathEnv(runtimePath string) string {
@@ -317,9 +510,6 @@ func registerPythonPluginConfigSchema(path, uuid string) error {
 	}
 	preload, err := ensurePythonConfigPreload(pythonPath)
 	if err != nil {
-		return err
-	}
-	if err := ensurePipxRuntimeEnv(); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp("", "sillygirl-python-plugin-schema-*.json")

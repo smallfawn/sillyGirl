@@ -1238,7 +1238,6 @@ class DaiDai {
         return this.request("POST", "/notifications/send", { title, content });
     }
 }
-globalThis.form = form;
 class Adapter {
     platform;
     bot_id;

@@ -75,6 +75,24 @@ type pipxCommand struct {
 
 const defaultPnpmRegistry = "https://registry.npmmirror.com"
 const defaultPipxRegistry = "https://pypi.tuna.tsinghua.edu.cn/simple"
+const pnpmRegistryOptionsKey = "pnpm_registry_options"
+const pipxRegistryOptionsKey = "pipx_registry_options"
+
+var builtinPnpmRegistries = []string{
+	defaultPnpmRegistry,
+	"https://registry.npmjs.org",
+	"https://registry.npm.taobao.org",
+	"https://mirrors.cloud.tencent.com/npm",
+}
+
+var builtinPipxRegistries = []string{
+	defaultPipxRegistry,
+	"https://mirrors.aliyun.com/pypi/simple",
+	"https://pypi.doubanio.com/simple",
+	"https://mirrors.ustc.edu.cn/pypi/simple",
+	"https://pypi.org/simple",
+}
+
 const pythonPipxRuntimePackage = "sillygirl-python-runtime"
 const pythonGrpcRuntimeDependency = "grpcio==1.83.0"
 const pythonProtobufRuntimeDependency = "protobuf==7.35.1"
@@ -87,7 +105,7 @@ var nodeSillygirlRuntimeDependencies = map[string]string{
 var (
 	jsDocBlockPattern        = regexp.MustCompile(`(?s)/\*\*(.*?)\*/`)
 	pythonDocBlockPattern    = regexp.MustCompile(`(?s)(?:"""|''')(.*?)(?:"""|''')`)
-	dependencyMetaPattern    = regexp.MustCompile(`(?m)^\s*\*\s*@depe\s+(.+?)\s*$`)
+	dependencyMetaPattern    = regexp.MustCompile(`(?m)^\s*(?:\*\s*)?@depe\s+(.+?)\s*$`)
 	pythonDependencyPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
 	pythonPackageArgPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~*+]*$`)
 	nodePackageArgPattern    = regexp.MustCompile(`^[A-Za-z0-9@._~/-]+$`)
@@ -135,6 +153,8 @@ func init() {
 
 	GinApi(GET, "/api/admin/plugin/dependency/registry", RequireAuth, handlePluginDependencyRegistry)
 	GinApi(PUT, "/api/admin/plugin/dependency/registry", RequireAuth, handleSetPluginDependencyRegistry)
+	GinApi(POST, "/api/admin/plugin/dependency/registry", RequireAuth, handleAddPluginDependencyRegistryOption)
+	GinApi(DELETE, "/api/admin/plugin/dependency/registry", RequireAuth, handleRemovePluginDependencyRegistryOption)
 
 	GinApi(PUT, "/api/admin/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
 		req := struct {
@@ -154,8 +174,14 @@ func init() {
 	})
 
 	GinApi(GET, "/api/admin/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
-		ApiOK(ctx, map[string]string{"registry": pnpmRegistry()})
+		registry := pnpmRegistry()
+		ApiOK(ctx, map[string]interface{}{
+			"registry": registry,
+			"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, registry, normalizePnpmRegistry),
+		})
 	})
+	GinApi(POST, "/api/admin/node/dependency/registry", RequireAuth, handleAddNodeDependencyRegistryOption)
+	GinApi(DELETE, "/api/admin/node/dependency/registry", RequireAuth, handleRemoveNodeDependencyRegistryOption)
 
 	GinApi(POST, "/api/admin/plugin/dependency", RequireAuth, handleInstallPluginDependency)
 	GinApi(POST, "/api/admin/node/dependency", RequireAuth, handleInstallPluginDependency)
@@ -308,10 +334,18 @@ func handlePluginDependencies(ctx *gin.Context) {
 func handlePluginDependencyRegistry(ctx *gin.Context) {
 	runtime := normalizeDependencyRuntime(ctx.Query("runtime"))
 	if runtime == PYTHON {
-		ApiOK(ctx, map[string]string{"registry": pipxRegistry()})
+		registry := pipxRegistry()
+		ApiOK(ctx, map[string]interface{}{
+			"registry": registry,
+			"options":  settingOptions(pipxRegistryOptionsKey, builtinPipxRegistries, registry, normalizePipxRegistry),
+		})
 		return
 	}
-	ApiOK(ctx, map[string]string{"registry": pnpmRegistry()})
+	registry := pnpmRegistry()
+	ApiOK(ctx, map[string]interface{}{
+		"registry": registry,
+		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, registry, normalizePnpmRegistry),
+	})
 }
 
 func handleSetPluginDependencyRegistry(ctx *gin.Context) {
@@ -342,6 +376,126 @@ func handleSetPluginDependencyRegistry(ctx *gin.Context) {
 	}
 	sillyGirl.Set("pnpm_registry", registry)
 	ApiOK(ctx, map[string]string{"registry": registry})
+}
+
+func handleAddNodeDependencyRegistryOption(ctx *gin.Context) {
+	req := struct {
+		Registry string `json:"registry"`
+	}{}
+	if err := ctx.BindJSON(&req); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	registry, err := addSettingOption(pnpmRegistryOptionsKey, req.Registry, normalizePnpmRegistry)
+	if err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	ApiOK(ctx, map[string]interface{}{
+		"registry": pnpmRegistry(),
+		"added":    registry,
+		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry),
+	})
+}
+
+func handleRemoveNodeDependencyRegistryOption(ctx *gin.Context) {
+	req := struct {
+		Registry string `json:"registry"`
+	}{}
+	if err := ctx.BindJSON(&req); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	registry, err := removeSettingOption(pnpmRegistryOptionsKey, req.Registry, builtinPnpmRegistries, normalizePnpmRegistry)
+	if err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	if registry == pnpmRegistry() {
+		sillyGirl.Set("pnpm_registry", defaultPnpmRegistry)
+	}
+	ApiOK(ctx, map[string]interface{}{
+		"registry": pnpmRegistry(),
+		"removed":  registry,
+		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry),
+	})
+}
+
+func handleAddPluginDependencyRegistryOption(ctx *gin.Context) {
+	req := struct {
+		Runtime  string `json:"runtime"`
+		Registry string `json:"registry"`
+	}{}
+	if err := ctx.BindJSON(&req); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	runtime := normalizeDependencyRuntime(req.Runtime)
+	if runtime == PYTHON {
+		registry, err := addSettingOption(pipxRegistryOptionsKey, req.Registry, normalizePipxRegistry)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		ApiOK(ctx, map[string]interface{}{
+			"registry": pipxRegistry(),
+			"added":    registry,
+			"options":  settingOptions(pipxRegistryOptionsKey, builtinPipxRegistries, pipxRegistry(), normalizePipxRegistry),
+		})
+		return
+	}
+	registry, err := addSettingOption(pnpmRegistryOptionsKey, req.Registry, normalizePnpmRegistry)
+	if err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	ApiOK(ctx, map[string]interface{}{
+		"registry": pnpmRegistry(),
+		"added":    registry,
+		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry),
+	})
+}
+
+func handleRemovePluginDependencyRegistryOption(ctx *gin.Context) {
+	req := struct {
+		Runtime  string `json:"runtime"`
+		Registry string `json:"registry"`
+	}{}
+	if err := ctx.BindJSON(&req); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	runtime := normalizeDependencyRuntime(req.Runtime)
+	if runtime == PYTHON {
+		registry, err := removeSettingOption(pipxRegistryOptionsKey, req.Registry, builtinPipxRegistries, normalizePipxRegistry)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		if registry == pipxRegistry() {
+			sillyGirl.Set("pipx_registry", defaultPipxRegistry)
+			invalidatePipxRuntimeEnvCache()
+		}
+		ApiOK(ctx, map[string]interface{}{
+			"registry": pipxRegistry(),
+			"removed":  registry,
+			"options":  settingOptions(pipxRegistryOptionsKey, builtinPipxRegistries, pipxRegistry(), normalizePipxRegistry),
+		})
+		return
+	}
+	registry, err := removeSettingOption(pnpmRegistryOptionsKey, req.Registry, builtinPnpmRegistries, normalizePnpmRegistry)
+	if err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	if registry == pnpmRegistry() {
+		sillyGirl.Set("pnpm_registry", defaultPnpmRegistry)
+	}
+	ApiOK(ctx, map[string]interface{}{
+		"registry": pnpmRegistry(),
+		"removed":  registry,
+		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry),
+	})
 }
 
 func handleInstallPluginDependency(ctx *gin.Context) {
@@ -1013,6 +1167,17 @@ func nodePluginWorkDir(scriptOrDir string) string {
 }
 
 func parseDeclaredDependencies(content string, runtime string) []string {
+	values := []string{}
+	for _, entry := range pluginMetaEntries(content) {
+		if len(entry) < 3 {
+			continue
+		}
+		key := normalizePluginMetaKey(entry[1])
+		if key != "depe" {
+			continue
+		}
+		values = appendDependencyMetaValues(values, entry[2])
+	}
 	block := ""
 	if match := jsDocBlockPattern.FindStringSubmatch(content); len(match) > 1 {
 		block = match[1]
@@ -1023,37 +1188,40 @@ func parseDeclaredDependencies(content string, runtime string) []string {
 		}
 	}
 	if block == "" {
-		return nil
+		return normalizeDependencyNamesForRuntime(values, runtime)
 	}
-	values := []string{}
 	matches := dependencyMetaPattern.FindAllStringSubmatch(block, -1)
 	for _, match := range matches {
 		if len(match) < 2 {
 			continue
 		}
-		raw := strings.TrimSpace(match[1])
-		if raw == "" {
-			continue
-		}
-		list := []string{}
-		if err := json.Unmarshal([]byte(raw), &list); err == nil {
-			values = append(values, list...)
-			continue
-		}
-		manifest := map[string]string{}
-		if err := json.Unmarshal([]byte(raw), &manifest); err == nil {
-			for name := range manifest {
-				values = append(values, name)
-			}
-			continue
-		}
-		for _, item := range strings.FieldsFunc(raw, func(r rune) bool {
-			return r == ',' || r == '，' || r == ' ' || r == '\t'
-		}) {
-			values = append(values, strings.Trim(item, `"'`))
-		}
+		values = appendDependencyMetaValues(values, match[1])
 	}
 	return normalizeDependencyNamesForRuntime(values, runtime)
+}
+
+func appendDependencyMetaValues(values []string, raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return values
+	}
+	list := []string{}
+	if err := json.Unmarshal([]byte(raw), &list); err == nil {
+		return append(values, list...)
+	}
+	manifest := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &manifest); err == nil {
+		for name := range manifest {
+			values = append(values, name)
+		}
+		return values
+	}
+	for _, item := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '，' || r == ' ' || r == '\t'
+	}) {
+		values = append(values, strings.Trim(item, `"'`))
+	}
+	return values
 }
 
 func normalizeDependencyNames(values []string) []string {
@@ -1667,7 +1835,7 @@ func pythonPipxSitePackageDirs() []string {
 	venv := pythonPipxVenvDir()
 	candidates := []string{
 		filepath.Join(venv, "Lib", "site-packages"),
-		filepath.Join(venv, "lib", "python"+pythonRequiredVersion, "site-packages"),
+		filepath.Join(venv, "lib", "python"+pythonMinimumVersion, "site-packages"),
 	}
 	if matches, err := filepath.Glob(filepath.Join(venv, "lib", "python*", "site-packages")); err == nil {
 		candidates = append(candidates, matches...)

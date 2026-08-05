@@ -51,6 +51,7 @@ func Init() {
 	initListenReply()
 	// initPluginFile()
 	initWebPluginList()
+	initMarketPluginEditor()
 	go initPluginList()
 	initPluginPublish()
 

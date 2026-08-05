@@ -615,13 +615,17 @@ func upsertPluginCronAnnotation(script, schedule string, scriptType ...string) s
 		kind = scriptType[0]
 	}
 	lines := strings.Split(strings.ReplaceAll(script, "\r\n", "\n"), "\n")
-	cronLine := regexp.MustCompile(`^(\s*\*\s*@cron\s+)(.+?)\s*$`)
+	cronLine := regexp.MustCompile(`^(\s*(?://|#+)\s*\[\s*cron\s*:\s*)(.*?)(\s*\]\s*)$|^(\s*\*\s*@cron\s+)(.+?)\s*$`)
 	updated := false
 	out := make([]string, 0, len(lines)+1)
 	for _, line := range lines {
-		if match := cronLine.FindStringSubmatch(line); len(match) == 3 {
+		if match := cronLine.FindStringSubmatch(line); len(match) != 0 {
 			if !updated && schedule != "" {
-				out = append(out, match[1]+formatCronMetaValue(schedule))
+				if match[1] != "" {
+					out = append(out, match[1]+formatCronMetaValue(schedule)+match[3])
+				} else {
+					out = append(out, match[4]+formatCronMetaValue(schedule))
+				}
 			}
 			updated = true
 			continue
@@ -629,24 +633,30 @@ func upsertPluginCronAnnotation(script, schedule string, scriptType ...string) s
 		out = append(out, line)
 	}
 	if !updated && schedule != "" {
-		insert := " * @cron " + formatCronMetaValue(schedule)
-		inserted := false
-		for i, line := range out {
-			if strings.TrimSpace(line) == "*/" {
-				out = append(out[:i], append([]string{insert}, out[i:]...)...)
-				inserted = true
-				break
-			}
+		prefix := "//"
+		if kind == PYTHON {
+			prefix = "#"
 		}
-		if !inserted && kind == PYTHON {
-			inserted = insertPythonCronAnnotation(&out, insert)
+		insert := prefix + " [cron: " + formatCronMetaValue(schedule) + "]"
+		inserted := false
+		lastMeta := -1
+		for i, line := range out {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" && lastMeta < 0 {
+				continue
+			}
+			if pluginLegacyMetaLinePattern.MatchString(line) {
+				lastMeta = i
+				continue
+			}
+			break
+		}
+		if lastMeta >= 0 {
+			out = append(out[:lastMeta+1], append([]string{insert}, out[lastMeta+1:]...)...)
+			inserted = true
 		}
 		if !inserted {
-			if kind == PYTHON {
-				out = append([]string{`"""`, insert, `"""`, ""}, out...)
-			} else {
-				out = append([]string{"/**", insert, " */"}, out...)
-			}
+			out = append([]string{insert, ""}, out...)
 		}
 	}
 	return strings.Join(out, newline)

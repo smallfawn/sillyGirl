@@ -520,6 +520,29 @@ body {
   height: calc(100vh - 248px);
 }
 
+.plugin-market-code-editor {
+  overflow: hidden;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+}
+
+.plugin-market-code-editor-dark {
+  border-color: #1f2937;
+  background: #111827;
+}
+
+.plugin-market-code-editor-light {
+  background: #fff;
+}
+
+.plugin-market-code-editor .cm-editor {
+  height: min(62vh, 620px);
+}
+
+.plugin-editor-meta {
+  gap: 8px 12px;
+}
+
 .script-editor-status {
   display: flex;
   gap: 14px;
@@ -868,6 +891,20 @@ body {
 .settings-backup-description {
   margin-bottom: 12px !important;
   color: #475569;
+}
+
+.settings-select-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid #eef2f7;
+  background: #fff;
+}
+
+.settings-select-add .ant-input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .plugin-market-pagination {

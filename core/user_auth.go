@@ -220,10 +220,18 @@ func init() {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
+		announcement := strings.TrimSpace(sillyGirl.GetString("user_announcement"))
+		announcementEnabledValue := GetBucketKeyValue(sillyGirl, "user_announcement_enable")
+		announcementEnabled := announcementEnabledValue == true || fmt.Sprint(announcementEnabledValue) == "true"
 		ApiOK(ctx, gin.H{
 			"user":            toPublicNormalUser(user),
 			"bindings":        loadNormalUserBindings(user.Username),
 			"smallcat_panels": publicSmallcatPanels(),
+			"announcement": gin.H{
+				"enabled": announcementEnabled,
+				"content": announcement,
+				"format":  normalizeUserAnnouncementFormat(sillyGirl.GetString("user_announcement_format")),
+			},
 		})
 	})
 
@@ -1055,6 +1063,17 @@ func findStringInJSON(value interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeUserAnnouncementFormat(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "html":
+		return "html"
+	case "md", "markdown":
+		return "markdown"
+	default:
+		return "text"
+	}
 }
 
 func toPublicNormalUser(user *normalUser) publicNormalUser {

@@ -122,6 +122,23 @@ import requests
 	}
 }
 
+func TestParseDeclaredDependenciesFromLegacyComment(t *testing.T) {
+	nodeDeps := parseDeclaredDependencies(`//[title: old node]
+//[depe: ["ipp", "axios"]]
+const ipp = require("ipp");
+`, NODE)
+	if len(nodeDeps) != 2 || nodeDeps[0] != "axios" || nodeDeps[1] != "ipp" {
+		t.Fatalf("parseDeclaredDependencies legacy node = %#v; want [axios ipp]", nodeDeps)
+	}
+	pythonDeps := parseDeclaredDependencies(`##[title: old python]
+##[depe: {"requests==2.32.0":"", "beautiful_soup4":""}]
+import requests
+`, PYTHON)
+	if len(pythonDeps) != 2 || pythonDeps[0] != "beautiful-soup4" || pythonDeps[1] != "requests" {
+		t.Fatalf("parseDeclaredDependencies legacy python = %#v; want [beautiful-soup4 requests]", pythonDeps)
+	}
+}
+
 func TestPluginClassFromIndexTypeHasPriority(t *testing.T) {
 	if got := pluginClassFromIndexType("python", "plugins/demo.js"); got != PYTHON {
 		t.Fatalf("pluginClassFromIndexType python = %q; want %q", got, PYTHON)

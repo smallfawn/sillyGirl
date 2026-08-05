@@ -23,6 +23,7 @@ import (
 
 const pluginSourceReposKey = "plugin_source_repos"
 const pluginSourceGithubProxyKey = "plugin_source_github_proxy"
+const pluginSourceGithubProxyOptionsKey = "plugin_source_github_proxy_options"
 const defaultPluginSourceRepo = "https://github.com/smallfawn/sillyGirl_Plugins"
 const githubNodePluginScheme = "github-node"
 
@@ -79,9 +80,10 @@ func initWebPluginList() {
 		ApiOK(ctx, pluginSourceAddresses())
 	})
 	GinApi(GET, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+		proxy := githubAcceleratorPrefix()
 		ApiOK(ctx, map[string]interface{}{
-			"proxy":   githubAcceleratorPrefix(),
-			"options": builtinGithubAccelerators,
+			"proxy":   proxy,
+			"options": settingOptions(pluginSourceGithubProxyOptionsKey, builtinGithubAccelerators, proxy, normalizeGithubAcceleratorPrefix),
 		})
 	})
 	GinApi(PUT, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
@@ -97,6 +99,43 @@ func initWebPluginList() {
 		}
 		sillyGirl.Set(pluginSourceGithubProxyKey, proxy)
 		ApiOK(ctx, map[string]interface{}{"proxy": proxy})
+	})
+	GinApi(POST, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+		payload := map[string]string{}
+		if err := ctx.BindJSON(&payload); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		proxy, err := addSettingOption(pluginSourceGithubProxyOptionsKey, payload["proxy"], normalizeGithubAcceleratorPrefix)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		ApiOK(ctx, map[string]interface{}{
+			"proxy":   githubAcceleratorPrefix(),
+			"added":   proxy,
+			"options": settingOptions(pluginSourceGithubProxyOptionsKey, builtinGithubAccelerators, githubAcceleratorPrefix(), normalizeGithubAcceleratorPrefix),
+		})
+	})
+	GinApi(DELETE, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+		payload := map[string]string{}
+		if err := ctx.BindJSON(&payload); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		proxy, err := removeSettingOption(pluginSourceGithubProxyOptionsKey, payload["proxy"], builtinGithubAccelerators, normalizeGithubAcceleratorPrefix)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		if proxy == githubAcceleratorPrefix() {
+			sillyGirl.Set(pluginSourceGithubProxyKey, "")
+		}
+		ApiOK(ctx, map[string]interface{}{
+			"proxy":   githubAcceleratorPrefix(),
+			"removed": proxy,
+			"options": settingOptions(pluginSourceGithubProxyOptionsKey, builtinGithubAccelerators, githubAcceleratorPrefix(), normalizeGithubAcceleratorPrefix),
+		})
 	})
 	GinApi(POST, "/api/admin/plugins/source", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
@@ -1002,12 +1041,14 @@ func normalizeGithubAcceleratorPrefix(prefix string) (string, error) {
 		return "", nil
 	}
 	prefix = strings.TrimRight(prefix, "/")
-	for _, candidate := range builtinGithubAccelerators {
-		if prefix == strings.TrimRight(candidate, "/") {
-			return prefix, nil
-		}
+	parsed, err := url.Parse(prefix)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("GitHub 加速地址格式错误")
 	}
-	return "", errors.New("请选择内置 GitHub 加速地址")
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("GitHub 加速地址只支持 http 或 https")
+	}
+	return prefix, nil
 }
 
 func isGithubURLHost(host string) bool {

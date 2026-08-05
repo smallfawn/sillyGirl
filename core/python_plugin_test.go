@@ -58,7 +58,7 @@ func TestCreatePythonPluginWritesFlatScriptAndRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(content)
-	for _, want := range []string{"@title PythonSmoke", "from sillygirl import sender as s", "asyncio.run(main())"} {
+	for _, want := range []string{"[title: PythonSmoke]", "from sillygirl import sender as s", "asyncio.run(main())"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("created python script missing %q:\n%s", want, text)
 		}

@@ -63,7 +63,6 @@ func readSmallCatSource(t *testing.T, relativePath, start, end string) string {
 
 func TestSmallCatInlineEndpointWrappers(t *testing.T) {
 	runtimes := map[string]string{
-		"node preload":  smallCatSourceBlock(t, nodeRuntimePreloadScript, "class SmallCat {", "class DaiDai {"),
 		"node module":   readSmallCatSource(t, "proto3/sillygirl.js", "class SmallCat {", "class DaiDai {"),
 		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "class _SmallCat:", "class _DaiDai:"),
 	}
@@ -119,7 +118,6 @@ func TestSmallCatInlineEndpointWrappers(t *testing.T) {
 
 func TestUtilsUserListRuntimeExports(t *testing.T) {
 	runtimes := map[string]string{
-		"node preload":  nodeRuntimePreloadScript,
 		"node module":   readSmallCatSource(t, "proto3/sillygirl.js", "async function userList", "function normalizeSchema"),
 		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "async def _userList", "def normalize_schema"),
 	}
