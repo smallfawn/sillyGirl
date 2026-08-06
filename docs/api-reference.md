@@ -474,7 +474,7 @@ s.setLevel(level: number): void
 ```js
 s.getContent(): string
 s.setContent(content: string): void
-s.continue(): void
+s.resume(): void
 ```
 
 #### 回复与消息
@@ -556,7 +556,7 @@ interface Bucket {
   watch(key: string, callback: (old: any, new_: any, key: string) => void): void
   getAll(): Record<string, any>
   empty(): Error | undefined
-  len(): number
+  count(): number
   buckets(): string[]
 }
 ```

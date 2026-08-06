@@ -147,9 +147,10 @@ func TestPluginParseDetectsV2FormUsage(t *testing.T) {
 		script string
 		want   bool
 	}{
-		{name: "new form", script: `const config = new form({ token: form.string() })`, want: true},
-		{name: "spaced new form", script: `const config = new form ({ token: form.string() })`, want: true},
-		{name: "python form", script: `config = form({"token": form.string()})`, want: true},
+		{name: "new plugin form", script: `const config = new plugin.Form({ token: plugin.Form.string() })`, want: true},
+		{name: "spaced plugin form", script: `const config = new plugin . Form ({ token: plugin.Form.string() })`, want: true},
+		{name: "python plugin form", script: `config = plugin.Form({"token": plugin.Form.string()})`, want: true},
+		{name: "lowercase plugin form removed", script: `new plugin.form({ token: plugin.form.string() })`, want: false},
 		{name: "word only", script: `// form config`, want: false},
 	}
 	for _, test := range tests {
@@ -157,6 +158,27 @@ func TestPluginParseDetectsV2FormUsage(t *testing.T) {
 			fn, _ := pluginParse(test.script, "demo")
 			if fn.HasForm != test.want {
 				t.Fatalf("HasForm = %v; want %v", fn.HasForm, test.want)
+			}
+		})
+	}
+}
+
+func TestPluginParseDetectsUserFormUsage(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   bool
+	}{
+		{name: "javascript", script: `const value = new user.Form({ phone: user.Form.string() })`, want: true},
+		{name: "python", script: `value = user.Form({"phone": user.Form.string()})`, want: true},
+		{name: "lowercase user form removed", script: `new user.form({ phone: user.form.string() })`, want: false},
+		{name: "plugin form only", script: `new plugin.Form({ token: plugin.Form.string() })`, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fn, _ := pluginParse(test.script, "demo")
+			if fn.HasUserForm != test.want {
+				t.Fatalf("HasUserForm = %v; want %v", fn.HasUserForm, test.want)
 			}
 		})
 	}

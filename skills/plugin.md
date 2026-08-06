@@ -18,18 +18,19 @@ const {
   sender: s,
   Bucket,
   container,
-  form,
+  plugin,
+  user,
   utils,
 } = require('sillygirl');
 
 ```
 
-Use `new container.QingLong({ id })`, `new container.SmallCat({ id })`, `new container.DaiDai({ id })` for panel clients. Use `utils.userList()`, `utils.sleep()`, `utils.version()`, `utils.restart()`, `utils.update()` for system helpers.
+Use `new container.QingLong({ id })`, `new container.SmallCat({ id })`, `new container.DaiDai({ id })` for panel clients. Use `user.getUserList()`, `utils.sleep()`, `utils.version()`, `utils.restart()`, `utils.update()` for system helpers.
 
 - Import Python runtime APIs from `sillygirl`:
 
 ```python
-from sillygirl import sender as s, Bucket, container, form, utils
+from sillygirl import sender as s, Bucket, container, plugin, user, utils
 
 ```
 
@@ -40,11 +41,11 @@ Use `container.QingLong({"id": 1})`, `container.SmallCat({"id": 1})`, `container
 - Do not invent wrappers that change third-party API response shapes. Return or reply with the original API meaning unless the user asks for formatting.
 - Prefer `async function main() { ... }` and end with `main().catch(...)`.
 - Always handle exceptions and reply with a useful error message.
-- Never hard-code secrets in plugin code. Use `new form({...})`, `Bucket`, or environment variables.
+- Never hard-code secrets in plugin code. Use `new plugin.Form({...})`, `Bucket`, or environment variables.
 - Declare third-party dependencies with new-style `[depe: ["axios"]]` / `[depe: ["requests"]]`; legacy `@depe ...` metadata is still detected for migration. NodeJS uses pnpm, Python uses pipx. 
 
-> 迁移旧插件时不要依赖外部兼容脚本，也不要随插件安装额外文件；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`container`、`utils`、`form` 等现有能力。
-Do not use `[param: {...}]`; plugin configuration must use top-level `new form({...})` in NodeJS or `form({...})` in Python.
+> 迁移旧插件时不要依赖外部兼容脚本，也不要随插件安装额外文件；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`plugin`、`user`、`container`、`utils` 等现有能力。
+Do not use `[param: {...}]`; plugin configuration must use top-level `new plugin.Form({...})` in NodeJS or `plugin.Form({...})` in Python.
 
 ## Metadata Header
 
@@ -85,7 +86,7 @@ Legacy `@title ...` comments are accepted for migration compatibility, but new p
  */
 ```
 
-Do not write `[param: {...}]`; it is intentionally ignored. Use `form` for all plugin settings.
+Do not write `[param: {...}]`; it is intentionally ignored. Use `plugin.Form` for all plugin settings.
 
 Supported metadata:
 
@@ -193,20 +194,43 @@ Use one bucket per plugin or feature. Avoid writing to shared buckets like `sill
 
 ## Plugin Configuration
 
-Use only the chain-style `new form({...})` at top level. Do not use raw JSON Schema, `utils.schema`, `form.schema`, `SillyGirlPluginConfig`, or `setTitle/setDefault/setEnum` aliases.
+Use only the chain-style `new plugin.Form({...})` at top level. Do not use raw JSON Schema, `utils.schema`, `plugin.Form.schema`, `SillyGirlPluginConfig`, or `setTitle/setDefault/setEnum` aliases. User-submitted Home parameters belong in `new user.Form({...})`.
 
 ```js
-const { form } = require('sillygirl');
+const { plugin } = require('sillygirl');
 
-const Config = new form({
-  apiBase: form.string().title('接口地址').default(''),
-  token: form.string().title('Token').format('password').default(''),
-  open: form.boolean().title('是否启用').default(false),
-  mode: form.select([{ label: '自动', value: 'auto' }, { label: '手动', value: 'manual' }])
+const Config = new plugin.Form({
+  apiBase: plugin.Form.string().title('接口地址').default(''),
+  token: plugin.Form.string().title('Token').format('password').default(''),
+  enable: plugin.Form.boolean().title('是否启用').default(false),
+  mode: plugin.Form.select([{ label: '自动', value: 'auto' }, { label: '手动', value: 'manual' }])
     .title('模式')
     .default('auto'),
 });
 ```
+
+`enable` is reserved as the plugin-wide switch and is enforced by SillyGirl for message, cron, and on-start triggers. Use another field such as `cron_run` only for an additional cron-specific switch.
+
+For Home-user input, use server-side validation when a value must be checked by a remote API:
+
+```js
+const { user } = require('sillygirl');
+new user.Form({
+  token: user.Form.string()
+    .required().err('请输入 Token')
+    .test(async (value, ctx) => {
+      const response = await fetch('https://api.example.com/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: value, user: ctx.user.id }),
+      });
+      if (!response.ok) return '认证接口请求失败';
+      return (await response.json()).valid || 'Token 未通过认证';
+    }).err('Token 验证失败'),
+});
+```
+
+Keep `.match(...)` regex-only. `.test(fn)` runs server-side before saving and accepts sync/async callbacks. Return `true` to pass, `false` to use `.err(...)`, or a string as the exact error. The callback context contains `values`, `user`, `plugin`, and `config`. Validators run in an isolated process with a 10-second timeout, so keep them self-contained and do not depend on closure variables. In Python prefer a named `def`/`async def` and put imports inside it.
 
 Read config values:
 
@@ -216,6 +240,8 @@ const token = values.token || '';
 ```
 
 Config registration must run at plugin load time, not inside a branch that may never execute.
+
+User forms use `required().err(message)` and `match(regex).err(message)` for validation. Add `.multiple(limit).keyBy([fields])` when one user may submit several records. Read them with `user.getUserList({ withRecords: true })` or `user.getUser(idOrName)`. Values are stored as plaintext JSON; never assume automatic trimming, encryption, or length validation.
 
 ## Python Plugins
 
@@ -325,7 +351,7 @@ Common methods:
 - `sc.getPhoneNumber({ openid, appid })`
 - `sc.cloud(payload)` / `sc.gateway(payload)`
 - `sc.qrCodeAuth(payload)`
-- `sc.oAuth(payload)`
+- `sc.oauth(payload)`
 - `sc.translateLink(payload)` / `sc.autoAuth(payload)`
 - `sc.appMsgExt(payload)` / `sc.appMsgLike(payload)`
 
@@ -421,6 +447,8 @@ main().catch(err => s.reply(`搬运处理失败：${err.message || err}`));
 ```
 
 ## Cron Plugins
+
+Reserve the `plugin.Form` boolean field `enable` as the plugin-wide runtime gate. SillyGirl checks it before message, cron, and on-start execution. A cron runs only when both the plugin `enable` value and the task's own `enable` state are true; disabling the plugin preserves its cron expression. Plugins without this field remain enabled for compatibility.
 
 Cron plugins should include `@cron`:
 

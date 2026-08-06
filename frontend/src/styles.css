@@ -570,21 +570,48 @@ body {
   border-radius: 8px;
 }
 
+.plugin-admin-legend {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 5px;
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.plugin-admin-legend-swatch {
+  width: 12px;
+  height: 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 3px;
+}
+
+.plugin-market-hint .ant-alert-description {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.plugin-market-hint .ant-alert-icon {
+  margin-inline-end: 8px;
+  font-size: 14px;
+}
+
 .plugin-market-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
 .plugin-market-card {
   display: grid;
-  flex: 1 1 360px;
-  min-width: min(100%, 360px);
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  gap: 12px;
+  min-width: 0;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: start;
-  min-height: 104px;
-  padding: 12px;
+  min-height: 92px;
+  padding: 10px;
   background: #ffffff;
   border: 1px solid #e6eaf0;
   border-radius: 8px;
@@ -594,17 +621,26 @@ body {
     transform 0.16s ease;
 }
 
+.plugin-market-card--admin {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
 .plugin-market-card:hover {
   border-color: #c9d7ee;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07);
   transform: translateY(-1px);
 }
 
+.plugin-market-card--admin:hover {
+  border-color: #93c5fd;
+}
+
 .plugin-card-icon {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   overflow: hidden;
   color: #111827;
@@ -666,6 +702,15 @@ body {
   outline: 0;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.plugin-card-cron-badge.ant-tag {
+  margin: 0;
+  color: #15803d;
+  background: #dcfce7;
+  border-color: #86efac;
+  font-size: 11px;
+  line-height: 18px;
 }
 
 .plugin-detail {
@@ -760,8 +805,8 @@ body {
 .plugin-card-download {
   display: inline-grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.05);
 }
 
@@ -1168,6 +1213,18 @@ body {
   flex: 0 0 auto;
 }
 
+@media (max-width: 1280px) and (min-width: 981px) {
+  .plugin-market-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) and (min-width: 769px) {
+  .plugin-market-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 768px) {
   body {
     background: #ffffff;
@@ -1351,11 +1408,10 @@ body {
   }
 
   .plugin-market-grid {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .plugin-market-card {
-    flex-basis: auto;
     width: 100%;
     grid-template-columns: 44px minmax(0, 1fr) auto;
     gap: 10px;

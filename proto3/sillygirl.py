@@ -1,7 +1,9 @@
 import asyncio
+import ast
 import base64
 import hashlib
 import inspect
+import textwrap
 import json
 import os
 import pickle
@@ -51,7 +53,7 @@ def get_async_stub():
     return _async_stub
 
 
-def transform(value):
+def _transform_bucket_value(value):
     if not value:
         return None
     if value.startswith("f:"):
@@ -67,7 +69,7 @@ def transform(value):
     return value
 
 
-def reverse_transform(value):
+def _serialize_bucket_value(value):
     try:
         if isinstance(value, bool):
             return "b:true" if value else "b:false"
@@ -82,9 +84,6 @@ def reverse_transform(value):
         return "o:" + json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     except Exception:
         return "p:%s" % base64.b64encode(pickle.dumps(value)).decode("utf-8")
-
-
-reverseTransform = reverse_transform
 
 
 class Bucket:
@@ -111,7 +110,7 @@ class Bucket:
             srpc_pb2.BucketKeyRequest(name=self.__name, key=str(key)),
             metadata=metadata,
         )
-        value = transform(response.value)
+        value = _transform_bucket_value(response.value)
         return defaultValue if value is None else value
 
     def __get(self, key, defaultValue=None):
@@ -119,19 +118,19 @@ class Bucket:
             srpc_pb2.BucketKeyRequest(name=self.__name, key=str(key)),
             metadata=metadata,
         )
-        value = transform(response.value)
+        value = _transform_bucket_value(response.value)
         return defaultValue if value is None else value
 
     async def set(self, key, value):
         response = await get_async_stub().BucketSet(
-            srpc_pb2.BucketSetRequest(name=self.__name, key=str(key), value=reverse_transform(value)),
+            srpc_pb2.BucketSetRequest(name=self.__name, key=str(key), value=_serialize_bucket_value(value)),
             metadata=metadata,
         )
         return {"message": response.message, "changed": response.changed}
 
     def __set(self, key, value):
         response = get_stub().BucketSet(
-            srpc_pb2.BucketSetRequest(name=self.__name, key=str(key), value=reverse_transform(value)),
+            srpc_pb2.BucketSetRequest(name=self.__name, key=str(key), value=_serialize_bucket_value(value)),
             metadata=metadata,
         )
         return {"message": response.message, "changed": response.changed}
@@ -142,7 +141,7 @@ class Bucket:
             metadata=metadata,
         )
         raw = json.loads(response.value or "{}")
-        return {key: transform(value) for key, value in raw.items()}
+        return {key: _transform_bucket_value(value) for key, value in raw.items()}
 
     async def delete(self, key):
         return await self.set(key, None)
@@ -160,7 +159,7 @@ class Bucket:
         )
         return list(response.keys)
 
-    async def len(self):
+    async def count(self):
         response = await get_async_stub().BucketLen(
             srpc_pb2.BucketRequest(name=self.__name),
             metadata=metadata,
@@ -195,7 +194,7 @@ class Bucket:
 
             async for response in get_async_stub().BucketWatch(request_iterator(), metadata=metadata):
                 try:
-                    result = handle(transform(response.old), transform(response.now), response.key)
+                    result = handle(_transform_bucket_value(response.old), _transform_bucket_value(response.now), response.key)
                     if inspect.isawaitable(result):
                         result = await result
                 except Exception as exc:
@@ -206,7 +205,7 @@ class Bucket:
                     payload["error"] = "VOID"
                 else:
                     if "now" in result:
-                        payload["now"] = reverse_transform(result["now"])
+                        payload["now"] = _serialize_bucket_value(result["now"])
                     if "message" in result:
                         payload["message"] = str(result["message"])
                     if "error" in result:
@@ -219,11 +218,6 @@ class Bucket:
             asyncio.get_event_loop().create_task(watch_loop())
 
 
-async def _userList():
-    """Read ordinary users and this plugin's authorization state."""
-    return await Bucket("__plugin_users__").get("list", [])
-
-
 def _is_schema_node(value):
     return isinstance(value, SchemaNode)
 
@@ -231,17 +225,18 @@ def _is_schema_node(value):
 def _normalize_form_field(value, path="field"):
     if _is_schema_node(value):
         return value.toJSON()
-    raise RuntimeError(f"form schema {path} must use form.string()/form.boolean()/form.select() helpers")
+    raise RuntimeError(f"Form schema {path} must use plugin.Form/user.Form field helpers")
 
 
 def normalize_config_schema(fields):
     if not isinstance(fields, dict):
-        raise RuntimeError('form(...) only accepts an object like {"token": form.string().title("Token")}')
-    result = {"type": "object", "properties": {}}
+        raise RuntimeError('Form(...) only accepts an object like {"token": plugin.Form.string().title("Token")}')
+    result = {"type": "object", "properties": {}, "propertyOrder": []}
     for key, value in fields.items():
         if str(key).startswith("_"):
             continue
         result["properties"][key] = _normalize_form_field(value, key)
+        result["propertyOrder"].append(key)
     return result
 
 
@@ -263,11 +258,25 @@ def _pluginConfigDefaults(schema):
     return None
 
 
+def _validator_source(callback):
+    source = textwrap.dedent(inspect.getsource(callback)).strip()
+    tree = ast.parse(source)
+    first = tree.body[0] if tree.body else None
+    if isinstance(first, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return source
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Lambda):
+            return ast.get_source_segment(source, node)
+    raise RuntimeError("test() callback source cannot be extracted")
+
+
 class SchemaNode:
     def __init__(self, schema_type, extra=None):
         self.schema = {"type": schema_type}
         if extra:
             self.schema.update(extra)
+        self.validators = []
+        self._last_rule = ""
 
     def title(self, value):
         self.schema["title"] = value
@@ -284,8 +293,31 @@ class SchemaNode:
     def options(self, value):
         return _apply_schema_options(self, value)
 
-    def required(self, value):
-        self.schema["required"] = value
+    def required(self, value=True):
+        self.schema["required"] = bool(value)
+        self._last_rule = "required"
+        return self
+
+    def match(self, value):
+        self.schema["pattern"] = getattr(value, "pattern", str(value or ""))
+        self._last_rule = "match"
+        return self
+
+    def test(self, callback):
+        if not callable(callback):
+            raise RuntimeError("test() requires a function")
+        source = _validator_source(callback)
+        self.validators.append({"runtime": "python", "source": source, "message": ""})
+        self._last_rule = "test"
+        return self
+
+    def err(self, value):
+        if not self._last_rule:
+            raise RuntimeError("err() must follow required(), match() or test()")
+        if self._last_rule == "test":
+            self.validators[-1]["message"] = str(value or "")
+        else:
+            self.schema.setdefault("errorMessages", {})[self._last_rule] = str(value or "")
         return self
 
     def format(self, value):
@@ -300,25 +332,12 @@ class SchemaNode:
         self.schema["maximum"] = value
         return self
 
-    def minLength(self, value):
-        self.schema["minLength"] = value
-        return self
-
-    def maxLength(self, value):
-        self.schema["maxLength"] = value
-        return self
-
-    def pattern(self, value):
-        self.schema["pattern"] = value
-        return self
-
     def widget(self, value):
         self.schema["ui:widget"] = value
         return self
 
     def toJSON(self):
         return self.schema
-
 
 def _apply_schema_options(node, options):
     if isinstance(options, list):
@@ -404,26 +423,83 @@ class _PluginConfigFormInstance:
             self.userConfig = await Bucket("plugin_config_values").get(self.uuid, {})
         return self.userConfig
 
-    async def Get(self):
-        return await self.get()
-
     async def set(self, values=None):
         if isinstance(values, dict):
             self.userConfig = values
         await Bucket("plugin_config_values").set(self.uuid, self.userConfig or {})
         return {"error": ""}
 
-    async def Set(self, values=None):
-        return await self.set(values)
 
-
-def form(schema):
+def _plugin_form(schema):
     return _PluginConfigFormInstance(schema)
 
 
 for _name in ("string", "number", "integer", "boolean", "array", "object", "select"):
-    setattr(form, _name, getattr(_formHelpers, _name))
-form.defaults = lambda fields: _pluginConfigDefaults(normalize_config_schema(fields))
+    setattr(_plugin_form, _name, getattr(_formHelpers, _name))
+_plugin_form.defaults = lambda fields: _pluginConfigDefaults(normalize_config_schema(fields))
+
+
+class _UserFormInstance:
+    def __init__(self, schema):
+        validators = {str(key): value.validators for key, value in schema.items() if _is_schema_node(value) and value.validators}
+        self.definition = {"schema": normalize_config_schema(schema), "multiple": 1, "key_by": [], "validators": validators}
+        self._register()
+
+    def _register(self):
+        if not plugin_id:
+            return
+        try:
+            asyncio.get_running_loop().create_task(Bucket("plugin_user_form_schemas").set(plugin_id, self.definition))
+        except RuntimeError:
+            pass
+
+    def multiple(self, limit):
+        self.definition["multiple"] = max(1, int(limit or 1))
+        self._register()
+        return self
+
+    def keyBy(self, fields):
+        self.definition["key_by"] = [str(item) for item in (fields if isinstance(fields, (list, tuple)) else [fields])]
+        self._register()
+        return self
+
+
+def _user_form(schema):
+    return _UserFormInstance(schema)
+
+
+for _name in ("string", "number", "integer", "boolean", "array", "object", "select"):
+    setattr(_user_form, _name, getattr(_formHelpers, _name))
+
+
+class Plugin:
+    Form = staticmethod(_plugin_form)
+
+
+class User:
+    Form = staticmethod(_user_form)
+
+    async def getUserList(self, options=None):
+        rows = await Bucket("__plugin_users__").get("list", [])
+        rows = rows if isinstance(rows, list) else []
+        if (options or {}).get("withRecords"):
+            return rows
+        return [{key: value for key, value in item.items() if key != "records"} for item in rows]
+
+    async def getUser(self, selector):
+        rows = await self.getUserList({"withRecords": True})
+        if isinstance(selector, dict):
+            user_id, name = str(selector.get("id") or ""), str(selector.get("name") or "")
+        else:
+            user_id = name = str(selector or "")
+        matches = [item for item in rows if (user_id and item.get("id") == user_id) or (name and name in (item.get("username"), item.get("nickname")))]
+        if len(matches) > 1:
+            raise RuntimeError("USER_AMBIGUOUS")
+        return matches[0] if matches else None
+
+
+plugin = Plugin()
+user = User()
 
 
 async def _read_runtime_panels(key):
@@ -802,7 +878,7 @@ class _SmallCat:
     async def qrCodeAuth(self, options):
         return await self._post("/wx/qrcodeauth", options)
 
-    async def oAuth(self, options):
+    async def oauth(self, options):
         return await self._post("/wx/oauth", options)
 
     async def translateLink(self, options):
@@ -1008,7 +1084,7 @@ class Sender:
             metadata=metadata,
         )
 
-    async def continue_(self):
+    async def resume(self):
         await get_async_stub().SenderContinue(srpc_pb2.SenderRequest(uuid=self.__uuid), metadata=metadata)
 
     async def getEvent(self):
@@ -1107,7 +1183,6 @@ class Sender:
         return await _pushAdmin(content, options or {})
 
 
-setattr(Sender, "continue", Sender.continue_)
 sender = Sender(os.environ.get("SENDER_ID", ""))
 s = sender
 
@@ -1192,9 +1267,6 @@ class Adapter:
 
 
 class Utils:
-    async def userList(self):
-        return await _userList()
-
     async def sleep(self, ms=1000):
         return await _sleep(ms)
 

@@ -32,7 +32,7 @@ var smallCatClientAPIEndpoints = map[string]string{
 	"cloud":           "/wx/cloud",
 	"gateway":         "/wx/gateway",
 	"qrCodeAuth":      "/wx/qrcodeauth",
-	"oAuth":           "/wx/oauth",
+	"oauth":           "/wx/oauth",
 	"translateLink":   "/wx/translatelink",
 	"autoAuth":        "/wx/autoauth",
 	"appMsgExt":       "/wx/appmsgext",
@@ -116,26 +116,74 @@ func TestSmallCatInlineEndpointWrappers(t *testing.T) {
 	}
 }
 
-func TestUtilsUserListRuntimeExports(t *testing.T) {
+func TestUserNamespaceRuntimeExports(t *testing.T) {
+	read := func(path string) string {
+		data, err := os.ReadFile(filepath.Join("..", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
 	runtimes := map[string]string{
-		"node module":   readSmallCatSource(t, "proto3/sillygirl.js", "async function userList", "function normalizeSchema"),
-		"python module": readSmallCatSource(t, "proto3/sillygirl.py", "async def _userList", "def normalize_schema"),
+		"node runtime":   read("proto3/sillygirl.js"),
+		"python runtime": read("proto3/sillygirl.py"),
 	}
 	for name, source := range runtimes {
-		if !strings.Contains(source, "userList") || !strings.Contains(source, pluginUserRuntimeBucket) || !strings.Contains(source, pluginUserRuntimeListKey) {
-			t.Errorf("%s: utils.userList runtime bridge is missing", name)
+		for _, marker := range []string{"getUserList", "getUser", pluginUserRuntimeBucket, pluginUserRuntimeListKey} {
+			if !strings.Contains(source, marker) {
+				t.Errorf("%s: user namespace marker %s is missing", name, marker)
+			}
+		}
+	}
+	typings := map[string]string{"grpc typings": typeat, "node typings": read("proto3/sillygirl.d.ts")}
+	for name, source := range typings {
+		for _, marker := range []string{"getUserList", "getUser", "authorized", "smallcat_openids"} {
+			if !strings.Contains(source, marker) {
+				t.Errorf("%s: user typing %s is missing", name, marker)
+			}
 		}
 	}
 	for name, source := range map[string]string{
-		"grpc plugin typings": typeat,
-		"node typings":        readSmallCatSource(t, "proto3/sillygirl.d.ts", "interface SillyGirlUserBindings", "export {"),
+		"node typings": read("proto3/sillygirl.d.ts"),
+		"grpc typings": typeat,
 	} {
-		if !strings.Contains(source, "userList: typeof userList") {
-			t.Errorf("%s: utils.userList typing is missing", name)
+		if strings.Contains(source, "userList: typeof userList") {
+			t.Errorf("%s: obsolete utils.userList export remains", name)
 		}
-		for _, field := range []string{"authorized", "qq", "telegram", "smallcat_openids"} {
-			if !strings.Contains(source, field) {
-				t.Errorf("%s: userList field %s is missing", name, field)
+	}
+}
+
+func TestSDKExportNamingConsistency(t *testing.T) {
+	read := func(path string) string {
+		data, err := os.ReadFile(filepath.Join("..", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	nodeRuntime := read("proto3/sillygirl.js")
+	pythonRuntime := read("proto3/sillygirl.py")
+	typings := []string{read("proto3/sillygirl.d.ts"), typeat}
+
+	for _, marker := range []string{"async resume()", "async count()", "oauth(options)"} {
+		if !strings.Contains(nodeRuntime, marker) {
+			t.Errorf("node runtime: expected %q", marker)
+		}
+	}
+	for _, marker := range []string{"async def resume(self)", "async def count(self)", "async def oauth(self, options)"} {
+		if !strings.Contains(pythonRuntime, marker) {
+			t.Errorf("python runtime: expected %q", marker)
+		}
+	}
+	for _, source := range typings {
+		for _, marker := range []string{"resume():", "count():", "oauth(options:"} {
+			if !strings.Contains(source, marker) {
+				t.Errorf("typing: expected %q", marker)
+			}
+		}
+		for _, obsolete := range []string{"\n    continue():", "\n    len():", "\n    oAuth(options:", "\n    Get():", "\n    Set(values"} {
+			if strings.Contains(source, obsolete) {
+				t.Errorf("typing: obsolete member %q remains", obsolete)
 			}
 		}
 	}

@@ -265,7 +265,7 @@ func shouldExcludeSystemBackupPath(rel string, isDir bool) bool {
 
 func writeSystemBackupBytes(writer *zip.Writer, name string, data []byte, modifiedAt time.Time) error {
 	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
-	header.SetModTime(modifiedAt)
+	header.Modified = modifiedAt
 	entry, err := writer.CreateHeader(header)
 	if err != nil {
 		return err

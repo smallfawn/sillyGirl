@@ -139,12 +139,12 @@ update_result = await utils.update({"restart": True})
 
 ### 普通用户列表
 
-`utils.userList()` 提供普通用户及当前插件的授权和绑定状态。`authorized` 只表示当前插件的 `smallcat:read` 授权，运行时会从当前插件上下文判定，不接受插件 UUID 参数。
+`user.getUserList()` 提供普通用户及当前插件的授权和绑定状态。`authorized` 只表示当前插件的 `smallcat:read` 授权，运行时会从当前插件上下文判定，不接受插件 UUID 参数。
 
 ```js
-const { container, utils } = require("sillygirl");
+const { container, user } = require("sillygirl");
 
-const users = await utils.userList();
+const users = await user.getUserList();
 const openids = users
   .filter((user) => !user.disabled && user.authorized)
   .flatMap((user) => user.bindings.smallcat_openids);
@@ -153,9 +153,9 @@ const accounts = await new container.SmallCat({ id: 1 }).userList();
 ```
 
 ```python
-from sillygirl import container, utils
+from sillygirl import container, user
 
-users = await utils.userList()
+users = await user.getUserList()
 openids = [
     openid
     for user in users
@@ -166,7 +166,7 @@ openids = [
 accounts = await container.SmallCat({"id": 1}).userList()
 ```
 
-`utils.userList()` 的每个用户包含：
+`user.getUserList()` 的每个用户包含：
 
 ```json
 {
@@ -205,17 +205,17 @@ await db.delete("count")
 Python 插件支持和 NodeJS 一样的声明式配置。配置对象建议在文件顶层创建，这样插件安装后触发一次规则或设置 `@on_start true` 时，后台「插件配置」就能注册到表单。
 
 ```python
-from sillygirl import sender as s, form
+from sillygirl import sender as s, plugin
 
-config = form({
-    "apiBase": form.string()
+config = plugin.Form({
+    "apiBase": plugin.Form.string()
         .title("接口地址")
         .default("http://127.0.0.1:8081"),
-    "token": form.string()
+    "token": plugin.Form.string()
         .title("Token")
         .format("password")
         .default(""),
-    "enabled": form.boolean()
+    "enable": plugin.Form.boolean()
         .title("启用")
         .default(False),
 })
@@ -417,7 +417,7 @@ r"""
 """
 ```
 
-`[param: {...}]` 已废弃且不再解析；插件配置必须使用 `form`：NodeJS 顶层 `new form({...})`，Python 顶层 `form({...})`。
+`[param: {...}]` 已废弃且不再解析；插件配置必须使用 `Form`：NodeJS 顶层 `new plugin.Form({...})`，Python 顶层 `plugin.Form({...})`。
 
 ### 元数据示例
 
@@ -522,7 +522,7 @@ s.isAdmin()         // 判断用户是否为管理员（boolean）
 ```js
 s.getContent()      // 获取消息原始内容（string）
 s.setContent(text)  // 修改当前消息内容（影响后续插件匹配）
-s.continue()        // 继续匹配后续规则（默认匹配成功即停止）
+s.resume()        // 继续匹配后续规则（默认匹配成功即停止）
 ```
 
 #### 回复消息
@@ -578,14 +578,18 @@ bucket.keys();       // 获取所有键名（string[]）
 bucket.getAll();     // 获取所有键值（object）
 bucket.delete("key"); // 删除键
 bucket.empty();      // 清空 bucket
-bucket.len();        // 获取键数量（number）
+bucket.count();        // 获取键数量（number）
 ```
 
 **作用域说明**：每个 Bucket 是独立的命名空间，不同插件建议使用不同的 Bucket 名称，避免键冲突。
 
-### form 配置表单
+### plugin.Form 插件配置表单
 
-SillyGirl 支持声明式插件配置。Node 插件推荐直接用顶层 `form`：`new form({...})` 注册并读取配置，不需要再从 `utils` 取 schema。`form.string()` / `form.boolean()` / `form.select()` 等 helper 会生成配置表单结构；后台会在「插件设置」弹窗展示已注册的配置表单。
+SillyGirl 支持声明式插件配置。Node 插件使用顶层 `new plugin.Form({...})` 注册并读取配置。`plugin.Form.string()` / `plugin.Form.boolean()` / `plugin.Form.select()` 等 helper 会生成配置表单结构；后台会在「插件设置」弹窗展示已注册的配置表单。
+
+`enable` 是保留的插件总开关。声明为 boolean 后，SillyGirl 核心会在消息、`@cron` 和 `@on_start` 三类入口执行前统一检查；值为 `false` 时保留 Cron 表达式但跳过插件执行，重新开启后无需重写定时配置。没有声明 `enable` 的旧插件保持默认启用。
+
+定时任务页面的“启用”是调度开关。最终执行条件为：**插件总开关开启，并且定时任务启用**。插件需要单独控制定时行为时，可再声明普通业务字段（例如 `cron_run`），但不能替代 `enable` 总开关。
 
 ```js
 /**
@@ -593,21 +597,21 @@ SillyGirl 支持声明式插件配置。Node 插件推荐直接用顶层 `form`�
  * @rule raw ^配置测试$
  */
 
-const { sender: s, form } = require("sillygirl");
+const { sender: s, plugin } = require("sillygirl");
 
-const ConfigDB = new form({
-  host: form.string()
+const ConfigDB = new plugin.Form({
+  host: plugin.Form.string()
     .title("服务地址")
     .description("例如 http://127.0.0.1:9090")
     .default("http://127.0.0.1:9090"),
-  open: form.boolean()
+  enable: plugin.Form.boolean()
     .title("启用开关")
     .default(false),
-  delTime: form.number()
+  delTime: plugin.Form.number()
     .title("撤回时间")
     .description("0 表示不撤回")
     .default(0),
-  mode: form.select([
+  mode: plugin.Form.select([
     { label: "普通", value: "normal" },
     { label: "快速", value: "fast" },
   ]).title("模式"),
@@ -621,20 +625,20 @@ if (!Object.keys(ConfigDB.userConfig).length) {
 }
 ```
 
-`new form({...})` 的对象参数固定使用字段名到 `form.*()` helper 的映射；不要传原生 JSON Schema。需要嵌套对象时只用 `form.object({...})`。
+`new plugin.Form({...})` 的对象参数固定使用字段名到 `plugin.Form.*()` helper 的映射；不要传原生 JSON Schema。需要嵌套对象时只用 `plugin.Form.object({...})`。
 
 支持的 helper：
 
 | helper | 说明 |
 |------|------|
-| `form.string()` | 字符串字段 |
-| `form.number()` | 数字字段 |
-| `form.integer()` | 整数字段 |
-| `form.boolean()` | 布尔开关 |
-| `form.array(item)` | 数组字段 |
-| `form.object(props)` | 对象字段 |
-| `form.select(options)` | 下拉/单选候选值，支持 `[{ label, value }]` 或 `{ value: label }` |
-| `form.defaults(fields)` | 读取表单默认值 |
+| `plugin.Form.string()` | 字符串字段 |
+| `plugin.Form.number()` | 数字字段 |
+| `plugin.Form.integer()` | 整数字段 |
+| `plugin.Form.boolean()` | 布尔开关 |
+| `plugin.Form.array(item)` | 数组字段 |
+| `plugin.Form.object(props)` | 对象字段 |
+| `plugin.Form.select(options)` | 下拉/单选候选值，支持 `[{ label, value }]` 或 `{ value: label }` |
+| `plugin.Form.defaults(fields)` | 读取表单默认值 |
 
 支持的链式方法包括：
 
@@ -646,11 +650,11 @@ if (!Object.keys(ConfigDB.userConfig).length) {
 | `options(values)` | 可选值 |
 | `format(value)` | 字段格式，例如 `password`、`textarea` |
 | `widget(value)` | UI 组件提示，例如 `radio`、`password`、`textarea` |
-| `setMin(value)` / `setMax(value)` | 数字范围 |
-| `setMinLength(value)` / `setMaxLength(value)` | 字符串长度 |
-| `setPattern(value)` | 字符串正则约束 |
+| `min(value)` / `max(value)` | 数字范围 |
+| `required().err(message)` | 必填校验及错误信息 |
+| `match(regex).err(message)` | 正则校验及错误信息 |
 
-`new form(fields)` 返回的配置实例属性和方法：
+`new plugin.Form(fields)` 返回的配置实例属性和方法：
 
 ```js
 ConfigDB.jsonSchema   // 当前插件配置 schema
@@ -660,19 +664,19 @@ ConfigDB.set()        // 保存 ConfigDB.userConfig
 ConfigDB.set(obj)     // 保存指定配置对象
 ```
 
-注意：配置 schema 会在插件顶层执行到 `new form({...})` 时注册。新插件首次安装后，
+注意：配置 schema 会在插件顶层执行到 `new plugin.Form({...})` 时注册。新插件首次安装后，
 如果后台「插件配置」里还看不到它，先触发一次插件规则或把插件声明为 `@on_start true`。
 
-Python 插件不用 `new`，也可以直接使用 `form.string()` 这一套 helper：
+Python 插件不用 `new`，也可以直接使用 `plugin.Form.string()` 这一套 helper：
 
 ```python
-from sillygirl import form
+from sillygirl import plugin
 
-config = form({
-    "host": form.string()
+config = plugin.Form({
+    "host": plugin.Form.string()
         .title("服务地址")
         .default("http://127.0.0.1:9090"),
-    "enabled": form.boolean()
+    "enable": plugin.Form.boolean()
         .title("启用")
         .default(False),
 })
@@ -682,6 +686,75 @@ async def main():
     values = await config.get()
     print(values)
 ```
+
+### user.Form 普通用户表单
+
+`user.Form` 单独定义 Home 普通用户提交的参数。数据按“用户 + 当前插件”隔离，以明文 JSON 存入 SillyGirl 存储桶，不执行加密或自动裁剪。
+
+```js
+const { user } = require("sillygirl");
+
+new user.Form({
+  phone: user.Form.string()
+    .title("手机号")
+    .required().err("请输入手机号")
+    .match(/^1[3-9]\d{9}$/).err("手机号格式错误"),
+  remark: user.Form.string()
+    .title("备注")
+    .match(/^.{0,20}$/).err("备注最多20个字符")
+    .default(""),
+}).multiple(3).keyBy(["phone"]);
+
+// test() 在服务端保存前运行，支持 async 和远程 API 校验。
+new user.Form({
+  token: user.Form.string()
+    .required().err("请输入 Token")
+    .test(async (value, ctx) => {
+      const response = await fetch("https://api.example.com/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: value, user: ctx.user.id }),
+      });
+      if (!response.ok) return "认证接口请求失败";
+      const result = await response.json();
+      return result.valid || "Token 未通过认证";
+    }).err("Token 验证失败"),
+});
+
+const users = await user.getUserList({ withRecords: true });
+const current = await user.getUser({ name: "ACCOUNT" });
+```
+
+```python
+from sillygirl import user
+
+async def verify_token(value, ctx):
+    import urllib.request
+    # 可在这里请求远程 API；True 通过，False/字符串不通过。
+    return True if value == "demo" else "Token 未通过认证"
+
+user.Form({
+    "phone": user.Form.string()
+        .title("手机号")
+        .required().err("请输入手机号")
+        .match(r"^1[3-9]\d{9}$").err("手机号格式错误"),
+    "token": user.Form.string()
+        .test(verify_token).err("Token 验证失败"),
+}).multiple(3).keyBy(["phone"])
+
+users = await user.getUserList({"withRecords": True})
+current = await user.getUser({"name": "ACCOUNT"})
+```
+
+- `.multiple(limit)`：允许每个普通用户保存多条记录，默认 `1`。
+- `.keyBy(fields)`：相同键再次提交时更新原记录，避免重复；支持一个或多个字段。
+- `user.getUserList()`：列出用户；传 `{ withRecords: true }` 时包含当前插件的 `records`。
+- `user.getUser(idOrName)` / `user.getUser({ id, name })`：按 ID、用户名或昵称查询单个用户；重名时抛出 `USER_AMBIGUOUS`。
+- `required/match/err` 同时在前端和服务端执行，服务端结果为最终判定。
+- `.test(callback)` 只在服务端保存前执行，可传同步或异步函数；回调参数为 `(value, ctx)`。
+- `ctx` 包含 `values`（本次完整表单）、`user`（当前用户及绑定）、`plugin` 和 `config`（当前插件配置）。
+- 回调返回 `true` 表示通过；返回 `false` 使用紧跟的 `.err(...)`；返回非空字符串时直接作为错误；抛出异常会返回远程验证异常。总执行超时为 10 秒。
+- 校验函数会脱离插件主流程单独执行，因此应写成自包含函数，只使用参数、运行时全局 API（如 Node `fetch`）或函数内部 `import`；不要依赖外层闭包变量。Python 推荐使用具名 `def/async def`。
 
 ### container 容器入口
 
@@ -821,7 +894,7 @@ sc.address  // smallcat 地址
 | `cloud(options)` | `POST /wx/cloud` | `{ openid, appid, function_name, data }` | 原始 API 响应 |
 | `gateway(options)` | `POST /wx/gateway` | `{ openid, appid, action, env }` 或完整 `domain` | 原始 API 响应 |
 | `qrCodeAuth(options)` | `POST /wx/qrcodeauth` | `{ openid, uuid }` | 原始 API 响应 |
-| `oAuth(options)` | `POST /wx/oauth` | `{ openid, appid, redirect_uri, scope?, state?, component_appid? }` 等 | 原始 API 响应 |
+| `oauth(options)` | `POST /wx/oauth` | `{ openid, appid, redirect_uri, scope?, state?, component_appid? }` 等 | 原始 API 响应 |
 | `translateLink(options)` | `POST /wx/translatelink` | `{ openid, link, scene? }` | 原始 API 响应 |
 | `autoAuth(options)` | `POST /wx/autoauth` | `{ openid }` | 原始 API 响应 |
 | `appMsgExt(options)` | `POST /wx/appmsgext` | `{ openid, article_url }` | 原始 API 响应 |
@@ -895,7 +968,7 @@ const phone = sc.getPhoneNumber({
 });
 console.log(phone.status, phone.message, phone.data);
 
-const oauth = sc.oAuth({
+const oauth = sc.oauth({
   openid: "用户 openid",
   appid: "wx2f5d8f9715c59d10",
   redirect_uri: "https://example.com/callback",
@@ -1079,7 +1152,7 @@ time.Parse(str, layout, locale)  // 解析时间字符串
 2. **高 priority** 优先于低 priority
 3. 同一优先级下，先加载的插件优先
 
-使用 `s.continue()` 可以让当前插件执行完毕后继续匹配后续规则：
+使用 `s.resume()` 可以让当前插件执行完毕后继续匹配后续规则：
 
 ```js
 /**
@@ -1089,7 +1162,7 @@ time.Parse(str, layout, locale)  // 解析时间字符串
  */
 
 console.log("收到消息:", s.getContent());
-s.continue();  // 继续让其他插件处理
+s.resume();  // 继续让其他插件处理
 ```
 
 ## 消息监听与会话
@@ -1325,4 +1398,4 @@ RegistFuncs["utils"] = {
 ```
 
 
-迁移旧插件时不要依赖外部兼容脚本；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`container`、`utils`、`form` 等现有能力。
+迁移旧插件时不要依赖外部兼容脚本；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`plugin`、`user`、`container`、`utils` 等现有能力。

@@ -2,9 +2,10 @@ package core
 
 import (
 	"bytes"
+	cryptorand "crypto/rand"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/big"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -133,14 +134,24 @@ func (sender *Strings) Union(a, b []interface{}) []interface{} {
 }
 
 func (sender *Strings) Random(length int, substr string) string {
+	if length <= 0 || length > 1<<20 {
+		return ""
+	}
 	ws := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	if substr != "" {
 		ws = substr
 	}
 	letters := []rune(ws)
+	if len(letters) == 0 {
+		return ""
+	}
 	b := make([]rune, length)
 	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+		index, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(len(letters))))
+		if err != nil {
+			return ""
+		}
+		b[i] = letters[index.Int64()]
 	}
 	return string(b)
 }

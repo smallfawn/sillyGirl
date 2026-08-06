@@ -47,6 +47,7 @@ func newSMTPWriter() Logger {
 
 // Init smtp writer with json config.
 // config like:
+//
 //	{
 //		"username":"example@gmail.com",
 //		"password:"password",
@@ -89,11 +90,15 @@ func (s *SMTPWriter) sendMail(hostAddressWithPort string, auth smtp.Auth, fromAd
 	if err != nil {
 		return err
 	}
+	defer client.Close()
 
-	host, _, _ := net.SplitHostPort(hostAddressWithPort)
+	host, _, err := net.SplitHostPort(hostAddressWithPort)
+	if err != nil {
+		return err
+	}
 	tlsConn := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         host,
+		MinVersion: tls.VersionTLS12,
+		ServerName: host,
 	}
 	if err = client.StartTLS(tlsConn); err != nil {
 		return err

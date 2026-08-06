@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
 	proto3assets "github.com/smallfawn/sillyGirl/proto3"
 	"github.com/smallfawn/sillyGirl/utils"
 )
@@ -28,10 +27,13 @@ from __future__ import annotations
 
 import importlib.abc
 import importlib.util
+import ast
+import inspect
 import json
 import os
 import runpy
 import sys
+import textwrap
 import types
 
 
@@ -109,12 +111,12 @@ def _is_schema_node(value):
 def _normalize_form_field(value, path="field"):
     if _is_schema_node(value):
         return value.schema
-    raise TypeError(f"form schema {path} must use form.string()/form.boolean()/form.select() helpers")
+    raise TypeError(f"Form schema {path} must use Form.string()/Form.boolean()/Form.select() helpers")
 
 
 def _normalize_config_schema(fields):
     if not isinstance(fields, dict) or _is_schema_node(fields):
-        raise TypeError('new form(...) only accepts an object like {"token": form.string().title("Token")}')
+        raise TypeError('plugin.Form/user.Form only accepts an object of field helpers')
     return {
         "type": "object",
         "properties": {
@@ -122,6 +124,7 @@ def _normalize_config_schema(fields):
             for key, value in fields.items()
             if not str(key).startswith("_")
         },
+        "propertyOrder": [key for key in fields if not str(key).startswith("_")],
     }
 
 
@@ -143,11 +146,25 @@ def _schema_defaults(schema):
     return None
 
 
+def _validator_source(callback):
+    source = textwrap.dedent(inspect.getsource(callback)).strip()
+    tree = ast.parse(source)
+    first = tree.body[0] if tree.body else None
+    if isinstance(first, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return source
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Lambda):
+            return ast.get_source_segment(source, node)
+    raise TypeError("test() callback source cannot be extracted")
+
+
 class _SchemaNode:
     def __init__(self, node_type, extra=None):
         setattr(self, "__schemaNode", True)
         self.schema = {"type": node_type}
         self.schema.update(extra or {})
+        self.validators = []
+        self.last_rule = ""
 
     def title(self, value):
         self.schema["title"] = value
@@ -164,8 +181,30 @@ class _SchemaNode:
     def options(self, value):
         return _apply_schema_options(self, value)
 
-    def required(self, value):
-        self.schema["required"] = value
+    def required(self, value=True):
+        self.schema["required"] = bool(value)
+        self.last_rule = "required"
+        return self
+
+    def match(self, value):
+        self.schema["pattern"] = getattr(value, "pattern", str(value or ""))
+        self.last_rule = "match"
+        return self
+
+    def test(self, callback):
+        if not callable(callback):
+            raise TypeError("test() requires a function")
+        self.validators.append({"runtime": "python", "source": _validator_source(callback), "message": ""})
+        self.last_rule = "test"
+        return self
+
+    def err(self, value):
+        if not self.last_rule:
+            raise TypeError("err() must follow required(), match() or test()")
+        if self.last_rule == "test":
+            self.validators[-1]["message"] = str(value or "")
+        else:
+            self.schema.setdefault("errorMessages", {})[self.last_rule] = str(value or "")
         return self
 
     def format(self, value):
@@ -178,18 +217,6 @@ class _SchemaNode:
 
     def max(self, value):
         self.schema["maximum"] = value
-        return self
-
-    def minLength(self, value):
-        self.schema["minLength"] = value
-        return self
-
-    def maxLength(self, value):
-        self.schema["maxLength"] = value
-        return self
-
-    def pattern(self, value):
-        self.schema["pattern"] = value
         return self
 
     def widget(self, value):
@@ -222,18 +249,10 @@ def _apply_schema_options(node, options):
     return node
 
 
-class _Form:
+class _PluginForm:
     def __call__(self, schema):
-        json_schema = _normalize_config_schema(schema)
-        target = os.environ.get("SILLYGIRL_CONFIG_SCHEMA_FILE", "")
-        data = json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
-        if target:
-            with open(target, "w", encoding="utf-8") as fp:
-                fp.write(data)
-        else:
-            print("__SILLYGIRL_CONFIG_SCHEMA__" + data)
-        raise SystemExit(0)
-
+        _exported["plugin"] = _normalize_config_schema(schema)
+        return self
     def string(self): return _SchemaNode("string")
     def number(self): return _SchemaNode("number")
     def integer(self): return _SchemaNode("integer")
@@ -244,32 +263,42 @@ class _Form:
     def defaults(self, fields): return _schema_defaults(_normalize_config_schema(fields))
 
 
+class _UserForm(_PluginForm):
+    def __call__(self, schema):
+        validators = {str(key): value.validators for key, value in schema.items() if _is_schema_node(value) and value.validators}
+        self.definition = {"schema": _normalize_config_schema(schema), "multiple": 1, "key_by": [], "validators": validators}
+        _exported["user"] = self.definition
+        return self
+    def multiple(self, limit):
+        self.definition["multiple"] = max(1, int(limit or 1))
+        return self
+    def keyBy(self, fields):
+        self.definition["key_by"] = [str(item) for item in (fields if isinstance(fields, (list, tuple)) else [fields])]
+        return self
+
+
 class _Dummy:
-    def __init__(self, *_args, **_kwargs):
-        pass
-    def __getattr__(self, _name):
-        return self
-    def __call__(self, *_args, **_kwargs):
-        return self
-    def __getitem__(self, _key):
-        return ""
-    def __setitem__(self, _key, _value):
-        return None
-    def __iter__(self):
-        return iter(())
+    def __init__(self, *_args, **_kwargs): pass
+    def __getattr__(self, _name): return self
+    def __call__(self, *_args, **_kwargs): return self
+    def __getitem__(self, _key): return ""
+    def __setitem__(self, _key, _value): return None
+    def __iter__(self): return iter(())
     def __await__(self):
-        async def _done():
-            return self
+        async def _done(): return self
         return _done().__await__()
 
 
+_exported = {"plugin": None, "user": None}
+_plugin_form = _PluginForm()
+_user_form = _UserForm()
 _dummy = _Dummy()
-_form = _Form()
 _sillygirl = types.ModuleType("sillygirl")
 _sillygirl.Adapter = _Dummy
 _sillygirl.Bucket = _Dummy
 _sillygirl.Sender = _Dummy
-_sillygirl.form = _form
+_sillygirl.plugin = types.SimpleNamespace(Form=_plugin_form)
+_sillygirl.user = types.SimpleNamespace(Form=_user_form, getUserList=_dummy, getUser=_dummy)
 _sillygirl.sender = _dummy
 _sillygirl.container = _dummy
 _sillygirl.utils = _dummy
@@ -279,7 +308,56 @@ sys.modules["sillygirl"] = _sillygirl
 if len(sys.argv) != 2:
     raise SystemExit("usage: sillygirl-config-preload.py PLUGIN_PATH")
 
-runpy.run_path(sys.argv[1], run_name="__main__")
+source_path = sys.argv[1]
+source = open(source_path, "r", encoding="utf-8").read()
+tree = ast.parse(source, filename=source_path)
+def has_form_call(node):
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call) or not isinstance(child.func, ast.Attribute) or child.func.attr != "Form":
+            continue
+        if isinstance(child.func.value, ast.Name) and child.func.value.id in ("plugin", "user"):
+            return True
+    return False
+def defined_names(node):
+    names = set()
+    targets = []
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        names.add(node.name)
+    elif isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+    for target_node in targets:
+        for child in ast.walk(target_node):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                names.add(child.id)
+    return names
+def loaded_names(node):
+    return {child.id for child in ast.walk(node) if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)}
+form_nodes = [node for node in tree.body if has_form_call(node)]
+definitions = {}
+for node in tree.body:
+    for name in defined_names(node):
+        definitions[name] = node
+dependencies = set()
+pending = set()
+for node in form_nodes:
+    pending.update(loaded_names(node))
+while pending:
+    name = pending.pop()
+    node = definitions.get(name)
+    if node is None or node in dependencies or node in form_nodes:
+        continue
+    dependencies.add(node)
+    pending.update(loaded_names(node))
+selected = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom)) or node in dependencies or node in form_nodes]
+exec(compile(ast.Module(body=selected, type_ignores=[]), source_path, "exec"), {"__name__": "__main__"})
+target = os.environ.get("SILLYGIRL_CONFIG_SCHEMA_FILE", "")
+data = json.dumps(_exported, ensure_ascii=False, separators=(",", ":"))
+if target:
+    open(target, "w", encoding="utf-8").write(data)
+else:
+    print("__SILLYGIRL_CONFIG_SCHEMA__" + data)
 `
 
 var pythonSillygirlModuleCache sync.Map
@@ -532,6 +610,7 @@ func registerPythonPluginConfigSchema(path, uuid string) error {
 		"SILLYGIRL_CONFIG_REGISTER_ONLY=true",
 		"SILLYGIRL_CONFIG_SCHEMA_FILE="+tempPath,
 	)
+	env = append(env, pluginFormRegistrationEnv(path)...)
 	cmd.Env = append(os.Environ(), env...)
 	output, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
@@ -547,16 +626,9 @@ func registerPythonPluginConfigSchema(path, uuid string) error {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return errors.New("插件没有导出配置 schema")
 	}
-	schema := map[string]interface{}{}
-	if err := json.Unmarshal(data, &schema); err != nil {
-		return fmt.Errorf("配置 schema 解析失败：%v", err)
-	}
-	if len(schema) == 0 {
-		return errors.New("配置 schema 为空")
-	}
-	if _, _, err := SetBucketKeyValue(pluginConfigSchemas, uuid, schema); err != nil {
+	if err := saveRegisteredPluginForms(uuid, data); err != nil {
 		return err
 	}
-	console.Log("已注册 Python 插件配置 %s (%s)", filepath.Base(path), uuid)
+	console.Log("已注册 Python 插件表单 %s (%s)", filepath.Base(path), uuid)
 	return nil
 }

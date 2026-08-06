@@ -328,8 +328,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-      local: info.local || '1.0.3',
-      remote: info.remote || info.local || '1.0.3',
+      local: info.local || '1.0.7',
+      remote: info.remote || info.local || '1.0.7',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -976,6 +976,7 @@ const tasks = reactive({
   total: 0,
   editing: null as Task | null,
   form: {} as any,
+  toggling: {} as Record<string, boolean>,
   scripts: [] as any[],
   platforms: [] as Array<{ value: string; label: string }>,
   platformBots: {} as Record<string, string[]>,
@@ -1060,6 +1061,21 @@ async function removeTask(row: Task) {
 async function runTask(row: Task) {
   await get(`/api/admin/tasks/run?task_id=${encodeURIComponent(row.task_id)}`);
   message.success('已触发');
+}
+async function toggleTaskEnabled(row: Task, enabled = !row.enable) {
+  const taskId = `${row.task_id || ''}`;
+  if (!taskId || tasks.toggling[taskId]) return;
+  tasks.toggling[taskId] = true;
+  try {
+    await put('/api/admin/tasks/enable', { task_id: taskId, enable: enabled });
+    row.enable = enabled;
+    message.success(enabled ? '定时任务已启用' : '定时任务已停用');
+    await loadTasks();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '更新定时任务状态失败');
+  } finally {
+    tasks.toggling[taskId] = false;
+  }
 }
 
 const carry = reactive({ rows: [] as CarryGroup[], total: 0, editing: null as CarryGroup | null, form: {} as any, selects: {} as any });
@@ -1350,7 +1366,7 @@ const plugins = reactive({
   rows: [] as PluginInfo[],
   total: 0,
   current: 1,
-  pageSize: 12,
+  pageSize: 16,
   tab: 'all',
   keyword: '',
   klass: '全部',
@@ -1372,6 +1388,31 @@ const plugins = reactive({
   detailOpen: false,
   detail: null as PluginInfo | null,
 });
+
+const pluginSearchDebounceMs = 350;
+let pluginSearchTimer = 0;
+
+function cancelPluginSearch() {
+  if (!pluginSearchTimer) return;
+  window.clearTimeout(pluginSearchTimer);
+  pluginSearchTimer = 0;
+}
+
+function searchPluginsNow() {
+  cancelPluginSearch();
+  void loadPlugins(1, plugins.pageSize);
+}
+
+function schedulePluginSearch() {
+  cancelPluginSearch();
+  if (page.value !== 'plugins') return;
+  // 输入变化后立即让进行中的旧请求失效，避免防抖等待期间回填旧结果。
+  plugins.requestId += 1;
+  pluginSearchTimer = window.setTimeout(() => {
+    pluginSearchTimer = 0;
+    void loadPlugins(1, plugins.pageSize);
+  }, pluginSearchDebounceMs);
+}
 
 const pluginEditor = reactive({
   open: false,
@@ -1503,6 +1544,9 @@ function pluginInitial(row: PluginInfo) {
   const text = String(row.title || row.id || 'P').trim();
   return (text ? text.slice(0, 1) : 'P').toUpperCase();
 }
+function pluginHasSchedule(row: PluginInfo) {
+  return Boolean(row.cron && Object.values(row.cron).some((value) => String(value || '').trim()));
+}
 function openPluginDetail(row: PluginInfo) {
   plugins.detail = row;
   plugins.detailOpen = true;
@@ -1519,7 +1563,7 @@ async function loadPluginSources() {
     plugins.sources = [];
   }
 }
-async function loadPlugins(current = 1, pageSize = 12, refresh = false) {
+async function loadPlugins(current = 1, pageSize = plugins.pageSize, refresh = false) {
   const requestId = ++plugins.requestId;
   plugins.loading = true;
   try {
@@ -1536,6 +1580,8 @@ async function loadPlugins(current = 1, pageSize = 12, refresh = false) {
     const res = await get<ApiEnvelope<any>>(`/api/plugins/list.json?${params.toString()}`);
     if (requestId !== plugins.requestId) return;
     const data = apiData(res) || {};
+    const responsePage = Number(data.page);
+    if (Number.isInteger(responsePage) && responsePage > 0) plugins.current = responsePage;
     plugins.rows = data.data || data.list || [];
     plugins.total = data.total || 0;
     plugins.meta = data;
@@ -1576,6 +1622,8 @@ async function removePluginSource(address: string) {
   }
 }
 async function installPlugin(row: PluginInfo) {
+  const marketPage = plugins.current;
+  const marketPageSize = plugins.pageSize;
   plugins.installing[row.id] = true;
   try {
     const res = await put<ApiEnvelope<{ errors?: Record<string, string>; messages?: Record<string, string> }>>('/api/admin/storage', {
@@ -1588,9 +1636,9 @@ async function installPlugin(row: PluginInfo) {
     }
     const firstMessage = Object.values(data.messages || {}).find(Boolean);
     message.success(firstMessage || (row.status === 1 ? '已更新' : '已安装'));
-    await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
+    await Promise.all([loadPlugins(marketPage, marketPageSize), loadUser(), loadPluginConfigs()]);
     try {
-      await offerPluginDependencyInstall(row);
+      await offerPluginDependencyInstall(row, plugins.current, plugins.pageSize);
     } catch (error) {
       message.warning(`插件已安装，但依赖检测失败：${error instanceof Error ? error.message : '未知错误'}`);
     }
@@ -1995,7 +2043,11 @@ async function resolvePluginDependencyPlan(row: PluginInfo): Promise<PluginDepen
   };
 }
 
-async function installMarketPluginDependencies(plan: PluginDependencyPlan) {
+async function installMarketPluginDependencies(
+  plan: PluginDependencyPlan,
+  marketPage = plugins.current,
+  marketPageSize = plugins.pageSize,
+) {
   const messageKey = `plugin-dependencies-${plan.runtime}-${plan.plugin}`;
   message.loading({ key: messageKey, content: `正在安装 ${plan.dependencies.length} 个依赖…`, duration: 0 });
   const failed: string[] = [];
@@ -2016,10 +2068,14 @@ async function installMarketPluginDependencies(plan: PluginDependencyPlan) {
     throw new Error(failed.join('；'));
   }
   message.success({ key: messageKey, content: `${plan.pluginTitle} 的依赖已全部安装`, duration: 3 });
-  await Promise.all([loadPluginConfigs(), loadUser(false), loadPlugins()]);
+  await Promise.all([loadPluginConfigs(), loadUser(false), loadPlugins(marketPage, marketPageSize)]);
 }
 
-async function offerPluginDependencyInstall(row: PluginInfo) {
+async function offerPluginDependencyInstall(
+  row: PluginInfo,
+  marketPage = plugins.current,
+  marketPageSize = plugins.pageSize,
+) {
   const plan = await resolvePluginDependencyPlan(row);
   if (!plan) return;
   const names = plan.dependencies.map((item) => item.name).join('、');
@@ -2037,7 +2093,7 @@ async function offerPluginDependencyInstall(row: PluginInfo) {
     okText: '自动安装',
     cancelText: '暂不安装',
     centered: true,
-    onOk: () => installMarketPluginDependencies(plan),
+    onOk: () => installMarketPluginDependencies(plan, marketPage, marketPageSize),
   });
 }
 
@@ -3067,8 +3123,8 @@ function openActiveMessageTool() {
   openMessage();
 }
 
-watch([page, user], ([p]) => {
-  if (!user.value) return;
+watch([page, () => Boolean(user.value)], ([p, authenticated]) => {
+  if (!authenticated) return;
   if (p === 'bots') loadBots();
   if (p === 'users') loadNormalUsers();
   if (p === 'masters') loadMasters();
@@ -3078,7 +3134,7 @@ watch([page, user], ([p]) => {
   if (p === 'dependencies') loadNodeDependencies();
   if (p === 'plugins') {
     loadPluginSources();
-    loadPlugins(1, 12, true);
+    loadPlugins(1, 16, true);
     loadPluginConfigs();
   }
   if (p === 'storage') {
@@ -3097,8 +3153,16 @@ watch(messageToolKind, (kind) => {
   window.history.replaceState({}, '', `/admin/message-tools/${kind}`);
   loadActiveMessageTool();
 });
-watch(() => plugins.tab, () => loadPlugins());
-watch(() => plugins.klass, () => loadPlugins());
+watch(() => plugins.keyword, schedulePluginSearch);
+watch(() => plugins.tab, () => {
+  cancelPluginSearch();
+  loadPlugins();
+});
+watch(() => plugins.klass, () => {
+  cancelPluginSearch();
+  loadPlugins();
+});
+onBeforeUnmount(cancelPluginSearch);
 watch(() => nodeDeps.plugin, (plugin) => {
   if (page.value === 'dependencies') loadNodeDependencies(plugin);
 });
@@ -3793,7 +3857,16 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Table.Column title="标题" data-index="title" :width="180" />
                 <Table.Column title="Cron" data-index="schedule" :width="180" />
                 <Table.Column title="命令" data-index="command" ellipsis />
-                <Table.Column title="启用" data-index="enable" :width="80"><template #default="{ text }">{{ text ? '是' : '否' }}</template></Table.Column>
+                <Table.Column title="状态" data-index="enable" :width="80" align="center">
+                  <template #default="{ record }">
+                    <Switch
+                      :checked="record.enable"
+                      :loading="tasks.toggling[record.task_id]"
+                      :aria-label="`${record.title}启用状态`"
+                      @change="(checked: boolean) => toggleTaskEnabled(record, checked)"
+                    />
+                  </template>
+                </Table.Column>
                 <Table.Column title="创建时间" data-index="created_at" :width="180"><template #default="{ text }">{{ timestamp(text) }}</template></Table.Column>
                 <Table.Column title="操作" :width="180"><template #default="{ record }"><Button type="text" @click="runTask(record)"><Play :size="16" /></Button><Button type="text" @click="openTask(record)">编辑</Button><Popconfirm title="确认删除？" @confirm="removeTask(record)"><Button type="text" danger><Trash2 :size="16" /></Button></Popconfirm></template></Table.Column>
               </Table>
@@ -3918,20 +3991,21 @@ function smallcatOpenids(record?: AdminUserRow) {
             <section v-if="page === 'plugins'" class="panel">
               <Tabs v-model:active-key="plugins.tab">
                 <TabPane key="all" :tab="`全部 ${plugins.meta.all ?? ''}`" />
+                <TabPane key="latest" :tab="`最新发布 ${plugins.meta.latest ?? ''}`" />
                 <TabPane key="private" :tab="`非公开 ${plugins.meta.private ?? ''}`" />
                 <TabPane key="tab1" :tab="`已安装 ${plugins.meta.tab1 ?? ''}`" />
                 <TabPane key="tab2" :tab="`未安装 ${plugins.meta.tab2 ?? ''}`" />
                 <TabPane key="tab3" :tab="`可更新 ${plugins.meta.tab3 ?? ''}`" />
               </Tabs>
               <Alert
+                class="plugin-market-hint"
                 type="info"
                 show-icon
-                message="操作提示"
                 description="点击插件图标可以打开插件源码编辑器；点击插件名字可以查看插件介绍。"
                 style="margin-bottom: 12px"
               />
               <div class="toolbar-left" style="margin-bottom: 12px">
-                <Input id="plugin-market-search" v-model:value="plugins.keyword" name="plugin-market-search" allow-clear style="width: 260px" placeholder="搜索插件或来源" @press-enter="loadPlugins()" />
+                <Input id="plugin-market-search" v-model:value="plugins.keyword" name="plugin-market-search" allow-clear style="width: 260px" placeholder="输入即搜索，支持模糊匹配" @press-enter="searchPluginsNow" />
                 <Select
                   id="plugin-market-class"
                   v-model:value="plugins.klass"
@@ -3941,16 +4015,25 @@ function smallcatOpenids(record?: AdminUserRow) {
                   :options="pluginClassOptions"
                   :filter-option="filterPluginClassOption"
                 />
-                <Button type="primary" @click="loadPlugins()"><template #icon><Search :size="16" /></template>搜索</Button>
+                <Button type="primary" @click="searchPluginsNow"><template #icon><Search :size="16" /></template>搜索</Button>
                 <Button type="primary" @click="openPluginSourceManager">
                   <template #icon><Settings :size="16" /></template>管理插件源
                 </Button>
-                <Button @click="loadPlugins(1, 12, true)"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                <Button @click="loadPlugins(1, 16, true)"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
                 <Button type="primary" @click="openNewMarketPluginEditor"><template #icon><Plus :size="16" /></template>新增插件</Button>
+                <span class="plugin-admin-legend" aria-label="淡蓝色卡片表示管理员插件">
+                  <span class="plugin-admin-legend-swatch" aria-hidden="true"></span>
+                  <span>管理员插件</span>
+                </span>
               </div>
               <Spin :spinning="plugins.loading">
                 <div v-if="plugins.rows.length" class="plugin-market-grid">
-                  <article v-for="record in plugins.rows" :key="record.id" class="plugin-market-card">
+                  <article
+                    v-for="record in plugins.rows"
+                    :key="record.id"
+                    class="plugin-market-card"
+                    :class="{ 'plugin-market-card--admin': record.admin }"
+                  >
                     <button
                       type="button"
                       class="plugin-card-icon"
@@ -3965,6 +4048,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                         <button type="button" class="plugin-card-title" @click="openPluginDetail(record)">
                           {{ record.title || record.id }}
                         </button>
+                        <Tag v-if="pluginHasSchedule(record)" class="plugin-card-cron-badge">定时</Tag>
                       </div>
                       <div class="plugin-card-meta">
                         <Tag>{{ record.latest_version || record.version || record.current_version || '-' }}</Tag>
@@ -4402,7 +4486,6 @@ function smallcatOpenids(record?: AdminUserRow) {
           <Form.Item label="触发命令" html-for="task-command"><Select id="task-command" v-model:value="tasks.form.command" show-search :options="tasks.scripts" placeholder="node xxx.js 或 python xxx.py" /></Form.Item>
           <Form.Item label="接收平台" html-for="task-platform"><Select id="task-platform" v-model:value="tasks.form.platform" allow-clear :options="tasks.platforms" placeholder="选择 BOT 平台" /></Form.Item>
           <Form.Item label="接收人 ID" html-for="task-recipient" help="填写该平台的用户 ID；插件调用 s.reply() 时会私聊此账号"><Input id="task-recipient" v-model:value="tasks.form.recipient" name="task-recipient" allow-clear placeholder="请输入用户 ID / OpenID" /></Form.Item>
-          <Form.Item label="启用" html-for="task-enable"><Switch id="task-enable" v-model:checked="tasks.form.enable" /></Form.Item>
         </Form>
       </Modal>
 

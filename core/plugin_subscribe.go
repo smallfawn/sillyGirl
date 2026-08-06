@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/smallfawn/sillyGirl/core/common"
@@ -47,6 +48,7 @@ type RequestPluginResult struct {
 	Tab1    int                `json:"tab1"`
 	Tab2    int                `json:"tab2"`
 	Tab3    int                `json:"tab3"`
+	Latest  int                `json:"latest"`
 	Private int                `json:"private"`
 	All     int                `json:"all"`
 	Tab     string             `json:"tab"`
@@ -56,6 +58,81 @@ type RequestPluginResult struct {
 }
 
 var plugin_list = []*common.Function{}
+
+const latestPluginMarketLimit = 20
+
+func pluginPublishedAt(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func latestPluginMarketItems(items []*common.Function, limit int) []*common.Function {
+	latest := make([]*common.Function, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if _, ok := pluginPublishedAt(item.CreateAt); ok {
+			latest = append(latest, item)
+		}
+	}
+	sort.SliceStable(latest, func(i, j int) bool {
+		left, _ := pluginPublishedAt(latest[i].CreateAt)
+		right, _ := pluginPublishedAt(latest[j].CreateAt)
+		if left.Equal(right) {
+			return firstNonEmpty(latest[i].Title, latest[i].UUID) < firstNonEmpty(latest[j].Title, latest[j].UUID)
+		}
+		return left.After(right)
+	})
+	if limit > 0 && len(latest) > limit {
+		latest = latest[:limit]
+	}
+	return latest
+}
+
+func compactPluginSearchText(value string) string {
+	var result strings.Builder
+	for _, char := range strings.ToLower(value) {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			result.WriteRune(char)
+		}
+	}
+	return result.String()
+}
+
+func pluginMatchesKeyword(plugin *common.Function, keyword string) bool {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return true
+	}
+	if plugin == nil {
+		return false
+	}
+	fields := []string{
+		plugin.Title, plugin.Description, plugin.Author, plugin.Class,
+		plugin.Organization, plugin.Address, plugin.UUID, plugin.Type,
+		plugin.Suffix, plugin.Rule, plugin.Version,
+	}
+	fields = append(fields, plugin.Classes...)
+	fields = append(fields, plugin.Dependencies...)
+	haystack := strings.ToLower(strings.Join(fields, " "))
+	compactHaystack := compactPluginSearchText(haystack)
+	for _, token := range strings.Fields(keyword) {
+		if strings.Contains(haystack, token) {
+			continue
+		}
+		compactToken := compactPluginSearchText(token)
+		if compactToken == "" || !strings.Contains(compactHaystack, compactToken) {
+			return false
+		}
+	}
+	return true
+}
 
 func initPluginList() {
 	list := []*common.Function{}
@@ -208,9 +285,12 @@ func initWebPluginList() {
 			}
 			privatePlugins := localPrivatePlugins(plugin_list, Functions)
 			rr.Private = len(privatePlugins)
-			marketPlugins := plugin_list
+			marketPlugins := append([]*common.Function(nil), plugin_list...)
 			if activeKey == "private" {
 				marketPlugins = privatePlugins
+			} else {
+				// “全部”和安装状态标签应包含本地插件；“非公开”仍可单独筛选。
+				marketPlugins = append(append([]*common.Function(nil), privatePlugins...), marketPlugins...)
 			}
 			var list []*common.Function
 			if keyword == "" {
@@ -227,13 +307,13 @@ func initWebPluginList() {
 			} else {
 				if len(origins) == 0 {
 					for _, f := range marketPlugins {
-						if strings.Contains(f.Title, keyword) || strings.Contains(f.Organization, keyword) {
+						if pluginMatchesKeyword(f, keyword) {
 							list = append(list, f)
 						}
 					}
 				} else {
 					for _, f := range marketPlugins {
-						if strings.Contains(f.Title, keyword) || strings.Contains(f.Organization, keyword) {
+						if pluginMatchesKeyword(f, keyword) {
 							if Contains(origins, f.Organization) {
 								list = append(list, f)
 							}
@@ -275,6 +355,8 @@ func initWebPluginList() {
 			if class != "全部" {
 				list = classes[class]
 			}
+			latest := latestPluginMarketItems(list, latestPluginMarketLimit)
+			rr.Latest = len(latest)
 			rr.Class = classesNum
 			var origins = map[string]string{}
 			for i := range list { //处理第二分类
@@ -312,6 +394,8 @@ func initWebPluginList() {
 				list = tab2
 			} else if activeKey == "tab3" {
 				list = tab3
+			} else if activeKey == "latest" {
+				list = latest
 			}
 			tab := ""
 			if mclass == "true" {
@@ -332,6 +416,7 @@ func initWebPluginList() {
 			if last := (rr.Total + pageSize - 1) / pageSize; current > last {
 				current = last
 			}
+			rr.Page = current
 			begin := (current - 1) * pageSize
 			end := (current) * pageSize
 			if end > rr.Total {
@@ -350,11 +435,14 @@ func initWebPluginList() {
 			for i := range rr.Data {
 				rr.Data[i].Icon = pluginIconOrDefault(rr.Data[i].Icon)
 				rr.Data[i].HasForm = false
+				rr.Data[i].HasUserForm = false
 				rr.Data[i].ConfigRegistered = getPluginConfigRecord(rr.Data[i].UUID) != nil
 				rr.Data[i].UsesSmallCat = false
 				rr.Data[i].Running = false
 				for j := range fc {
 					if rr.Data[i].UUID == fc[j].UUID {
+						rr.Data[i].Admin = fc[j].Admin
+						rr.Data[i].Cron = fc[j].Cron
 						rr.Data[i].Messages = GetPluginMessage(rr.Data[i].UUID)
 						rr.Data[i].CurrentVersion = fc[j].Version
 						rr.Data[i].LatestVersion = rr.Data[i].Version
@@ -372,13 +460,14 @@ func initWebPluginList() {
 						if fc[j].HasForm {
 							rr.Data[i].HasForm = true
 						}
+						rr.Data[i].HasUserForm = fc[j].HasUserForm
 						rr.Data[i].UsesSmallCat = fc[j].UsesSmallCat
 						if fc[j].Running {
 							rr.Data[i].Running = true
 						}
 						rr.Data[i].Debug = plugin_debug.GetString(rr.Data[i].UUID) == "b:true"
 						rr.Data[i].Disable = fc[j].Disable
-						rr.Data[i].Open = fc[j].Open && fc[j].UsesSmallCat
+						rr.Data[i].Open = fc[j].Open && (fc[j].UsesSmallCat || fc[j].HasUserForm)
 					}
 				}
 				rr.Data[i].Description = parseReply2(rr.Data[i].Description)
@@ -600,12 +689,14 @@ type githubPublicFileIndexEntry struct {
 	Rule         string   `json:"rule"`
 	Public       bool     `json:"public"`
 	Admin        bool     `json:"admin"`
+	Cron         string   `json:"cron"`
 	Disable      bool     `json:"disable"`
 	Path         string   `json:"path"`
 	Raw          string   `json:"raw"`
 	Dependencies []string `json:"dependencies"`
 	Type         string   `json:"type"`
 	Origin       string   `json:"origin"`
+	CreateAt     string   `json:"create_at"`
 }
 
 func parseGithubPluginSource(address string) (*githubPluginSource, error) {
@@ -788,6 +879,10 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 			rawURL = githubRawURL(source.Owner, source.Repo, source.Branch, pluginPath)
 		}
 		pluginAddress := makeGithubNodePluginAddress(source, pluginPath, rawURL, class)
+		cron := map[string]string{}
+		if schedule := parseCronMetaValue(record.Cron); schedule != "" {
+			cron["task"] = schedule
+		}
 		items = append(items, &common.Function{
 			UUID:         id,
 			Title:        title,
@@ -802,8 +897,11 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 			Address:      pluginAddress,
 			Classes:      classes,
 			Public:       record.Public,
+			Admin:        record.Admin,
+			Cron:         cron,
 			Disable:      record.Disable,
 			Dependencies: record.Dependencies,
+			CreateAt:     strings.TrimSpace(record.CreateAt),
 			PluginPublisher: common.PluginPublisher{
 				Address:      pluginAddress,
 				Organization: organization,

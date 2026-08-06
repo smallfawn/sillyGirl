@@ -16,7 +16,7 @@ type MongoDBPool struct {
 	mutex   sync.Mutex               // 互斥锁
 }
 
-var p *MongoDBPool
+var p = NewMongoDBPool()
 
 // 创建一个新的MongoDB连接池
 func NewMongoDBPool() *MongoDBPool {
@@ -27,9 +27,6 @@ func NewMongoDBPool() *MongoDBPool {
 
 // 获取一个MongoDB客户端连接
 func GetClient(uri string) (*mongo.Client, error) {
-	if p == nil {
-		p = NewMongoDBPool()
-	}
 	// 加锁
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -39,17 +36,11 @@ func GetClient(uri string) (*mongo.Client, error) {
 		return client, nil
 	}
 
-	// 创建新的连接
-	client, err := mongo.NewClient(options.Client().ApplyURI(uri))
-	if err != nil {
-		return nil, err
-	}
-
-	// 连接数据库
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = client.Connect(ctx)
+	// 创建并连接客户端。
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, err
 	}

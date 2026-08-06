@@ -113,11 +113,75 @@ func pluginCronTasks() []*Tasks {
 				Command:  scriptCommandForFunction(f),
 				Scripts:  []string{f.UUID},
 				Remark:   "来自脚本注释 @cron",
-				Enable:   !f.Disable,
+				Enable:   pluginExecutionEnabled(f),
 			})
 		}
 	}
 	return rows
+}
+
+// setTaskEnabled keeps the task list switch as the single place for changing
+// scheduled execution state. Plugin @cron rows reuse the plugin's enable field;
+// ordinary tasks keep their own persisted enable flag.
+func setTaskEnabled(taskID string, enabled bool) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("缺少任务ID")
+	}
+	if _, _, ok := parsePluginCronTaskID(taskID); ok {
+		f, _ := findScriptFunctionByTask(taskID, "")
+		if f == nil {
+			return fmt.Errorf("定时任务脚本不存在")
+		}
+		config := getPluginUserConfig(f.UUID)
+		if config == nil {
+			config = map[string]interface{}{}
+		}
+		config["enable"] = enabled
+		if _, _, err := SetBucketKeyValue(pluginConfigValues, f.UUID, config); err != nil {
+			return err
+		}
+		return nil
+	}
+	raw := tasks.GetString(taskID)
+	if raw == "" {
+		return fmt.Errorf("定时任务不存在")
+	}
+	var task Tasks
+	if err := json.Unmarshal([]byte(raw), &task); err != nil {
+		return err
+	}
+	task.Enable = enabled
+	tasks.Set(taskID, utils.JsonMarshal(task))
+	return nil
+}
+
+func runTaskNow(taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("缺少任务ID")
+	}
+	if _, platform, ok := parsePluginCronTaskID(taskID); ok {
+		f, _ := findScriptFunctionByTask(taskID, "")
+		if f == nil || f.Handle == nil {
+			return fmt.Errorf("定时任务脚本不存在")
+		}
+		if !pluginExecutionEnabled(f) {
+			return fmt.Errorf("插件未启用")
+		}
+		f.Handle(&CustomSender{F: &Factory{botplt: platform, uuid: f.UUID}})
+		return nil
+	}
+	for _, task := range pts {
+		if task.ID == taskID {
+			if task.Handle == nil {
+				return fmt.Errorf("定时任务不可执行")
+			}
+			task.Handle()
+			return nil
+		}
+	}
+	return fmt.Errorf("定时任务不存在")
 }
 
 func scriptTaskTitle(f *common.Function) string {
@@ -135,6 +199,9 @@ func findScriptFunctionByTask(taskID, command string) (*common.Function, string)
 	if uuid, platform, ok := parsePluginCronTaskID(taskID); ok {
 		for _, f := range Functions {
 			if f != nil && f.UUID == uuid && (f.Type == NODE || f.Type == PYTHON) {
+				if _, exists := f.Cron[platform]; !exists {
+					return nil, platform
+				}
 				return f, platform
 			}
 		}
@@ -163,6 +230,9 @@ func RegistTasks(pt *Tasks) {
 				for _, script := range pt.Scripts {
 					for _, function := range Functions {
 						if function.UUID == script {
+							if !pluginExecutionEnabled(function) {
+								break
+							}
 							for i := range function.Rules {
 								reg, err := functionRulePattern(function, i)
 								if err == nil {
@@ -179,6 +249,10 @@ func RegistTasks(pt *Tasks) {
 				}
 			}
 		}
+	}
+	if !pt.Enable {
+		pt.CronID = 0
+		return
 	}
 	cid, _ := CRON.AddFunc(pt.Schedule, pt.Handle)
 	pt.CronID = int(cid)
@@ -377,6 +451,21 @@ func init() {
 		}
 		ApiOK(ctx, nil)
 	})
+	GinApi(PUT, "/api/admin/tasks/enable", RequireAuth, func(ctx *gin.Context) {
+		var req struct {
+			TaskID string `json:"task_id"`
+			Enable bool   `json:"enable"`
+		}
+		if err := ctx.BindJSON(&req); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		if err := setTaskEnabled(req.TaskID, req.Enable); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		ApiOK(ctx, gin.H{"task_id": req.TaskID, "enable": req.Enable})
+	})
 	GinApi(DELETE, "/api/admin/tasks", RequireAuth, func(ctx *gin.Context) {
 		pt := &Tasks{}
 		err := ctx.BindJSON(pt)
@@ -480,11 +569,9 @@ func init() {
 		})
 	})
 	GinApi(GET, "/api/admin/tasks/run", RequireAuth, func(ctx *gin.Context) {
-		var task_id = ctx.Query("task_id")
-		for _, pt := range pts {
-			if pt.ID == task_id {
-				pt.Handle()
-			}
+		if err := runTaskNow(ctx.Query("task_id")); err != nil {
+			ApiFail(ctx, err.Error())
+			return
 		}
 		ApiOK(ctx, nil)
 	})
@@ -512,6 +599,10 @@ func runScriptTaskCommand(command string, targets []Sender) bool {
 	f := scriptFunctionByCommandTarget(target, class)
 	if f == nil || f.Handle == nil {
 		console.Error("定时任务脚本不存在：%s", target)
+		return true
+	}
+	if !pluginExecutionEnabled(f) {
+		console.Log("定时任务已跳过，插件未启用：%s", f.Title)
 		return true
 	}
 	if len(targets) == 0 {
@@ -660,33 +751,6 @@ func upsertPluginCronAnnotation(script, schedule string, scriptType ...string) s
 		}
 	}
 	return strings.Join(out, newline)
-}
-
-func insertPythonCronAnnotation(lines *[]string, insert string) bool {
-	out := *lines
-	quote := ""
-	for i, line := range out {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmed, `"""`) {
-			quote = `"""`
-		} else if strings.HasPrefix(trimmed, `'''`) {
-			quote = `'''`
-		}
-		if quote == "" {
-			return false
-		}
-		for j := i + 1; j < len(out); j++ {
-			if strings.TrimSpace(out[j]) == quote {
-				*lines = append(out[:j], append([]string{insert}, out[j:]...)...)
-				return true
-			}
-		}
-		return false
-	}
-	return false
 }
 
 func formatCronMetaValue(schedule string) string {

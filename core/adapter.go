@@ -2,9 +2,10 @@ package core
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"reflect"
 	"regexp"
 	"strings"
@@ -144,14 +145,25 @@ Try:
 		return nil, ErrNotFind
 	}
 	if len(select_bots) != 0 {
-		i := rand.Intn(len(select_bots))
+		i := adapterRandomIndex(len(select_bots))
 		return select_bots[i], nil
 	}
-	i := rand.Intn(len(bots))
+	i := adapterRandomIndex(len(bots))
 	if hasBotFilter {
 		return bots[i], ErrNotFind
 	}
 	return bots[i], nil
+}
+
+func adapterRandomIndex(length int) int {
+	if length <= 1 {
+		return 0
+	}
+	index, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(length)))
+	if err != nil {
+		return 0
+	}
+	return int(index.Int64())
 }
 
 func GetAdapters(botplt string, bots_id ...string) ([]*Factory, error) {

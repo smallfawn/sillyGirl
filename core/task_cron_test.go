@@ -1,11 +1,13 @@
 package core
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/smallfawn/sillyGirl/core/common"
+	"github.com/smallfawn/sillyGirl/utils"
 )
 
 func TestParseCronMetaValue(t *testing.T) {
@@ -69,5 +71,85 @@ func TestScriptCommandForPythonFunction(t *testing.T) {
 	target, class := scriptTaskTarget("python daily.py")
 	if target != "daily.py" || class != PYTHON {
 		t.Fatalf("scriptTaskTarget() = (%q, %q); want (%q, %q)", target, class, "daily.py", PYTHON)
+	}
+}
+
+func TestDisabledTaskIsNotRegistered(t *testing.T) {
+	task := &Tasks{Schedule: "0 * * * *", Enable: false}
+	RegistTasks(task)
+	if task.CronID != 0 {
+		t.Fatalf("disabled task cron id = %d; want 0", task.CronID)
+	}
+}
+
+func TestSetTaskEnabledPersistsOrdinaryTask(t *testing.T) {
+	id := "task-toggle-test-" + utils.GenUUID()
+	task := Tasks{ID: id, Title: "toggle", Schedule: "0 * * * *", Enable: true}
+	tasks.Set(id, utils.JsonMarshal(task))
+	t.Cleanup(func() { tasks.Set(id, "") })
+
+	if err := setTaskEnabled(id, false); err != nil {
+		t.Fatal(err)
+	}
+	var saved Tasks
+	if err := json.Unmarshal([]byte(tasks.GetString(id)), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Enable {
+		t.Fatal("ordinary task remains enabled")
+	}
+}
+
+func TestSetTaskEnabledUpdatesPluginConfig(t *testing.T) {
+	uuid := "plugin-toggle-test-" + utils.GenUUID()
+	f := &common.Function{UUID: uuid, Type: NODE, Cron: map[string]string{"task": "0 * * * *"}}
+	previous := Functions
+	Functions = append(Functions, f)
+	t.Cleanup(func() {
+		Functions = previous
+		pluginConfigValues.Set(uuid, "")
+	})
+
+	if err := setTaskEnabled(pluginCronTaskID(uuid, "task"), false); err != nil {
+		t.Fatal(err)
+	}
+	if pluginExecutionEnabled(f) {
+		t.Fatal("plugin cron remains enabled")
+	}
+}
+
+func TestRunTaskNowExecutesPluginCron(t *testing.T) {
+	uuid := "plugin-run-test-" + utils.GenUUID()
+	called := 0
+	f := &common.Function{
+		UUID: uuid,
+		Type: NODE,
+		Cron: map[string]string{"task": "0 * * * *"},
+		Handle: func(common.Sender) interface{} {
+			called++
+			return nil
+		},
+	}
+	previous := Functions
+	Functions = append(Functions, f)
+	t.Cleanup(func() {
+		Functions = previous
+		pluginConfigValues.Set(uuid, "")
+	})
+
+	if err := runTaskNow(pluginCronTaskID(uuid, "task")); err != nil {
+		t.Fatal(err)
+	}
+	if called != 1 {
+		t.Fatalf("plugin cron called %d times; want 1", called)
+	}
+	if err := runTaskNow(pluginCronTaskID(uuid, "missing")); err == nil {
+		t.Fatal("unknown plugin cron platform was executed")
+	}
+	if err := setTaskEnabled(pluginCronTaskID(uuid, "task"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTaskNow(pluginCronTaskID(uuid, "task")); err == nil {
+		t.Fatal("disabled plugin cron was executed")
 	}
 }

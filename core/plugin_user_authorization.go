@@ -63,6 +63,7 @@ type pluginRuntimeUser struct {
 	Disabled   bool                      `json:"disabled"`
 	Authorized bool                      `json:"authorized"`
 	Bindings   pluginRuntimeUserBindings `json:"bindings"`
+	Records    []pluginUserFormRecord    `json:"records,omitempty"`
 }
 
 func init() {
@@ -263,6 +264,7 @@ func pluginRuntimeUsers(pluginID string) []pluginRuntimeUser {
 				Telegram:        row.Bindings.Telegram,
 				SmallcatOpenIDs: openids,
 			},
+			Records: pluginUserRecords(row.ID, pluginID),
 		})
 	}
 	return result

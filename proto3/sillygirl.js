@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.console = exports.utils = exports.sender = exports.form = exports.container = exports.Bucket = exports.Adapter = void 0;
+exports.console = exports.utils = exports.sender = exports.user = exports.plugin = exports.container = exports.Bucket = exports.Adapter = void 0;
 const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
@@ -218,7 +218,7 @@ class Sender {
             });
         });
     }
-    async continue() {
+    async resume() {
         return new Promise((resolve, reject) => {
             client.SenderContinue(new srpc_1.srpc.SenderRequest({
                 uuid: this.uuid,
@@ -370,7 +370,7 @@ class Bucket {
     constructor(name) {
         this.name = name;
     }
-    transform(v) {
+    #transformBucketValue(v) {
         if (!v) {
             return undefined;
         }
@@ -393,7 +393,7 @@ class Bucket {
         }
         return v;
     }
-    reverseTransform(value) {
+    #serializeBucketValue(value) {
         if (typeof value === "number") {
             if (value % 1 === 0) {
                 return `d:${value}`;
@@ -418,7 +418,7 @@ class Bucket {
                     reject(err);
                 }
                 else {
-                    resolve(this.transform(resp?.value) || defaultValue);
+                    resolve(this.#transformBucketValue(resp?.value) ?? defaultValue);
                 }
             });
         });
@@ -428,7 +428,7 @@ class Bucket {
             client.BucketSet(new srpc_1.srpc.BucketSetRequest({
                 name: this.name,
                 key,
-                value: this.reverseTransform(value),
+                value: this.#serializeBucketValue(value),
             }), metadata, (err, resp) => {
                 if (err) {
                     reject(err);
@@ -453,7 +453,7 @@ class Bucket {
                     if (resp?.value) {
                         values = JSON.parse(resp?.value);
                         for (let key in values) {
-                            values[key] = this.transform(values[key]);
+                            values[key] = this.#transformBucketValue(values[key]);
                         }
                     }
                     resolve(values);
@@ -488,7 +488,7 @@ class Bucket {
             });
         });
     }
-    async len() {
+    async count() {
         return new Promise((resolve, reject) => {
             client.BucketLen(new srpc_1.srpc.BucketRequest({ name: this.name }), metadata, (err, resp) => {
                 if (err) {
@@ -515,7 +515,7 @@ class Bucket {
     watch(key, handle) {
         const call = client.BucketWatch(metadata);
         call.on("data", async (response) => {
-            let fin = handle(this.transform(response.old), this.transform(response.now), response.key);
+            let fin = handle(this.#transformBucketValue(response.old), this.#transformBucketValue(response.now), response.key);
             try {
                 fin = await fin;
             }
@@ -529,7 +529,7 @@ class Bucket {
                 result.error = "VOID";
             }
             else {
-                result.now = this.reverseTransform(fin.now);
+                result.now = this.#serializeBucketValue(fin.now);
                 result.message = fin.message;
                 result.error = fin.error;
             }
@@ -549,21 +549,17 @@ class Bucket {
     }
 }
 exports.Bucket = Bucket;
-/** Read ordinary users and this plugin's authorization state. */
-async function userList() {
-    return await new Bucket("__plugin_users__").get("list", []);
-}
 function isSchemaNode(value) {
     return !!(value && value.__schemaNode && value.schema);
 }
 function normalizeFormField(value, path = "field") {
     if (isSchemaNode(value))
         return value.schema;
-    throw new Error(`form schema ${path} must use form.string()/form.boolean()/form.select() helpers`);
+    throw new Error(`Form schema ${path} must use plugin.Form/user.Form field helpers`);
 }
 function normalizeConfigSchema(fields) {
     if (!fields || typeof fields !== "object" || Array.isArray(fields) || isSchemaNode(fields)) {
-        throw new Error("new form(...) only accepts an object like { token: form.string().title(\"Token\") }");
+        throw new Error("Form(...) only accepts an object like { token: plugin.Form.string().title(\"Token\") }");
     }
     const properties = {};
     for (const key of Object.keys(fields)) {
@@ -571,7 +567,7 @@ function normalizeConfigSchema(fields) {
             continue;
         properties[key] = normalizeFormField(fields[key], key);
     }
-    return { type: "object", properties };
+    return { type: "object", properties, propertyOrder: Object.keys(properties) };
 }
 function pluginConfigDefaults(schema) {
     const normalized = isSchemaNode(schema) ? schema.schema : schema;
@@ -595,6 +591,8 @@ function pluginConfigDefaults(schema) {
 class SchemaNode {
     __schemaNode = true;
     schema;
+    lastRule = "";
+    validators = [];
     constructor(type, extra = {}) {
         this.schema = Object.assign({ type }, extra);
     }
@@ -602,13 +600,30 @@ class SchemaNode {
     description(value) { this.schema.description = value; return this; }
     default(value) { this.schema.default = value; return this; }
     options(value) { return applySchemaOptions(this, value); }
-    required(value) { this.schema.required = value; return this; }
+    required(value = true) { this.schema.required = value; this.lastRule = "required"; return this; }
+    match(value) { this.schema.pattern = value instanceof RegExp ? value.source : String(value || ""); this.lastRule = "match"; return this; }
+    test(callback) {
+        if (typeof callback !== "function")
+            throw new Error("test() requires a function");
+        this.validators.push({ runtime: "node", source: callback.toString(), message: "" });
+        this.lastRule = "test";
+        return this;
+    }
+    err(value) {
+        if (!this.lastRule)
+            throw new Error("err() must follow required(), match() or test()");
+        if (this.lastRule === "test")
+            this.validators[this.validators.length - 1].message = String(value || "");
+        else {
+            if (!this.schema.errorMessages)
+                this.schema.errorMessages = {};
+            this.schema.errorMessages[this.lastRule] = String(value || "");
+        }
+        return this;
+    }
     format(value) { this.schema.format = value; return this; }
     min(value) { this.schema.minimum = value; return this; }
     max(value) { this.schema.maximum = value; return this; }
-    minLength(value) { this.schema.minLength = value; return this; }
-    maxLength(value) { this.schema.maxLength = value; return this; }
-    pattern(value) { this.schema.pattern = value; return this; }
     widget(value) { this.schema["ui:widget"] = value; return this; }
     toJSON() { return this.schema; }
 }
@@ -684,9 +699,6 @@ class PluginConfigFormInstance {
         this.userConfig = await new Bucket("plugin_config_values").get(this.uuid, {});
         return this.userConfig;
     }
-    async Get() {
-        return this.get();
-    }
     async set(values) {
         await this.ready;
         if (values && typeof values === "object")
@@ -694,14 +706,51 @@ class PluginConfigFormInstance {
         await new Bucket("plugin_config_values").set(this.uuid, this.userConfig || {});
         return { error: "" };
     }
-    async Set(values) {
-        return this.set(values);
-    }
 }
-const form = Object.assign(function (fields) {
+const pluginForm = Object.assign(function (fields) {
     return new PluginConfigFormInstance(fields);
 }, formHelpers, { defaults: (fields) => pluginConfigDefaults(normalizeConfigSchema(fields)) });
-exports.form = form;
+class UserFormInstance {
+    definition;
+    constructor(fields) {
+        const validators = {};
+        for (const key of Object.keys(fields)) {
+            const node = fields[key];
+            if (node.validators?.length)
+                validators[key] = node.validators;
+        }
+        this.definition = { schema: normalizeConfigSchema(fields), multiple: 1, key_by: [], validators };
+        void this.register();
+    }
+    multiple(limit) { this.definition.multiple = Math.max(1, Math.trunc(Number(limit) || 1)); void this.register(); return this; }
+    keyBy(fields) { this.definition.key_by = (Array.isArray(fields) ? fields : [fields]).map(String); void this.register(); return this; }
+    async register() {
+        if (plugin_id)
+            await new Bucket("plugin_user_form_schemas").set(plugin_id, this.definition);
+    }
+}
+const userForm = Object.assign(function (fields) { return new UserFormInstance(fields); }, formHelpers);
+const plugin = { Form: pluginForm };
+exports.plugin = plugin;
+const user = {
+    Form: userForm,
+    async getUserList(options = {}) {
+        const rows = await new Bucket("__plugin_users__").get("list", []);
+        if (options.withRecords)
+            return rows;
+        return (Array.isArray(rows) ? rows : []).map((item) => { const copy = { ...item }; delete copy.records; return copy; });
+    },
+    async getUser(selector) {
+        const rows = await this.getUserList({ withRecords: true });
+        const id = typeof selector === "object" ? String(selector.id || "") : String(selector || "");
+        const name = typeof selector === "object" ? String(selector.name || "") : String(selector || "");
+        const matches = rows.filter(item => (id && item.id === id) || (name && (item.username === name || item.nickname === name)));
+        if (matches.length > 1)
+            throw new Error("USER_AMBIGUOUS");
+        return matches[0];
+    },
+};
+exports.user = user;
 async function readRuntimePanels(key) {
     const raw = await new Bucket("sillyGirl").get(key, []);
     if (Array.isArray(raw))
@@ -1081,7 +1130,7 @@ class SmallCat {
     qrCodeAuth(options) {
         return this.post("/wx/qrcodeauth", options);
     }
-    oAuth(options) {
+    oauth(options) {
         return this.post("/wx/oauth", options);
     }
     translateLink(options) {
@@ -1712,7 +1761,6 @@ class Console {
     debug = (message, ...optionalParams) => { };
 }
 let utils = {
-    userList,
     sleep,
     version,
     restart,

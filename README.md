@@ -111,7 +111,7 @@ Python 插件要点：
 |------|------|
 | 运行版本 | 只使用 Python 3.12；Docker 镜像已内置，本地运行需要安装 Python 3.12 |
 | 运行路径 | 推荐扁平文件 `/data/plugins/插件名.py`，不要再套 `插件名/main.py` |
-| SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, container, form, utils` |
+| SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, container, plugin, user, utils` |
 | 异步调用 | Python SDK 方法都是异步方法，`s.reply()`、`Bucket.get()` 等都要 `await` |
 | 运行时依赖 | 内置 `grpcio==1.83.0`、`protobuf==7.35.1`，用于和 Go 主程序 gRPC 通信 |
 | 第三方依赖 | 新式注释写 `@depe ["requests"]`，后台「依赖管理」选择 Python 后可安装/卸载；旧式方括号 `depe` 仍兼容 |
@@ -127,10 +127,10 @@ Python 使用存储和配置：
 """
 
 import asyncio
-from sillygirl import sender as s, Bucket, form
+from sillygirl import sender as s, Bucket, plugin
 
-config = form({
-    "token": form.string()
+config = plugin.Form({
+    "token": plugin.Form.string()
         .title("Token")
         .format("password")
         .default(""),
@@ -168,7 +168,7 @@ asyncio.run(main())
 """
 ```
 
-`[param: {...}]` 已废弃；配置统一写 `form`，例如 NodeJS 顶层 `new form({...})`、Python 顶层 `form({...})`。
+`[param: {...}]` 已废弃；配置统一写 `Form`，例如 NodeJS 顶层 `new plugin.Form({...})`、Python 顶层 `plugin.Form({...})`。
 元数据必填规则：
 
 | 使用场景 | 必填参数 | 说明 |
@@ -226,7 +226,7 @@ s.getPlatform();     // 平台
 s.getContent();      // 消息内容
 s.param("城市");     // 获取规则捕获参数
 s.reply("文本");     // 回复消息
-s.continue();        // 继续匹配后续插件
+s.resume();        // 继续匹配后续插件
 ```
 
 推送管理员：
@@ -244,20 +244,37 @@ await s.pushAdmin("指定机器人推送", { platform: "qq", botId: "10001" });
 插件配置表单：
 
 ```js
-const { form } = require("sillygirl");
+const { plugin } = require("sillygirl");
 
-const ConfigDB = new form({
-  host: form.string()
+const ConfigDB = new plugin.Form({
+  host: plugin.Form.string()
     .title("服务地址")
     .default("http://127.0.0.1:9090"),
-  enabled: form.boolean()
+  enabled: plugin.Form.boolean()
     .title("启用")
     .default(false),
 });
 
-ConfigDB.get();
-s.reply("当前地址：" + ConfigDB.userConfig.host);
+const values = await ConfigDB.get();
+await s.reply("当前地址：" + values.host);
 ```
+
+普通用户提交表单：
+
+```js
+const { user } = require("sillygirl");
+
+new user.Form({
+  phone: user.Form.string()
+    .title("手机号")
+    .match(/^1\d{10}$/)
+    .err("手机号格式错误"),
+})
+  .multiple(3)
+  .keyBy("phone");
+```
+
+Python 不写 `new`，分别使用 `plugin.Form({...})` 和 `user.Form({...})`。
 
 Web 服务脚本：
 
@@ -363,12 +380,12 @@ s.reply("匹配到 " + envs.length + " 个变量");
 
 ### 普通用户列表
 
-`utils.userList()` 返回普通用户、绑定信息以及当前插件的 SmallCat 读取授权状态；授权状态由运行时自动绑定到当前插件，脚本不需要也不能传入其他插件 UUID。
+`user.getUserList()` 返回普通用户、绑定信息以及当前插件的 SmallCat 读取授权状态；授权状态由运行时自动绑定到当前插件，脚本不需要也不能传入其他插件 UUID。
 
 ```js
-const { container, utils } = require("sillygirl");
+const { container, user } = require("sillygirl");
 
-const users = await utils.userList();
+const users = await user.getUserList();
 const authorizedOpenids = users
   .filter((user) => !user.disabled && user.authorized)
   .flatMap((user) => user.bindings.smallcat_openids);
@@ -407,7 +424,7 @@ const sc = new container.SmallCat({ id: 1 });
 | `getPhoneNumber(options)` | 获取手机号 code，调用 `POST /wx/getphonenumber`，返回 smallcat API 原始 JSON |
 | `cloud(options)` / `gateway(options)` | 云函数 / V3 云网关凭证 |
 | `qrCodeAuth(options)` | 二维码 OAuth 授权，调用 `POST /wx/qrcodeauth`，返回 smallcat API 原始 JSON |
-| `oAuth(options)` | OAuth 授权，调用 `POST /wx/oauth`，返回 smallcat API 原始 JSON |
+| `oauth(options)` | OAuth 授权，调用 `POST /wx/oauth`，返回 smallcat API 原始 JSON |
 | `translateLink(options)` / `autoAuth(options)` | 解析小程序口令 / 刷新 APP SESSION |
 | `appMsgExt(options)` / `appMsgLike(options)` | 阅读扩展 / 公众号文章点赞 |
 | `request(method, path, body, query)` | 调用其他 smallcat API |
@@ -443,7 +460,7 @@ const userInfo = sc.getUserInfo({
 });
 s.reply(JSON.stringify(userInfo));
 
-const oauth = sc.oAuth({
+const oauth = sc.oauth({
   openid: "用户 openid",
   appid: "wx2f5d8f9715c59d10",
   redirect_uri: "https://example.com/callback",
@@ -512,7 +529,7 @@ task.remove(ret.id);
 |------|------|
 | 管理面板 | Vue 管理后台，支持插件市场、配置、存储、任务等管理 |
 | 插件市场 | 支持管理插件源、从 GitHub 仓库 `plugins/` 目录导入插件；点击卡片图标打开源码编辑器，点击插件名称查看介绍，也支持新增本地非公开插件 |
-| 插件配置 | 支持 `new form({ key: form.string().title("标题").default("") })` 链式配置表单 |
+| 插件配置 | 支持 `new plugin.Form({ key: plugin.Form.string().title("标题").default("") })` 链式配置表单 |
 | 依赖管理 | 支持按 NodeJS/Python 筛选；NodeJS 使用 pnpm 管理共享依赖，Python 使用 pipx 管理共享依赖；依赖从新式 `@depe ...` 读取，并兼容旧式方括号 `//[depe: ...]` / `#[depe: ...]` |
 | 普通用户公告 | 基础设置可配置公告开关、格式和内容，开启后显示在 `/user` 页面顶部，支持纯文本、Markdown 和 HTML |
 | 网络与镜像 | 基础设置可维护 GitHub 加速、pnpm 镜像和 pipx 源，支持默认列表和自定义地址增删 |
@@ -705,5 +722,3 @@ SillyGirl 侧配置：
 ## 许可
 
 [MIT](LICENSE)
-
-

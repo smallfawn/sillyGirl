@@ -25,9 +25,9 @@ func TestRegisterNodePluginConfigSchema(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "config-plugin.js")
 	script := `
-const { form } = require("sillygirl");
-new form({
-  token: form.string().title("Token").default("abc")
+const { plugin } = require("sillygirl");
+new plugin.Form({
+  token: plugin.Form.string().title("Token").default("abc")
 });
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
@@ -60,10 +60,10 @@ func TestRegisterPythonPluginConfigSchema(t *testing.T) {
 import sillygirl_config_schema_dependency_that_does_not_exist as optional_dependency
 optional_dependency.initialize().configure()
 
-from sillygirl import form
+from sillygirl import plugin
 
-form({
-    "token": form.string().title("Token").default("abc")
+plugin.Form({
+    "token": plugin.Form.string().title("Token").default("abc")
 })
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
@@ -91,44 +91,16 @@ func TestPythonConfigPreloadStubsMissingDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	module := `
-import json
-import os
-
-class Field:
-    def __init__(self, field_type):
-        self.schema = {"type": field_type}
-    def title(self, value):
-        self.schema["title"] = value
-        return self
-    def default(self, value):
-        self.schema["default"] = value
-        return self
-    def toJSON(self):
-        return self.schema
-
-def form(fields):
-    schema = {"type": "object", "properties": {key: value.toJSON() for key, value in fields.items()}}
-    with open(os.environ["SILLYGIRL_CONFIG_SCHEMA_FILE"], "w", encoding="utf-8") as handle:
-        json.dump(schema, handle, ensure_ascii=False, separators=(",", ":"))
-    os._exit(0)
-
-form.string = lambda: Field("string")
-`
-	if err := os.WriteFile(filepath.Join(runtimeDir, "sillygirl.py"), []byte(module), 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	pluginPath := filepath.Join(dir, "missing-dependency-plugin.py")
 	plugin := `
 import sillygirl_dependency_that_is_definitely_not_installed as optional_dependency
 from sillygirl_dependency_that_is_definitely_not_installed.deep import Client
 optional_dependency.initialize().configure(Client)
 
-from sillygirl import form
+from sillygirl import plugin
 
-form({
-    "token": form.string().title("Token")
+plugin.Form({
+    "token": plugin.Form.string().title("Token")
 })
 
 raise RuntimeError("business code ran after config export")
@@ -149,14 +121,15 @@ raise RuntimeError("business code ran after config export")
 	if err := json.Unmarshal(data, &schema); err != nil {
 		t.Fatalf("invalid schema JSON: %v: %s", err, data)
 	}
-	properties, _ := schema["properties"].(map[string]interface{})
+	pluginSchema, _ := schema["plugin"].(map[string]interface{})
+	properties, _ := pluginSchema["properties"].(map[string]interface{})
 	token, _ := properties["token"].(map[string]interface{})
 	if token["title"] != "Token" {
 		t.Fatalf("unexpected schema: %s", data)
 	}
 }
 
-func TestPythonConfigPreloadKeepsRuntimeErrorsVisible(t *testing.T) {
+func TestPythonConfigPreloadSkipsBusinessCode(t *testing.T) {
 	bin, args := anyPythonCommandForTest(t)
 	dir := t.TempDir()
 	runtimeDir := filepath.Join(dir, "runtime")
@@ -168,17 +141,24 @@ func TestPythonConfigPreloadKeepsRuntimeErrorsVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 	pluginPath := filepath.Join(dir, "broken-plugin.py")
-	if err := os.WriteFile(pluginPath, []byte("raise RuntimeError('schema boom')\n"), 0644); err != nil {
+	source := `
+from sillygirl import plugin
+DEFAULT_TOKEN = "from-constant"
+plugin.Form({"token": plugin.Form.string().title("Token").default(DEFAULT_TOKEN)})
+raise RuntimeError("business code must not run while exporting forms")
+`
+	if err := os.WriteFile(pluginPath, []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
 	output, err := runPythonConfigPreloadForTest(
 		bin, args, preload, pluginPath, runtimeDir, filepath.Join(dir, "schema.json"),
 	)
-	if err == nil {
-		t.Fatal("expected config preload error")
+	if err != nil {
+		t.Fatalf("config preload ran business code: %v: %s", err, output)
 	}
-	if !strings.Contains(output, "schema boom") {
-		t.Fatalf("runtime error was not preserved: %s", output)
+	data, err := os.ReadFile(filepath.Join(dir, "schema.json"))
+	if err != nil || !strings.Contains(string(data), `"token"`) || !strings.Contains(string(data), `"from-constant"`) {
+		t.Fatalf("plugin form was not exported: %v: %s", err, data)
 	}
 }
 

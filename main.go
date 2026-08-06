@@ -24,14 +24,11 @@ import (
 )
 
 var app = core.MakeBucket("app")
-var ip = ""
 
 func main() {
 	runStartupStorageMigration()
-	ip = app.GetString("ip")
 	go func() {
-		var err error
-		ip, err = utils.GetPublicIP()
+		ip, err := utils.GetPublicIP()
 		if err == nil {
 			app.Set("ip", ip)
 		}
@@ -72,8 +69,6 @@ func main() {
 			}
 		}
 		if t {
-			// core.Logs.Info("Terminal机器人已连接")
-
 			a := &core.Factory{}
 			a.Init("terminal", "default", nil)
 			i := 1
@@ -85,10 +80,6 @@ func main() {
 				fmt.Printf("\x1b[%dm%s \x1b[0m\n", 31, m[core.CONETNT])
 				return fmt.Sprint(i)
 			})
-			// a.SetActionHandler(func(m map[string]interface{}) string {
-			// 	fmt.Println(`do action: ` + string(utils.JsonMarshal(m)))
-			// 	return ""
-			// })
 			reader := bufio.NewReader(os.Stdin)
 			for {
 				input, err := reader.ReadString('\n')
@@ -108,10 +99,7 @@ func main() {
 					MessageID: fmt.Sprint(i),
 				})
 				core.Messages <- s
-				// 在这里可以根据输入执行相应的逻辑
 			}
-		} else {
-			// core.Logs.Info("Terminal机器人不可用，运行带-t参数即可启用")
 		}
 	}
 	select {}
@@ -125,5 +113,3 @@ func runStartupStorageMigration() {
 			result.PanelBuckets, result.AdapterKeys, result.PluginConfigValues, result.Users, result.Authorizations)
 	}
 }
-
-//  git add . && git commit -m "x" && git push

@@ -29,135 +29,82 @@ func ensureNodeRuntimePreload() (string, error) {
 const nodeRuntimePreloadScript = `
 (function () {
   if (process.env.SILLYGIRL_CONFIG_REGISTER_ONLY === "true") {
-    function isSchemaNode(value) {
-      return !!(value && value.__schemaNode && value.schema);
-    }
+    const fs = require("fs");
+    const expectedPlugin = process.env.SILLYGIRL_EXPECT_PLUGIN_FORM === "true";
+    const expectedUser = process.env.SILLYGIRL_EXPECT_USER_FORM === "true";
+    const exported = { plugin: null, user: null };
+    function isSchemaNode(value) { return !!(value && value.__schemaNode && value.schema); }
     function normalizeFormField(value, path) {
       if (isSchemaNode(value)) return value.schema;
-      throw new Error("form schema " + (path || "field") + " must use form.string()/form.boolean()/form.select() helpers");
+      throw new Error("Form schema " + (path || "field") + " must use .Form.string()/.Form.boolean()/.Form.select() helpers");
     }
-    function normalizeConfigSchema(fields) {
-      if (!fields || typeof fields !== "object" || Array.isArray(fields) || isSchemaNode(fields)) {
-        throw new Error("new form(...) only accepts an object like { token: form.string().title(\"Token\") }");
-      }
+    function normalizeSchema(fields) {
+      if (!fields || typeof fields !== "object" || Array.isArray(fields) || isSchemaNode(fields)) throw new Error("Form(...) only accepts an object of schema fields");
       const properties = {};
-      for (const key of Object.keys(fields)) {
-        if (key.startsWith("_")) continue;
-        properties[key] = normalizeFormField(fields[key], key);
-      }
-      return { type: "object", properties: properties };
+      for (const key of Object.keys(fields)) if (!key.startsWith("_")) properties[key] = normalizeFormField(fields[key], key);
+      return { type: "object", properties, propertyOrder: Object.keys(properties) };
     }
-    function collectSchemaDefaults(schema) {
+    function defaults(schema) {
       schema = isSchemaNode(schema) ? schema.schema : (schema || {});
-      if (!schema || typeof schema !== "object") return undefined;
       if (Object.prototype.hasOwnProperty.call(schema, "default")) return schema.default;
       if (schema.type === "object" || schema.properties) {
-        const values = {};
-        for (const key of Object.keys(schema.properties || {})) {
-          const value = collectSchemaDefaults(schema.properties[key]);
-          if (value !== undefined) values[key] = value;
-        }
-        return values;
+        const result = {};
+        for (const key of Object.keys(schema.properties || {})) { const value = defaults(schema.properties[key]); if (value !== undefined) result[key] = value; }
+        return result;
       }
       if (schema.type === "array") return [];
       return undefined;
     }
-    function SchemaNode(type, extra) {
-      this.__schemaNode = true;
-      this.schema = Object.assign({ type: type }, extra || {});
-    }
+    function SchemaNode(type, extra) { this.__schemaNode = true; this.schema = Object.assign({ type }, extra || {}); this.validators = []; this.lastRule = ""; }
     SchemaNode.prototype.title = function (value) { this.schema.title = value; return this; };
     SchemaNode.prototype.description = function (value) { this.schema.description = value; return this; };
     SchemaNode.prototype.default = function (value) { this.schema.default = value; return this; };
-    SchemaNode.prototype.options = function (value) { return applySchemaOptions(this, value); };
-    SchemaNode.prototype.required = function (value) { this.schema.required = value; return this; };
+    SchemaNode.prototype.options = function (value) { return applyOptions(this, value); };
+    SchemaNode.prototype.required = function (value) { this.schema.required = value === undefined ? true : !!value; this.lastRule = "required"; return this; };
+    SchemaNode.prototype.match = function (value) { this.schema.pattern = value instanceof RegExp ? value.source : String(value || ""); this.lastRule = "match"; return this; };
+    SchemaNode.prototype.test = function (callback) { if (typeof callback !== "function") throw new Error("test() requires a function"); this.validators.push({ runtime: "node", source: callback.toString(), message: "" }); this.lastRule = "test"; return this; };
+    SchemaNode.prototype.err = function (value) { if (!this.lastRule) throw new Error("err() must follow required(), match() or test()"); if (this.lastRule === "test") this.validators[this.validators.length - 1].message = String(value || ""); else (this.schema.errorMessages ||= {})[this.lastRule] = String(value || ""); return this; };
     SchemaNode.prototype.format = function (value) { this.schema.format = value; return this; };
     SchemaNode.prototype.min = function (value) { this.schema.minimum = value; return this; };
     SchemaNode.prototype.max = function (value) { this.schema.maximum = value; return this; };
-    SchemaNode.prototype.minLength = function (value) { this.schema.minLength = value; return this; };
-    SchemaNode.prototype.maxLength = function (value) { this.schema.maxLength = value; return this; };
-    SchemaNode.prototype.pattern = function (value) { this.schema.pattern = value; return this; };
     SchemaNode.prototype.widget = function (value) { this.schema["ui:widget"] = value; return this; };
     SchemaNode.prototype.toJSON = function () { return this.schema; };
-    function applySchemaOptions(node, options) {
-      if (Array.isArray(options)) {
-        const values = [];
-        const names = [];
-        for (const item of options) {
-          if (item && typeof item === "object" && !Array.isArray(item)) {
-            const value = Object.prototype.hasOwnProperty.call(item, "value") ? item.value : (item.id ?? item.key ?? item.name ?? item.label);
-            values.push(value);
-            names.push(String(item.label ?? item.name ?? value));
-          } else {
-            values.push(item);
-            names.push(String(item));
-          }
-        }
-        node.schema.enum = values;
-        if (names.some(function (name, index) { return name !== String(values[index]); })) node.schema.enumNames = names;
-        return node;
+    function applyOptions(node, options) {
+      const values = [], names = [];
+      if (Array.isArray(options)) for (const item of options) {
+        const value = item && typeof item === "object" ? (Object.prototype.hasOwnProperty.call(item, "value") ? item.value : (item.id ?? item.key ?? item.name ?? item.label)) : item;
+        values.push(value); names.push(String(item && typeof item === "object" ? (item.label ?? item.name ?? value) : value));
       }
-      if (options && typeof options === "object") {
-        const values = Object.keys(options);
-        node.schema.enum = values;
-        node.schema.enumNames = values.map(function (key) { return String(options[key]); });
-      }
-      return node;
+      else if (options && typeof options === "object") for (const key of Object.keys(options)) { values.push(key); names.push(String(options[key])); }
+      node.schema.enum = values; if (names.some((name, i) => name !== String(values[i]))) node.schema.enumNames = names; return node;
     }
-    const formHelpers = {
-      string: function () { return new SchemaNode("string"); },
-      number: function () { return new SchemaNode("number"); },
-      integer: function () { return new SchemaNode("integer"); },
-      boolean: function () { return new SchemaNode("boolean"); },
-      array: function (item) { return new SchemaNode("array", item === undefined ? {} : { items: normalizeFormField(item, "array item") }); },
-      object: function (props) {
-        const properties = {};
-        for (const key of Object.keys(props || {})) properties[key] = normalizeFormField(props[key], key);
-        return new SchemaNode("object", { properties: properties });
-      },
-      select: function (options) { return applySchemaOptions(new SchemaNode("string"), options); },
+    const helpers = {
+      string: () => new SchemaNode("string"), number: () => new SchemaNode("number"), integer: () => new SchemaNode("integer"), boolean: () => new SchemaNode("boolean"),
+      array: item => new SchemaNode("array", item === undefined ? {} : { items: normalizeFormField(item, "array item") }),
+      object: props => new SchemaNode("object", { properties: Object.fromEntries(Object.entries(props || {}).map(([key, value]) => [key, normalizeFormField(value, key)])) }),
+      select: options => applyOptions(new SchemaNode("string"), options),
     };
-    class PluginConfigFormInstance {
-      constructor(schema) {
-        this.uuid = process.env.PLUGIN_ID || "";
-        this.jsonSchema = normalizeConfigSchema(schema);
-        try {
-          const fs = require("fs");
-          const target = process.env.SILLYGIRL_CONFIG_SCHEMA_FILE || "";
-          if (target) fs.writeFileSync(target, JSON.stringify(this.jsonSchema));
-          else console.log("__SILLYGIRL_CONFIG_SCHEMA__" + JSON.stringify(this.jsonSchema));
-          process.exit(0);
-        } catch (err) {
-          console.error("form schema export failed:", err && err.message ? err.message : err);
-          process.exit(1);
-        }
-      }
+    let finishScheduled = false;
+    function finishIfReady() {
+      if ((expectedPlugin && !exported.plugin) || (expectedUser && !exported.user)) return;
+      const target = process.env.SILLYGIRL_CONFIG_SCHEMA_FILE || "";
+      const data = JSON.stringify(exported);
+      if (target) fs.writeFileSync(target, data); else console.log("__SILLYGIRL_CONFIG_SCHEMA__" + data);
+      process.exit(0);
     }
-    function form(schema) { return new PluginConfigFormInstance(schema); }
-    Object.assign(form, formHelpers, { defaults: function (fields) { return collectSchemaDefaults(normalizeConfigSchema(fields)); } });
-    const dummy = new Proxy(function () {}, {
-      get: function () { return dummy; },
-      apply: function () { return dummy; },
-      construct: function () { return dummy; },
-    });
-
+    function scheduleFinish() { if (finishScheduled) return; finishScheduled = true; process.nextTick(function () { finishScheduled = false; finishIfReady(); }); }
+    function PluginForm(schema) { exported.plugin = normalizeSchema(schema); scheduleFinish(); return this; }
+    function UserForm(fields) { const validators = {}; for (const key of Object.keys(fields || {})) if (isSchemaNode(fields[key]) && fields[key].validators.length) validators[key] = fields[key].validators; this.definition = { schema: normalizeSchema(fields), multiple: 1, key_by: [], validators }; exported.user = this.definition; scheduleFinish(); }
+    UserForm.prototype.multiple = function (limit) { this.definition.multiple = Math.max(1, Number(limit || 1) | 0); scheduleFinish(); return this; };
+    UserForm.prototype.keyBy = function (fields) { this.definition.key_by = (Array.isArray(fields) ? fields : [fields]).map(String); scheduleFinish(); return this; };
+    const pluginForm = Object.assign(function (schema) { return new PluginForm(schema); }, helpers, { defaults: fields => defaults(normalizeSchema(fields)) });
+    const userForm = Object.assign(function (schema) { return new UserForm(schema); }, helpers);
+    const dummy = new Proxy(function () {}, { get: () => dummy, apply: () => dummy, construct: () => dummy });
     const sg = {
-      Adapter: dummy,
-      Bucket: dummy,
-      form,
-      sender: dummy,
-      container: dummy,
-      utils: {
-        userList: async function () { return []; },
-        sleep: async function () {},
-        version: async function () { return {}; },
-        restart: async function () { return {}; },
-        update: async function () { return {}; },
-        buildCQTag: function () { return ""; },
-        parseCQText: function () { return []; },
-        image: function (url) { return "[CQ:image,url=" + String(url || "") + "]"; },
-        video: function (url) { return "[CQ:video,url=" + String(url || "") + "]"; },
-      },
+      Adapter: dummy, Bucket: dummy, sender: dummy, container: dummy, console: dummy,
+      plugin: { Form: pluginForm },
+      user: { Form: userForm, getUserList: async () => [], getUser: async () => null },
+      utils: { sleep: async () => {}, version: async () => ({}), restart: async () => ({}), update: async () => ({}), buildCQTag: () => "", parseCQText: () => [], image: url => "[CQ:image,url=" + String(url || "") + "]", video: url => "[CQ:video,url=" + String(url || "") + "]" },
     };
     const Module = require("module");
     const originalLoad = Module._load;

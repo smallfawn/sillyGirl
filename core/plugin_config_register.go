@@ -45,6 +45,7 @@ func registerNodePluginConfigSchema(path, uuid string) error {
 		"SILLYGIRL_CONFIG_REGISTER_ONLY=true",
 		"SILLYGIRL_CONFIG_SCHEMA_FILE="+tempPath,
 	)
+	cmd.Env = append(cmd.Env, pluginFormRegistrationEnv(path)...)
 	cmd.Env = append(cmd.Env, sillyGirlRuntimeEnv()...)
 	if nodePath := nodeRuntimeNodePath(); nodePath != "" {
 		cmd.Env = append(cmd.Env, "NODE_PATH="+nodePath)
@@ -63,16 +64,51 @@ func registerNodePluginConfigSchema(path, uuid string) error {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return errors.New("插件没有导出配置 schema")
 	}
-	schema := map[string]interface{}{}
-	if err := json.Unmarshal(data, &schema); err != nil {
-		return fmt.Errorf("配置 schema 解析失败：%v", err)
-	}
-	if len(schema) == 0 {
-		return errors.New("配置 schema 为空")
-	}
-	if _, _, err := SetBucketKeyValue(pluginConfigSchemas, uuid, schema); err != nil {
+	if err := saveRegisteredPluginForms(uuid, data); err != nil {
 		return err
 	}
-	console.Log("已注册插件配置 %s (%s)", filepath.Base(path), uuid)
+	console.Log("已注册插件表单 %s (%s)", filepath.Base(path), uuid)
+	return nil
+}
+
+type registeredPluginForms struct {
+	Plugin map[string]interface{}    `json:"plugin"`
+	User   *pluginUserFormDefinition `json:"user"`
+}
+
+func pluginFormRegistrationEnv(path string) []string {
+	data, _ := os.ReadFile(path)
+	source := string(data)
+	return []string{
+		fmt.Sprintf("SILLYGIRL_EXPECT_PLUGIN_FORM=%t", pluginFormCallPattern.MatchString(source)),
+		fmt.Sprintf("SILLYGIRL_EXPECT_USER_FORM=%t", userFormCallPattern.MatchString(source)),
+	}
+}
+
+func saveRegisteredPluginForms(uuid string, data []byte) error {
+	forms := registeredPluginForms{}
+	if err := json.Unmarshal(data, &forms); err != nil {
+		return fmt.Errorf("表单 schema 解析失败：%v", err)
+	}
+	if len(forms.Plugin) == 0 && forms.User == nil {
+		return errors.New("插件没有导出 plugin.Form 或 user.Form")
+	}
+	if len(forms.Plugin) != 0 {
+		if _, _, err := SetBucketKeyValue(pluginConfigSchemas, uuid, forms.Plugin); err != nil {
+			return err
+		}
+	} else {
+		_, _, _ = SetBucketKeyValue2(pluginConfigSchemas, uuid, nil)
+	}
+	if forms.User != nil {
+		if err := validateUserFormDefinition(*forms.User); err != nil {
+			return err
+		}
+		if _, _, err := SetBucketKeyValue(pluginUserFormSchemas, uuid, forms.User); err != nil {
+			return err
+		}
+	} else {
+		_, _, _ = SetBucketKeyValue2(pluginUserFormSchemas, uuid, nil)
+	}
 	return nil
 }

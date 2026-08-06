@@ -402,7 +402,7 @@ func functionRulePattern(cmd *common.Function, index int) (*regexp.Regexp, error
 
 func AddCommand(cmds []*common.Function) {
 	for j := range cmds {
-		if cmds[j].OnStart && !cmds[j].Disable {
+		if cmds[j].OnStart && pluginExecutionEnabled(cmds[j]) {
 			go func(f *common.Function) {
 				time.Sleep(time.Second)
 				// console.Log("初始化%v服务", f.Title)
@@ -423,6 +423,9 @@ func AddCommand(cmds []*common.Function) {
 						Cron = "0 " + Cron
 					}
 					cronId, err := CRON.AddFunc(Cron, func() {
+						if !pluginExecutionEnabled(cmds[j]) {
+							return
+						}
 						cmds[j].Handle(&CustomSender{
 							F: &Factory{
 								botplt: plt,
@@ -640,6 +643,9 @@ func HandleMessage(sender common.Sender) {
 				matched = true
 			}
 			if matched {
+				if !pluginExecutionEnabled(function) {
+					break
+				}
 				if function.Admin && !a {
 					return
 				}
@@ -680,4 +686,15 @@ func HandleMessage(sender common.Sender) {
 			return
 		}
 	}
+}
+
+// pluginExecutionEnabled is the single runtime gate shared by message, cron
+// and startup triggers. A boolean plugin.Form field named "enable" is reserved
+// as the plugin-wide switch; plugins without it remain enabled for compatibility.
+func pluginExecutionEnabled(function *common.Function) bool {
+	if function == nil || function.Disable {
+		return false
+	}
+	enabled, declared := pluginConfigBool(function.UUID, "enable")
+	return !declared || enabled
 }

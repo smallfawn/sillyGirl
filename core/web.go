@@ -80,7 +80,38 @@ func SecurityHeaders() gin.HandlerFunc {
 	}
 }
 
+func trustedHTTPProxies() []string {
+	raw := strings.TrimSpace(firstNonEmpty(os.Getenv("SILLYGIRL_TRUSTED_PROXIES"), sillyGirl.GetString("trusted_proxies")))
+	if raw == "" || strings.EqualFold(raw, "none") {
+		return nil
+	}
+	result := []string{}
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" && !Contains(result, value) {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func configureTrustedHTTPProxies(engine *gin.Engine) error {
+	if err := engine.SetTrustedProxies(trustedHTTPProxies()); err != nil {
+		_ = engine.SetTrustedProxies(nil)
+		return err
+	}
+	return nil
+}
+
 var Server *gin.Engine
+
+func httpServer(addr string) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           Server,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+}
 
 func initWeb() {
 	for _, arg := range os.Args { //处理升级
@@ -100,6 +131,9 @@ func initWeb() {
 	}
 	gin.SetMode(gin.ReleaseMode)
 	Server = gin.New()
+	if err := configureTrustedHTTPProxies(Server); err != nil {
+		logs.Warn("可信代理配置无效，已忽略：%v", err)
+	}
 	Server.Use(Cors())
 	Server.Use(SecurityHeaders())
 	Server.Use(gzip.Gzip(gzip.DefaultCompression))
@@ -255,10 +289,7 @@ func initWeb() {
 	} else if stored := strings.TrimSpace(sillyGirl.GetString("port")); stored != normalizedPort && stored != fmt.Sprintf("d:%d", port) {
 		sillyGirl.Set("port", port)
 	}
-	srvs := []*http.Server{{
-		Addr:    ":" + normalizedPort,
-		Handler: Server,
-	}}
+	srvs := []*http.Server{httpServer(":" + normalizedPort)}
 
 	storage.Watch(sillyGirl, "port", func(old, new, key string) *storage.Final {
 		port, normalized := canonicalHTTPPortValue(new)
@@ -268,10 +299,7 @@ func initWeb() {
 			}
 			return nil
 		}
-		srv := &http.Server{
-			Addr:    ":" + normalized,
-			Handler: Server,
-		}
+		srv := httpServer(":" + normalized)
 		var ch = make(chan error, 1)
 		srvs = append(srvs, srv)
 

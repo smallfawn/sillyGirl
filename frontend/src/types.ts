@@ -69,6 +69,8 @@ export type AdminUserRow = {
 export type PluginInfo = {
   id: string;
   title: string;
+  admin?: boolean;
+  cron?: Record<string, string>;
   type?: string;
   suffix?: string;
   desc?: string;

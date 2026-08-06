@@ -1659,18 +1659,6 @@ func appendPluginConfigRefreshResult(output, pluginName, runtime string) string 
 	return output
 }
 
-// refreshNodePluginConfigSchemas bypasses the normal source-hash fast path and
-// only reruns scripts which declare a config form. Dependencies are shared by
-// plugins of the same runtime, so an empty/shared target retries every form
-// plugin for that runtime.
-func refreshNodePluginConfigSchemas(pluginName string) error {
-	return refreshPluginConfigSchemas(pluginName, NODE)
-}
-
-func refreshPythonPluginConfigSchemas(pluginName string) error {
-	return refreshPluginConfigSchemas(pluginName, PYTHON)
-}
-
 func refreshPluginConfigSchemas(pluginName, runtime string) error {
 	pluginName = strings.TrimSpace(pluginName)
 	runtime = normalizeDependencyRuntime(runtime)
@@ -1691,7 +1679,7 @@ func refreshPluginConfigSchemas(pluginName, runtime string) error {
 			continue
 		}
 		f, _ := pluginParse(string(data), nameUuid(plugin.Name))
-		if f == nil || !f.HasForm {
+		if f == nil || (!f.HasForm && !f.HasUserForm) {
 			continue
 		}
 		var registerErr error

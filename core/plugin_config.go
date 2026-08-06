@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +49,10 @@ func init() {
 			ApiFail(ctx, "缺少插件 UUID")
 			return
 		}
-		SetBucketKeyValue(pluginConfigValues, req.UUID, req.Value)
+		if _, _, err := SetBucketKeyValue(pluginConfigValues, req.UUID, req.Value); err != nil {
+			ApiFail(ctx, "保存插件配置失败："+err.Error())
+			return
+		}
 		ApiOK(ctx, nil)
 	})
 	GinApi(DELETE, "/api/admin/plugin/config", RequireAuth, func(ctx *gin.Context) {
@@ -78,6 +82,8 @@ func deletePluginConfig(uuid string, deleteSchema bool) {
 	_, _, _ = SetBucketKeyValue2(pluginConfigValues, uuid, nil)
 	if deleteSchema {
 		_, _, _ = SetBucketKeyValue2(pluginConfigSchemas, uuid, nil)
+		_, _, _ = SetBucketKeyValue2(pluginUserFormSchemas, uuid, nil)
+		_ = deletePluginUserRecordsForPlugin(uuid)
 	}
 }
 
@@ -236,4 +242,45 @@ func getPluginUserConfig(uuid string) map[string]interface{} {
 	data = strings.TrimPrefix(data, "o:")
 	json.Unmarshal([]byte(data), &config)
 	return config
+}
+
+// pluginConfigBool reads a boolean field from the saved plugin configuration.
+// When the user has not saved the field yet, its form default is used. The
+// second return value is false when the plugin form does not declare the field.
+func pluginConfigBool(uuid, key string) (bool, bool) {
+	if value, ok := getPluginUserConfig(uuid)[key]; ok {
+		return pluginConfigBoolValue(value), true
+	}
+	data := strings.TrimPrefix(pluginConfigSchemas.GetString(uuid), "o:")
+	if data == "" {
+		return false, false
+	}
+	var schema map[string]interface{}
+	if json.Unmarshal([]byte(data), &schema) != nil {
+		return false, false
+	}
+	properties, _ := schema["properties"].(map[string]interface{})
+	property, _ := properties[key].(map[string]interface{})
+	if property == nil || property["type"] != "boolean" {
+		return false, false
+	}
+	value, exists := property["default"]
+	if !exists {
+		return false, true
+	}
+	return pluginConfigBoolValue(value), true
+}
+
+func pluginConfigBoolValue(value interface{}) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		value := strings.ToLower(strings.TrimSpace(typed))
+		return value == "true" || value == "1" || value == "yes" || value == "on"
+	case float64:
+		return typed != 0
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(value)), "true")
+	}
 }

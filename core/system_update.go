@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,6 +21,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/smallfawn/sillyGirl/utils"
+)
+
+const (
+	maxReleaseMetadataBytes  int64 = 8 << 20
+	maxReleaseArchiveBytes   int64 = 512 << 20
+	maxReleaseExtractedBytes int64 = 1 << 30
 )
 
 type releaseAsset struct {
@@ -217,7 +224,7 @@ func fetchLatestRelease() (*releasePayload, error) {
 			lastErr = err
 			continue
 		}
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxReleaseMetadataBytes+1))
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = readErr
@@ -225,6 +232,10 @@ func fetchLatestRelease() (*releasePayload, error) {
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("%s HTTP %d", url, resp.StatusCode)
+			continue
+		}
+		if int64(len(data)) > maxReleaseMetadataBytes {
+			lastErr = fmt.Errorf("GitHub Release 响应超过 %d MiB 限制", maxReleaseMetadataBytes>>20)
 			continue
 		}
 		release := &releasePayload{}
@@ -325,15 +336,21 @@ func downloadReleaseFile(address string, target string) error {
 			resp.Body.Close()
 			continue
 		}
+		if resp.ContentLength > maxReleaseArchiveBytes {
+			lastErr = fmt.Errorf("Release 包超过 %d MiB 限制", maxReleaseArchiveBytes>>20)
+			resp.Body.Close()
+			continue
+		}
 		file, err := os.Create(target)
 		if err != nil {
 			resp.Body.Close()
 			return err
 		}
-		_, copyErr := io.Copy(file, resp.Body)
+		_, copyErr := copyWithLimit(file, resp.Body, maxReleaseArchiveBytes)
 		closeErr := file.Close()
 		resp.Body.Close()
 		if copyErr != nil {
+			_ = os.Remove(target)
 			lastErr = copyErr
 			continue
 		}
@@ -367,6 +384,7 @@ func extractTarGzArchive(archivePath string, targetDir string) error {
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
+	var extracted int64
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -385,6 +403,9 @@ func extractTarGzArchive(archivePath string, targetDir string) error {
 				return err
 			}
 		case tar.TypeReg:
+			if header.Size < 0 || header.Size > maxReleaseExtractedBytes-extracted {
+				return fmt.Errorf("Release 解压内容超过 %d MiB 限制", maxReleaseExtractedBytes>>20)
+			}
 			if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 				return err
 			}
@@ -392,7 +413,7 @@ func extractTarGzArchive(archivePath string, targetDir string) error {
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(out, tr)
+			written, copyErr := io.CopyN(out, tr, header.Size)
 			closeErr := out.Close()
 			if copyErr != nil {
 				return copyErr
@@ -400,6 +421,7 @@ func extractTarGzArchive(archivePath string, targetDir string) error {
 			if closeErr != nil {
 				return closeErr
 			}
+			extracted += written
 		}
 	}
 }
@@ -410,6 +432,7 @@ func extractZipArchive(archivePath string, targetDir string) error {
 		return err
 	}
 	defer reader.Close()
+	var extracted int64
 	for _, file := range reader.File {
 		dest, err := safeExtractPath(targetDir, file.Name)
 		if err != nil {
@@ -420,6 +443,10 @@ func extractZipArchive(archivePath string, targetDir string) error {
 				return err
 			}
 			continue
+		}
+		remaining := maxReleaseExtractedBytes - extracted
+		if file.UncompressedSize64 > uint64(remaining) {
+			return fmt.Errorf("Release 解压内容超过 %d MiB 限制", maxReleaseExtractedBytes>>20)
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			return err
@@ -433,7 +460,7 @@ func extractZipArchive(archivePath string, targetDir string) error {
 			src.Close()
 			return err
 		}
-		_, copyErr := io.Copy(out, src)
+		written, copyErr := copyWithLimit(out, src, remaining)
 		closeErr := out.Close()
 		src.Close()
 		if copyErr != nil {
@@ -442,8 +469,23 @@ func extractZipArchive(archivePath string, targetDir string) error {
 		if closeErr != nil {
 			return closeErr
 		}
+		extracted += written
 	}
 	return nil
+}
+
+func copyWithLimit(dst io.Writer, src io.Reader, limit int64) (int64, error) {
+	if limit < 0 {
+		return 0, errors.New("写入大小限制无效")
+	}
+	written, err := io.CopyN(dst, src, limit+1)
+	if written > limit {
+		return written, fmt.Errorf("内容超过 %d MiB 限制", limit>>20)
+	}
+	if errors.Is(err, io.EOF) {
+		return written, nil
+	}
+	return written, err
 }
 
 func installReleasePayload(tmpDir string) error {

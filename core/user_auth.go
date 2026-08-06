@@ -186,11 +186,18 @@ func init() {
 			ApiFail(ctx, "请求体不是有效 JSON")
 			return
 		}
-		user, err := verifyNormalUser(payload.Username, payload.Password)
-		if err != nil {
-			ApiFail(ctx, err.Error())
+		attemptKey := "user:" + normalizeNormalUsername(payload.Username)
+		if loginAttemptBlocked(ctx, attemptKey) {
+			ApiFail(ctx, "登录失败次数过多，请稍后再试")
 			return
 		}
+		user, err := verifyNormalUser(payload.Username, payload.Password)
+		if err != nil {
+			recordFailedLoginAttempt(ctx, attemptKey)
+			ApiFail(ctx, "账号或密码错误")
+			return
+		}
+		clearLoginAttempts(ctx, attemptKey)
 		token, err := createUserJWTCookie(ctx, user)
 		if err != nil {
 			ApiFail(ctx, err.Error())
@@ -673,6 +680,9 @@ func deleteNormalUser(username string) error {
 		if _, _, err := pluginUserAuthorizations.Set(key, ""); err != nil {
 			return err
 		}
+	}
+	if err := deletePluginUserRecordsForUser(user.ID); err != nil {
+		return err
 	}
 	if _, _, err := userBucket.Set(normalUserBindingsStorageKey(username), ""); err != nil {
 		return err

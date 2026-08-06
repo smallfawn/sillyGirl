@@ -7,7 +7,7 @@ type Function struct {
 	RulePatterns   []*regexp.Regexp         `json:"-"`
 	RuleErrors     []error                  `json:"-"`
 	Params         [][]string               `json:"-"`
-	Admin          bool                     `json:"-"`
+	Admin          bool                     `json:"admin"`
 	Handle         func(Sender) interface{} `json:"-"`
 	Cron           map[string]string        `json:"cron"`
 	Priority       int                      `json:"-"`
@@ -40,6 +40,7 @@ type Function struct {
 	Running          bool        `json:"running"`
 	Downloads        int         `json:"downloads"`
 	HasForm          bool        `json:"has_form"`
+	HasUserForm      bool        `json:"has_user_form"`
 	ConfigRegistered bool        `json:"config_registered"`
 	UsesSmallCat     bool        `json:"uses_smallcat"`
 	Carry            bool        `json:"carry"`

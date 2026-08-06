@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 func init() {
@@ -165,8 +166,8 @@ func ReplaceToEmojis(str string, format string) string {
 func transfer(str string) []string {
 	// 将输入字符串解析为十六进制数
 	unicodeValue, err := strconv.ParseUint(str, 16, 32)
-	if err != nil {
-		panic(err)
+	if err != nil || unicodeValue > utf8.MaxRune || unicodeValue < 0x10000 {
+		return nil
 	}
 	// 将 Unicode 编码值转换为 UTF-16 编码单元
 	utf16Units := utf16.Encode([]rune{rune(unicodeValue)})
@@ -196,6 +197,9 @@ func HexToRune(hexStr string) (rune, error) {
 	u, err := strconv.ParseUint(hexStr, 16, 32)
 	if err != nil {
 		return 0, err
+	}
+	if u > utf8.MaxRune || u >= 0xD800 && u <= 0xDFFF {
+		return 0, fmt.Errorf("无效 Unicode 码点：%s", hexStr)
 	}
 
 	// 将无符号整数转换为 rune 类型的 Unicode 编码值

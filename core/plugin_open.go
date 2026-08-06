@@ -18,6 +18,8 @@ type openPluginRecord struct {
 	Class        string   `json:"class"`
 	Rule         string   `json:"rule,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
+	UsesSmallCat bool     `json:"uses_smallcat"`
+	HasUserForm  bool     `json:"has_user_form"`
 }
 
 func init() {
@@ -36,8 +38,8 @@ func init() {
 			ApiFail(ctx, "插件未安装")
 			return
 		}
-		if payload.Open && !plugin.UsesSmallCat {
-			ApiFail(ctx, "插件未使用 smallcat，不能开放用户授权")
+		if payload.Open && !plugin.UsesSmallCat && !plugin.HasUserForm {
+			ApiFail(ctx, "插件没有用户表单，也未使用 smallcat")
 			return
 		}
 		previous := plugin.Open
@@ -73,7 +75,7 @@ func installedPluginByUUID(uuid string) *common.Function {
 func openPluginRecords(plugins []*common.Function) []openPluginRecord {
 	rows := []openPluginRecord{}
 	for _, plugin := range plugins {
-		if plugin == nil || plugin.UUID == "" || !plugin.Open || !plugin.UsesSmallCat || plugin.Disable || (plugin.Type != NODE && plugin.Type != PYTHON) {
+		if plugin == nil || plugin.UUID == "" || !plugin.Open || (!plugin.UsesSmallCat && !plugin.HasUserForm) || plugin.Disable || (plugin.Type != NODE && plugin.Type != PYTHON) {
 			continue
 		}
 		rows = append(rows, openPluginRecord{
@@ -86,6 +88,8 @@ func openPluginRecords(plugins []*common.Function) []openPluginRecord {
 			Class:        plugin.Class,
 			Rule:         plugin.Rule,
 			Dependencies: append([]string(nil), plugin.Dependencies...),
+			UsesSmallCat: plugin.UsesSmallCat,
+			HasUserForm:  plugin.HasUserForm,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {

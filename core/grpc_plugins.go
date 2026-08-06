@@ -212,7 +212,7 @@ func addNodePluginLocked(path, name, class string) error {
 		f.Suffix = ".py"
 	}
 	f.Path = path
-	if f.HasForm {
+	if f.HasForm || f.HasUserForm {
 		var err error
 		switch class {
 		case NODE:
@@ -474,7 +474,7 @@ var typeat = `declare class Sender {
     isAdmin(): Promise<boolean>;
     param(key: number | string): Promise<string>;
     setContent(content: string): Promise<undefined>;
-    continue(): Promise<undefined>;
+    resume(): Promise<undefined>;
     getAdapter(): Promise<Adapter>;
     listen(options?: {
         rules?: string[];
@@ -502,10 +502,9 @@ var typeat = `declare class Sender {
     }[]>;
 }
 declare class Bucket {
+    #private;
     private name;
     constructor(name: string);
-    transform(v: string | undefined): string | number | boolean | undefined;
-    reverseTransform(value: any): string;
     get(key: string, defaultValue?: any): Promise<any>;
     set(key: string, value: any): Promise<{
         message?: string;
@@ -518,7 +517,7 @@ declare class Bucket {
     }>;
     deleteAll(): Promise<undefined>;
     keys(): Promise<string[]>;
-    len(): Promise<number>;
+    count(): Promise<number>;
     buckets(): Promise<string[]>;
     watch(key: string, handle: (old: any, now: any, key: string) => StorageModifier | void): void;
     getName(): Promise<string>;
@@ -535,9 +534,14 @@ export interface SillyGirlUser {
     disabled: boolean;
     authorized: boolean;
     bindings: SillyGirlUserBindings;
+    records?: SillyGirlUserFormRecord[];
 }
-/** Read ordinary users and this plugin's authorization state. */
-declare function userList(): Promise<SillyGirlUser[]>;
+export interface SillyGirlUserFormRecord {
+    id: string;
+    values: Record<string, any>;
+    created_at: number;
+    updated_at: number;
+}
 interface SillyGirlSchemaNode {
     __schemaNode: boolean;
     schema: Record<string, any>;
@@ -546,30 +550,36 @@ interface SillyGirlSchemaNode {
     default(value: any): SillyGirlSchemaNode;
     options(value: any[] | Record<string, any>): SillyGirlSchemaNode;
     required(value: string[] | boolean): SillyGirlSchemaNode;
+    match(value: string | RegExp): SillyGirlSchemaNode;
+    test(callback: (value: any, context: SillyGirlUserFormTestContext) => boolean | string | Promise<boolean | string>): SillyGirlSchemaNode;
+    err(value: string): SillyGirlSchemaNode;
     format(value: string): SillyGirlSchemaNode;
     min(value: number): SillyGirlSchemaNode;
     max(value: number): SillyGirlSchemaNode;
-    minLength(value: number): SillyGirlSchemaNode;
-    maxLength(value: number): SillyGirlSchemaNode;
-    pattern(value: string): SillyGirlSchemaNode;
     widget(value: string): SillyGirlSchemaNode;
     toJSON(): Record<string, any>;
 }
 declare class SchemaNode implements SillyGirlSchemaNode {
     __schemaNode: boolean;
     schema: Record<string, any>;
+    private lastRule;
+    validators: Array<{
+        runtime: string;
+        source: string;
+        message: string;
+    }>;
     constructor(type: string, extra?: Record<string, any>);
     title(value: string): this;
     description(value: string): this;
     default(value: any): this;
     options(value: any[] | Record<string, any>): SchemaNode;
-    required(value: string[] | boolean): this;
+    required(value?: string[] | boolean): this;
+    match(value: string | RegExp): this;
+    test(callback: (value: any, context: SillyGirlUserFormTestContext) => boolean | string | Promise<boolean | string>): this;
+    err(value: string): this;
     format(value: string): this;
     min(value: number): this;
     max(value: number): this;
-    minLength(value: number): this;
-    maxLength(value: number): this;
-    pattern(value: string): this;
     widget(value: string): this;
     toJSON(): Record<string, any>;
 }
@@ -590,15 +600,11 @@ declare class PluginConfigFormInstance {
     constructor(schema: any);
     init(): Promise<Record<string, any>>;
     get(): Promise<Record<string, any>>;
-    Get(): Promise<Record<string, any>>;
     set(values?: Record<string, any>): Promise<{
         error: string;
     }>;
-    Set(values?: Record<string, any>): Promise<{
-        error: string;
-    }>;
 }
-interface PluginConfigFormFactory {
+interface FormFactory {
     (fields: Record<string, SillyGirlSchemaNode>): PluginConfigFormInstance;
     new (fields: Record<string, SillyGirlSchemaNode>): PluginConfigFormInstance;
     string: typeof formHelpers.string;
@@ -610,7 +616,49 @@ interface PluginConfigFormFactory {
     select: typeof formHelpers.select;
     defaults(fields: Record<string, SillyGirlSchemaNode>): any;
 }
-declare const form: PluginConfigFormFactory;
+interface SillyGirlUserFormTestContext {
+    values: Record<string, any>;
+    user: {
+        id: string;
+        username: string;
+        nickname: string;
+        bindings: Record<string, any>;
+    };
+    plugin: {
+        id: string;
+        title: string;
+    };
+    config: Record<string, any>;
+}
+declare class UserFormInstance {
+    definition: {
+        schema: Record<string, any>;
+        multiple: number;
+        key_by: string[];
+        validators: Record<string, any[]>;
+    };
+    constructor(fields: Record<string, SillyGirlSchemaNode>);
+    multiple(limit: number): this;
+    keyBy(fields: string[] | string): this;
+    private register;
+}
+interface UserFormFactory extends FormFactory {
+    (fields: Record<string, SillyGirlSchemaNode>): UserFormInstance;
+    new (fields: Record<string, SillyGirlSchemaNode>): UserFormInstance;
+}
+declare const plugin: {
+    Form: FormFactory;
+};
+declare const user: {
+    Form: UserFormFactory;
+    getUserList(options?: {
+        withRecords?: boolean;
+    }): Promise<SillyGirlUser[]>;
+    getUser(selector: string | {
+        id?: string;
+        name?: string;
+    }): Promise<SillyGirlUser | undefined>;
+};
 type ContainerKind = "smallcat" | "qinglong" | "daidai";
 interface ContainerPanelInfo {
     index: number;
@@ -635,7 +683,6 @@ interface ContainerApi {
     count(kind: ContainerKind | string): Promise<number>;
     get(kind: ContainerKind | string, id: number | string): Promise<ContainerPanelInfo | undefined>;
 }
-declare const container: ContainerApi;
 declare class QingLong {
     id: number;
     uuid: string;
@@ -718,7 +765,7 @@ declare class SmallCat {
     cloud(options: Record<string, any>): Promise<any>;
     gateway(options: Record<string, any>): Promise<any>;
     qrCodeAuth(options: Record<string, any>): Promise<any>;
-    oAuth(options: Record<string, any>): Promise<any>;
+    oauth(options: Record<string, any>): Promise<any>;
     translateLink(options: Record<string, any>): Promise<any>;
     autoAuth(options: Record<string, any>): Promise<any>;
     appMsgExt(options: Record<string, any>): Promise<any>;
@@ -836,7 +883,6 @@ interface CQParams {
     [key: string]: string | number | boolean;
 }
 declare let utils: {
-    userList: typeof userList;
     sleep: typeof sleep;
     version: typeof version;
     restart: typeof restart;
@@ -852,8 +898,8 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, container, form, sender, utils, console, };
-`
+declare const container: ContainerApi;
+export { Adapter, Bucket, container, plugin, user, sender, utils, console, };`
 
 func defaultScript(title string) string {
 	name := safePluginDirName(title)
@@ -868,8 +914,9 @@ const {
   sender: s,
   Bucket,
   container,
-  form,
-  utils: { buildCQTag, image, video, userList, sleep, version, restart, update },
+	plugin,
+	user,
+  utils: { buildCQTag, image, video, sleep, version, restart, update },
 } = require("sillygirl");
 `
 }
