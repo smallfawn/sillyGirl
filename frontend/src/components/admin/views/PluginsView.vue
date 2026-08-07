@@ -283,14 +283,19 @@ const {
             extra="新增时必须和源码里的 [name: xxx] 一致"
           >
             <Input
+              id="plugin-editor-name"
+              name="plugin-editor-name"
               v-model:value="pluginEditor.name"
               style="width: 260px"
               placeholder="例如 localPlugin"
               :disabled="pluginEditor.installed && !pluginEditor.isNew"
+              @input="pluginEditor.name = $event.target.value"
+              @change="pluginEditor.name = $event.target.value"
             />
           </Form.Item>
           <Form.Item label="类型" required>
             <Select
+              id="plugin-editor-type"
               v-model:value="pluginEditor.type"
               style="width: 160px"
               :options="[
@@ -361,6 +366,8 @@ const {
         <Form.Item label="新增插件源" required style="margin-bottom: 0">
           <Space.Compact style="width: 100%">
             <Input
+              id="plugin-source-address"
+              name="plugin-source-address"
               v-model:value="plugins.sourceAddress"
               placeholder="https://github.com/smallfawn/sillyGirl_Plugins 或 link://..."
               @press-enter="addPluginSource"
@@ -396,6 +403,8 @@ const {
               <Button
                 type="text"
                 danger
+                :title="`删除插件源 ${record.address}`"
+                :aria-label="`删除插件源 ${record.address}`"
                 :loading="plugins.sourceRemoving[record.address]"
               >
                 <Trash2 :size="16" />

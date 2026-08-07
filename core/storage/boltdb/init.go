@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -266,7 +267,8 @@ func (bucket *Bucket) GetInt(key string, vs ...int) int {
 		if b == nil {
 			return nil
 		}
-		v := utils.Int(string(b.Get([]byte(fmt.Sprint(key)))))
+		stored := string(b.Get([]byte(fmt.Sprint(key))))
+		v := utils.Int(strings.TrimPrefix(stored, "d:"))
 		if v != 0 {
 			value = v
 		}
@@ -285,7 +287,7 @@ func (bucket *Bucket) GetBool(key string, vs ...bool) bool {
 		if b == nil {
 			return nil
 		}
-		v := string(b.Get([]byte(fmt.Sprint(key))))
+		v := strings.TrimPrefix(string(b.Get([]byte(fmt.Sprint(key)))), "b:")
 		if v == "true" {
 			value = true
 		} else if v == "false" {

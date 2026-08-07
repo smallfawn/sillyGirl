@@ -102,22 +102,26 @@ func pluginCronTasks() []*Tasks {
 		}
 		sort.Strings(platforms)
 		for _, platform := range platforms {
-			title := f.Title
-			if title == "" {
-				title = scriptTaskTitle(f)
-			}
-			rows = append(rows, &Tasks{
-				ID:       pluginCronTaskID(f.UUID, platform),
-				Title:    title,
-				Schedule: f.Cron[platform],
-				Command:  scriptCommandForFunction(f),
-				Scripts:  []string{f.UUID},
-				Remark:   "来自脚本注释 @cron",
-				Enable:   pluginExecutionEnabled(f),
-			})
+			rows = append(rows, pluginCronTask(f, platform))
 		}
 	}
 	return rows
+}
+
+func pluginCronTask(f *common.Function, platform string) *Tasks {
+	title := f.Title
+	if title == "" {
+		title = scriptTaskTitle(f)
+	}
+	return &Tasks{
+		ID:       pluginCronTaskID(f.UUID, platform),
+		Title:    title,
+		Schedule: f.Cron[platform],
+		Command:  scriptCommandForFunction(f),
+		Scripts:  []string{f.UUID},
+		Remark:   "来自脚本注释 @cron",
+		Enable:   pluginExecutionEnabled(f),
+	}
 }
 
 // setTaskEnabled keeps the task list switch as the single place for changing
@@ -152,8 +156,36 @@ func setTaskEnabled(taskID string, enabled bool) error {
 		return err
 	}
 	task.Enable = enabled
-	tasks.Set(taskID, utils.JsonMarshal(task))
-	return nil
+	_, _, err := tasks.Set(taskID, utils.JsonMarshal(task))
+	return err
+}
+
+// handleTaskEnabledOnlyUpdate handles the lightweight payload sent by the task
+// list switch. Plugin cron tasks are virtual rows and therefore cannot be
+// hydrated through tasks.First like persisted tasks can.
+func handleTaskEnabledOnlyUpdate(ctx *gin.Context, taskID string, updateData map[string]interface{}) bool {
+	if len(updateData) != 1 {
+		return false
+	}
+	value, exists := updateData["enable"]
+	if !exists {
+		return false
+	}
+	enabled, ok := value.(bool)
+	if !ok {
+		ApiUnprocessable(ctx, "定时任务状态必须是布尔值")
+		return true
+	}
+	if err := setTaskEnabled(taskID, enabled); err != nil {
+		if strings.Contains(err.Error(), "不存在") {
+			ApiNotFound(ctx, err.Error())
+		} else {
+			ApiInternalError(ctx, err.Error())
+		}
+		return true
+	}
+	ApiOK(ctx, gin.H{"task_id": taskID, "enable": enabled})
+	return true
 }
 
 func runTaskNow(taskID string) error {
@@ -373,10 +405,21 @@ func init() {
 			ApiNotFound(ctx, "定时任务不存在")
 			return
 		}
-		var tp = Tasks{
-			ID: task_id,
+		if !creating && handleTaskEnabledOnlyUpdate(ctx, task_id, updateData) {
+			return
 		}
-		tasks.First(&tp)
+		var tp Tasks
+		if _, _, pluginTask := parsePluginCronTaskID(task_id); pluginTask {
+			f, platform := findScriptFunctionByTask(task_id, "")
+			if f == nil {
+				ApiNotFound(ctx, "定时任务脚本不存在")
+				return
+			}
+			tp = *pluginCronTask(f, platform)
+		} else {
+			tp.ID = task_id
+			tasks.First(&tp)
+		}
 		for key, value := range updateData {
 			switch key {
 			case "title":
@@ -416,9 +459,12 @@ func init() {
 					tp.Scripts = toStringSlice(v)
 				}
 			case "enable":
-				if v, ok := value.(bool); ok {
-					tp.Enable = v
+				v, ok := value.(bool)
+				if !ok {
+					ApiUnprocessable(ctx, "定时任务状态必须是布尔值")
+					return
 				}
+				tp.Enable = v
 			}
 		}
 		if tp.CreatedAt == 0 {
@@ -432,21 +478,33 @@ func init() {
 			ApiUnprocessable(ctx, err.Error())
 			return
 		}
-		if _, _, pluginCronTask := parsePluginCronTaskID(task_id); pluginCronTask {
+		if _, _, isPluginCronTask := parsePluginCronTaskID(task_id); isPluginCronTask {
 			f, platform := findScriptFunctionByTask(task_id, tp.Command)
 			if f == nil {
 				ApiNotFound(ctx, "定时任务脚本不存在")
 				return
 			}
-			if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
-				ApiInternalError(ctx, err.Error())
-				return
+			if _, scheduleProvided := updateData["schedule"]; scheduleProvided {
+				if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
+					ApiInternalError(ctx, err.Error())
+					return
+				}
+			}
+			if enabled, enableProvided := updateData["enable"].(bool); enableProvided {
+				if err := setTaskEnabled(task_id, enabled); err != nil {
+					ApiInternalError(ctx, err.Error())
+					return
+				}
 			}
 			if task_id != "" {
 				if _, _, err := tasks.Set(task_id, ""); err != nil {
 					ApiInternalError(ctx, err.Error())
 					return
 				}
+			}
+			if current, currentPlatform := findScriptFunctionByTask(task_id, ""); current != nil {
+				ApiOK(ctx, pluginCronTask(current, currentPlatform))
+				return
 			}
 			ApiOK(ctx, tp)
 			return

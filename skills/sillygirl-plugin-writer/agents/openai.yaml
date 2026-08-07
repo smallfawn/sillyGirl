@@ -1,0 +1,4 @@
+interface:
+  display_name: "SillyGirl 插件编写"
+  short_description: "用 AI 编写并校验 SillyGirl JavaScript/Python 插件"
+  default_prompt: "Use $sillygirl-plugin-writer to create a complete runnable SillyGirl plugin from my requirements."

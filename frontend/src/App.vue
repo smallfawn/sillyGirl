@@ -82,6 +82,8 @@ const activeView = computed(() => adminViews[page.value] || adminViews.welcome);
               <Button
                 class="mobile-menu-button"
                 type="text"
+                title="打开导航菜单"
+                aria-label="打开导航菜单"
                 @click="mobileMenuOpen = true"
               >
                 <template #icon><MenuIcon :size="18" /></template>

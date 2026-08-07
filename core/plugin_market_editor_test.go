@@ -139,4 +139,7 @@ func TestValidateLocalPluginRequestNameMatchesMetaName(t *testing.T) {
 	if err := validateLocalPluginRequestName("otherPlugin", content, NODE); err == nil || !strings.Contains(err.Error(), "必须和 [name: demoplugin] 一致") {
 		t.Fatalf("expected name mismatch error, got %v", err)
 	}
+	if err := validateLocalPluginRequestName("", content, NODE); err == nil || !strings.Contains(err.Error(), "插件名称不能为空") {
+		t.Fatalf("expected empty name error, got %v", err)
+	}
 }

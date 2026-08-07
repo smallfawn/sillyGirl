@@ -87,6 +87,9 @@ export function useTasksAdmin() {
       /^[\d*,/?#LW\-\u0041-\u005A\u0061-\u007A]+$/.test(part),
     );
   }
+  function isPluginCronTask(task?: Task | null) {
+    return `${task?.task_id || ""}`.startsWith("plugin-cron:");
+  }
   async function saveTask() {
     if (!`${tasks.form.title || ""}`.trim()) {
       message.error("定时任务标题不能为空");
@@ -163,6 +166,7 @@ export function useTasksAdmin() {
     loadTaskSelects,
     openTask,
     validateTaskCron,
+    isPluginCronTask,
     saveTask,
     removeTask,
     runTask,

@@ -30,7 +30,9 @@ const {
   <section v-if="page === 'storage'" class="panel">
     <div class="toolbar-left" style="margin-bottom: 12px">
       <Select
+        id="storage-bucket"
         :value="storageState.bucket"
+        aria-label="存储桶"
         style="width: 220px"
         show-search
         allow-clear
@@ -40,7 +42,10 @@ const {
         @change="selectStorageBucket"
       />
       <Input
+        id="storage-search"
+        name="storage-search"
         v-model:value="storageState.search"
+        aria-label="按 Key 或 Value 查询"
         allow-clear
         style="width: 360px"
         placeholder="按 Key 或 Value 查询"
@@ -78,20 +83,28 @@ const {
     </div>
     <Space.Compact style="width: 100%; margin-bottom: 12px">
       <Input
+        id="storage-entry-key"
+        name="storage-entry-key"
         v-model:value="storageState.entryKey"
+        aria-label="新 Key"
         style="width: 260px"
         placeholder="Key"
         :disabled="!selectedStorageBucket"
         @press-enter="createStorageEntry"
       />
       <Input
+        id="storage-entry-value"
+        name="storage-entry-value"
         v-model:value="storageState.entryValue"
+        aria-label="新 Value"
         placeholder="Value"
         :disabled="!selectedStorageBucket"
         @press-enter="createStorageEntry"
       />
       <Button
         type="primary"
+        title="添加 Key/Value"
+        aria-label="添加 Key/Value"
         :loading="storageState.savingEntry"
         :disabled="!selectedStorageBucket"
         @click="createStorageEntry"
@@ -119,9 +132,15 @@ const {
           <Space.Compact style="width: 100%">
             <Input.TextArea
               v-model:value="record.value"
+              :aria-label="`${record.key} 的 Value`"
               :auto-size="{ minRows: 1, maxRows: 6 }"
             />
-            <Button @click="saveStorageRow(record)"><Save :size="16" /></Button>
+            <Button
+              :title="`保存 ${record.key}`"
+              :aria-label="`保存 ${record.key}`"
+              @click="saveStorageRow(record)"
+              ><Save :size="16"
+            /></Button>
           </Space.Compact>
         </template>
       </Table.Column>
@@ -139,10 +158,13 @@ const {
     <Form layout="vertical">
       <Form.Item
         label="存储桶名称"
+        html-for="storage-new-bucket"
         required
         extra="不能包含点号、逗号或空白字符。"
       >
         <Input
+          id="storage-new-bucket"
+          name="storage-new-bucket"
           v-model:value="storageState.newBucketName"
           placeholder="例如：myPlugin"
           @press-enter="createStorageBucket"

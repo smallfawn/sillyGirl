@@ -7,8 +7,15 @@ body {
   background: #f5f7fb;
   color: #1f2937;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
 }
 
 .shell {
@@ -192,7 +199,10 @@ body {
   border: 1px solid #e5e9f0;
   border-radius: 14px;
   box-shadow: 0 4px 18px rgb(15 23 42 / 5%);
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
 .bot-card:hover {
@@ -649,7 +659,9 @@ body {
   border-radius: 8px;
   font-weight: 700;
   cursor: pointer;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .plugin-card-icon:hover,
@@ -979,7 +991,10 @@ body {
   color: #fff;
   box-shadow: 0 10px 28px rgba(22, 119, 255, 0.34);
   cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .web-chat-fab:hover {
@@ -1457,4 +1472,31 @@ body {
   .code-editor .cm-scroller {
     font-size: 12px;
   }
+}
+.ant-statistic-title,
+.ant-typography-secondary,
+.muted,
+.ant-form-item-extra {
+  color: #595959 !important;
+}
+
+a.ant-typography,
+.ant-typography a {
+  color: #0958d9 !important;
+}
+
+.ant-btn-primary:not(:disabled) {
+  background: #0958d9 !important;
+}
+
+.ant-btn-primary:not(:disabled):hover {
+  background: #003eb3 !important;
+}
+
+.ant-tag-green {
+  color: #237804 !important;
+}
+
+.ant-menu-light .ant-menu-item-selected {
+  color: #0958d9 !important;
 }

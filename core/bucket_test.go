@@ -11,6 +11,34 @@ func TestEncodeBucketValueKeepsIntegerFloatsAsIntegers(t *testing.T) {
 	}
 }
 
+func TestTypedBucketValuesRemainReadableByLegacyGetters(t *testing.T) {
+	bucket := MakeBucket("test_typed_bucket_getters")
+	t.Cleanup(func() {
+		_, _, _ = SetBucketKeyValue2(bucket, "bool", nil)
+		_, _, _ = SetBucketKeyValue2(bucket, "int", nil)
+	})
+
+	if _, _, err := SetBucketKeyValue(bucket, "bool", true); err != nil {
+		t.Fatal(err)
+	}
+	if !bucket.GetBool("bool") {
+		t.Fatal("GetBool did not decode b:true")
+	}
+	if _, _, err := SetBucketKeyValue(bucket, "bool", false); err != nil {
+		t.Fatal(err)
+	}
+	if bucket.GetBool("bool", true) {
+		t.Fatal("GetBool did not decode b:false")
+	}
+
+	if _, _, err := SetBucketKeyValue(bucket, "int", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if got := bucket.GetInt("int"); got != 8080 {
+		t.Fatalf("GetInt did not decode d:8080; got %d", got)
+	}
+}
+
 func TestStorageEntryMatchesSearch(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	appVersion          = "1.0.8"
+	appVersion          = "1.0.9"
 	appRepository       = "https://github.com/smallfawn/sillyGirl"
 	remoteVersionRawURL = "https://raw.githubusercontent.com/smallfawn/sillyGirl/refs/heads/main/VERSION"
 )
@@ -206,4 +206,3 @@ func normalizeAppVersion(version string) string {
 	version = strings.TrimPrefix(version, "v")
 	return strings.TrimSpace(version)
 }
-

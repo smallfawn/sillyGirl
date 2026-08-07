@@ -95,8 +95,12 @@ export function useStorageAdmin() {
     );
   }
   async function saveStorageRow(row: any) {
-    await saveStorage({ [`${row.bucket}.${row.key}`]: row.value });
-    message.success("已保存");
+    try {
+      await saveStorage({ [`${row.bucket}.${row.key}`]: row.value });
+      message.success("已保存");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "保存失败");
+    }
   }
   async function selectStorageBucket(bucket?: string) {
     storageState.bucket = bucket || "";
@@ -118,6 +122,14 @@ export function useStorageAdmin() {
       message.error("请输入存储桶名称");
       return;
     }
+    if (bucket.length > 128) {
+      message.error("存储桶名称不能超过128个字符");
+      return;
+    }
+    if (/[.,\s]/u.test(bucket)) {
+      message.error("存储桶名称不能包含点号、逗号或空白字符");
+      return;
+    }
     storageState.creatingBucket = true;
     try {
       await post("/api/admin/storage/buckets", { bucket });
@@ -128,6 +140,8 @@ export function useStorageAdmin() {
       storageState.search = "";
       await loadStorageBuckets();
       await loadStorage(1);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "存储桶创建失败");
     } finally {
       storageState.creatingBucket = false;
     }
@@ -159,6 +173,10 @@ export function useStorageAdmin() {
       storageState.search = "";
       await loadStorageBuckets();
       await loadStorage(1);
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : "Key/Value 添加失败",
+      );
     } finally {
       storageState.savingEntry = false;
     }
@@ -171,12 +189,16 @@ export function useStorageAdmin() {
     }
     storageState.deletingBucket = true;
     try {
-      await post(`/api/admin/storage/buckets/${encodeURIComponent(bucket)}/deletions`);
+      await post(
+        `/api/admin/storage/buckets/${encodeURIComponent(bucket)}/deletions`,
+      );
       message.success("存储桶已删除");
       storageState.bucket = "sillyGirl";
       storageState.search = "";
       await loadStorageBuckets();
       await loadStorage(1);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "存储桶删除失败");
     } finally {
       storageState.deletingBucket = false;
     }

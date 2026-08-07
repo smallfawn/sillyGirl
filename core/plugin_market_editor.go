@@ -255,8 +255,11 @@ func normalizePluginMetaFileName(value string, class string) (string, error) {
 
 func validateLocalPluginRequestName(requestName, content, class string) error {
 	metaName := strings.TrimSpace(pluginMetaMap(content)["name"])
-	if strings.TrimSpace(requestName) == "" || metaName == "" {
-		return nil
+	if strings.TrimSpace(requestName) == "" {
+		return errors.New("插件名称不能为空，且必须和 [name: 文件名] 一致")
+	}
+	if metaName == "" {
+		return errors.New("插件源码缺少 [name: 文件名]")
 	}
 	requestFile, err := normalizePluginMetaFileName(requestName, class)
 	if err != nil {

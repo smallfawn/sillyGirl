@@ -101,7 +101,13 @@ const {
             title="确认删除这个青龙面板？"
             @confirm="removeQinglongPanel(record)"
           >
-            <Button type="text" danger><Trash2 :size="16" /></Button>
+            <Button
+              type="text"
+              danger
+              :title="`删除青龙面板 ${record.name || record.address}`"
+              :aria-label="`删除青龙面板 ${record.name || record.address}`"
+              ><Trash2 :size="16"
+            /></Button>
           </Popconfirm>
         </template>
       </Table.Column>
@@ -149,7 +155,13 @@ const {
             title="确认删除这个呆呆面板？"
             @confirm="removeDaidaiPanel(record)"
           >
-            <Button type="text" danger><Trash2 :size="16" /></Button>
+            <Button
+              type="text"
+              danger
+              :title="`删除呆呆面板 ${record.name || record.address}`"
+              :aria-label="`删除呆呆面板 ${record.name || record.address}`"
+              ><Trash2 :size="16"
+            /></Button>
           </Popconfirm>
         </template>
       </Table.Column>
@@ -224,7 +236,13 @@ const {
             title="确认删除这个 smallcat？"
             @confirm="removeSmallcatPanel(record)"
           >
-            <Button type="text" danger><Trash2 :size="16" /></Button>
+            <Button
+              type="text"
+              danger
+              :title="`删除 smallcat ${record.name || record.address}`"
+              :aria-label="`删除 smallcat ${record.name || record.address}`"
+              ><Trash2 :size="16"
+            /></Button>
           </Popconfirm>
         </template>
       </Table.Column>
@@ -240,20 +258,39 @@ const {
     @ok="saveQinglongPanel"
   >
     <Form layout="vertical">
-      <Form.Item label="名称">
-        <Input v-model:value="qinglong.form.name" placeholder="例如：主青龙" />
-      </Form.Item>
-      <Form.Item label="青龙地址" required>
+      <Form.Item label="名称" html-for="qinglong-name">
         <Input
+          id="qinglong-name"
+          name="qinglong-name"
+          v-model:value="qinglong.form.name"
+          placeholder="例如：主青龙"
+        />
+      </Form.Item>
+      <Form.Item label="青龙地址" html-for="qinglong-address" required>
+        <Input
+          id="qinglong-address"
+          name="qinglong-address"
           v-model:value="qinglong.form.address"
           placeholder="http://127.0.0.1:5700"
         />
       </Form.Item>
-      <Form.Item label="Client ID" required>
-        <Input v-model:value="qinglong.form.client_id" />
+      <Form.Item label="Client ID" html-for="qinglong-client-id" required>
+        <Input
+          id="qinglong-client-id"
+          name="qinglong-client-id"
+          v-model:value="qinglong.form.client_id"
+        />
       </Form.Item>
-      <Form.Item label="Client Secret" required>
-        <Input.Password v-model:value="qinglong.form.client_secret" />
+      <Form.Item
+        label="Client Secret"
+        html-for="qinglong-client-secret"
+        required
+      >
+        <Input.Password
+          id="qinglong-client-secret"
+          name="qinglong-client-secret"
+          v-model:value="qinglong.form.client_secret"
+        />
       </Form.Item>
       <Button @click="testQinglongPanel()" :loading="qinglong.testing">
         <template #icon><RefreshCw :size="16" /></template>检测连接
@@ -270,20 +307,26 @@ const {
     @ok="saveSmallcatPanel"
   >
     <Form layout="vertical">
-      <Form.Item label="名称">
+      <Form.Item label="名称" html-for="smallcat-name">
         <Input
+          id="smallcat-name"
+          name="smallcat-name"
           v-model:value="smallcat.form.name"
           placeholder="例如：主 smallcat"
         />
       </Form.Item>
-      <Form.Item label="smallcat 地址" required>
+      <Form.Item label="smallcat 地址" html-for="smallcat-address" required>
         <Input
+          id="smallcat-address"
+          name="smallcat-address"
           v-model:value="smallcat.form.address"
           placeholder="http://127.0.0.1:18787"
         />
       </Form.Item>
-      <Form.Item label="API AUTH" required>
+      <Form.Item label="API AUTH" html-for="smallcat-api-auth" required>
         <Input.Password
+          id="smallcat-api-auth"
+          name="smallcat-api-auth"
           v-model:value="smallcat.form.api_auth"
           :placeholder="
             smallcat.form.id ? '留空保持原 AUTH 不变' : '请输入 API AUTH'
@@ -324,20 +367,35 @@ const {
     @ok="saveDaidaiPanel"
   >
     <Form layout="vertical">
-      <Form.Item label="名称">
-        <Input v-model:value="daidai.form.name" placeholder="例如：主呆呆" />
-      </Form.Item>
-      <Form.Item label="呆呆面板地址" required>
+      <Form.Item label="名称" html-for="daidai-name">
         <Input
+          id="daidai-name"
+          name="daidai-name"
+          v-model:value="daidai.form.name"
+          placeholder="例如：主呆呆"
+        />
+      </Form.Item>
+      <Form.Item label="呆呆面板地址" html-for="daidai-address" required>
+        <Input
+          id="daidai-address"
+          name="daidai-address"
           v-model:value="daidai.form.address"
           placeholder="http://127.0.0.1:5701"
         />
       </Form.Item>
-      <Form.Item label="App Key" required>
-        <Input v-model:value="daidai.form.app_key" />
+      <Form.Item label="App Key" html-for="daidai-app-key" required>
+        <Input
+          id="daidai-app-key"
+          name="daidai-app-key"
+          v-model:value="daidai.form.app_key"
+        />
       </Form.Item>
-      <Form.Item label="App Secret" required>
-        <Input.Password v-model:value="daidai.form.app_secret" />
+      <Form.Item label="App Secret" html-for="daidai-app-secret" required>
+        <Input.Password
+          id="daidai-app-secret"
+          name="daidai-app-secret"
+          v-model:value="daidai.form.app_secret"
+        />
       </Form.Item>
       <Button @click="testDaidaiPanel()" :loading="daidai.testing">
         <template #icon><RefreshCw :size="16" /></template>检测连接
