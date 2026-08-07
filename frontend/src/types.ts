@@ -88,6 +88,7 @@ export type PluginInfo = {
   public?: boolean;
   open?: boolean;
   has_form?: boolean;
+  has_user_form?: boolean;
   config_registered?: boolean;
   uses_smallcat?: boolean;
   module?: boolean;

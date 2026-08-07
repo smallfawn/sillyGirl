@@ -45,7 +45,11 @@ const { loadMasters, masters, page, removeMaster, saveMaster } =
       <Table.Column title="操作" :width="100"
         ><template #default="{ record }"
           ><Popconfirm title="确认删除？" @confirm="removeMaster(record)"
-            ><Button type="text" danger
+            ><Button
+              type="text"
+              danger
+              :title="`删除管理员 ${record.platform}:${record.number}`"
+              :aria-label="`删除管理员 ${record.platform}:${record.number}`"
               ><Trash2 :size="16" /></Button></Popconfirm></template
       ></Table.Column>
     </Table>
@@ -58,12 +62,16 @@ const { loadMasters, masters, page, removeMaster, saveMaster } =
     @ok="saveMaster"
   >
     <Form layout="vertical"
-      ><Form.Item label="平台"
+      ><Form.Item label="平台" html-for="master-platform"
         ><Select
+          id="master-platform"
           v-model:value="masters.form.platform"
           :options="masters.platforms" /></Form.Item
-      ><Form.Item label="账号"
-        ><Input v-model:value="masters.form.number" /></Form.Item
+      ><Form.Item label="账号" html-for="master-account"
+        ><Input
+          id="master-account"
+          name="master-account"
+          v-model:value="masters.form.number" /></Form.Item
     ></Form>
   </Modal>
 </template>

@@ -334,8 +334,8 @@ export function useAdminController() {
   const overviewVersion = computed(() => {
     const info = user.value?.version || {};
     return {
-      local: info.local || "1.0.8",
-      remote: info.remote || info.local || "1.0.8",
+      local: info.local || "1.0.9",
+      remote: info.remote || info.local || "1.0.9",
       source: info.source || "reserved",
       repository: info.repository || "https://github.com/smallfawn/sillyGirl",
     };
@@ -775,6 +775,7 @@ export function useAdminController() {
   } = useNormalUsersAdmin(smallcatOpenids);
 
   const {
+    isPluginCronTask,
     taskPlatformLabels,
     tasks,
     loadTasks,
@@ -1306,7 +1307,10 @@ export function useAdminController() {
   }
 
   function pluginCanOpen(row: PluginInfo) {
-    return pluginInstalled(row) && row.uses_smallcat === true;
+    return (
+      pluginInstalled(row) &&
+      (row.uses_smallcat === true || row.has_user_form === true)
+    );
   }
 
   function pluginCanConfigure(row: PluginInfo) {
@@ -1560,12 +1564,16 @@ export function useAdminController() {
     }
   }
   async function saveMarketPluginEditor() {
+    const nameInput = document.getElementById(
+      "plugin-editor-name",
+    ) as HTMLInputElement | null;
+    if (nameInput) pluginEditor.name = nameInput.value;
     if (!validatePluginEditorRequired()) return;
     pluginEditor.saving = true;
     try {
       const payload = {
         id: pluginEditor.id,
-        name: pluginEditor.name || pluginEditor.title,
+        name: pluginEditor.name,
         type: pluginEditor.type,
         content: pluginEditor.content,
       };
@@ -3175,6 +3183,7 @@ export function useAdminController() {
     installNodeDependency,
     installNodeDependencyRow,
     installPlugin,
+    isPluginCronTask,
     loadActiveContainerPanels,
     refreshActiveContainerPanels,
     loadActiveMessageTool,

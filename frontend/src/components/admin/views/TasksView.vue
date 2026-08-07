@@ -13,6 +13,7 @@ import { timestamp } from "../../../utils";
 import { useAdminViewContext } from "../adminViewContext";
 
 const {
+  isPluginCronTask,
   loadTasks,
   openTask,
   page,
@@ -61,11 +62,19 @@ const {
       >
       <Table.Column title="操作" :width="180"
         ><template #default="{ record }"
-          ><Button type="text" @click="runTask(record)"
+          ><Button
+            type="text"
+            :title="`运行 ${record.title}`"
+            :aria-label="`运行 ${record.title}`"
+            @click="runTask(record)"
             ><Play :size="16" /></Button
           ><Button type="text" @click="openTask(record)">编辑</Button
           ><Popconfirm title="确认删除？" @confirm="removeTask(record)"
-            ><Button type="text" danger
+            ><Button
+              type="text"
+              danger
+              :title="`删除 ${record.title}`"
+              :aria-label="`删除 ${record.title}`"
               ><Trash2 :size="16" /></Button></Popconfirm></template
       ></Table.Column>
     </Table>
@@ -83,11 +92,16 @@ const {
         label="标题"
         html-for="task-title"
         required
-        help="定时任务标题不能为空"
+        :help="
+          isPluginCronTask(tasks.form)
+            ? '插件任务标题与命令来自脚本注释，只能在插件编辑器中修改'
+            : '定时任务标题不能为空'
+        "
         ><Input
           id="task-title"
           v-model:value="tasks.form.title"
           name="task-title"
+          :disabled="isPluginCronTask(tasks.form)"
           placeholder="例如：每小时检查 IP"
       /></Form.Item>
       <Form.Item
@@ -106,6 +120,7 @@ const {
           id="task-command"
           v-model:value="tasks.form.command"
           show-search
+          :disabled="isPluginCronTask(tasks.form)"
           :options="tasks.scripts"
           placeholder="node xxx.js 或 python xxx.py"
       /></Form.Item>
@@ -114,6 +129,7 @@ const {
           id="task-platform"
           v-model:value="tasks.form.platform"
           allow-clear
+          :disabled="isPluginCronTask(tasks.form)"
           :options="tasks.platforms"
           placeholder="选择 BOT 平台"
       /></Form.Item>
@@ -126,6 +142,7 @@ const {
           v-model:value="tasks.form.recipient"
           name="task-recipient"
           allow-clear
+          :disabled="isPluginCronTask(tasks.form)"
           placeholder="请输入用户 ID / OpenID"
       /></Form.Item>
     </Form>

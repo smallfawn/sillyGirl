@@ -62,21 +62,28 @@ const {
         :options="dependencyRuntimeOptions"
       />
       <Select
+        id="dependency-plugin"
         v-model:value="nodeDeps.plugin"
+        aria-label="依赖所属插件"
         style="width: 260px"
         show-search
         :options="dependencyPluginOptions"
         option-filter-prop="label"
       />
       <Input
+        id="dependency-package"
+        name="dependency-package"
         v-model:value="nodeDeps.packageName"
+        aria-label="依赖名称"
         style="width: 320px"
         :placeholder="dependencyPackagePlaceholder"
         @press-enter="installNodeDependency"
       />
       <Switch
         v-if="nodeDeps.runtime === 'node'"
+        id="dependency-dev-mode"
         v-model:checked="nodeDeps.dev"
+        aria-label="依赖类型：Dev 或 Prod"
         checked-children="Dev"
         un-checked-children="Prod"
       />
@@ -170,6 +177,8 @@ const {
             <Button
               type="text"
               danger
+              :title="`卸载 ${record.name}`"
+              :aria-label="`卸载 ${record.name}`"
               :loading="
                 nodeDeps.removing[
                   `${nodeDeps.runtime}.${record.plugin}.${record.name}`

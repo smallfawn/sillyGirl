@@ -79,7 +79,11 @@ const {
         ><template #default="{ record }"
           ><Button type="text" @click="openCarry(record)">编辑</Button
           ><Popconfirm title="确认删除？" @confirm="removeCarry(record)"
-            ><Button type="text" danger
+            ><Button
+              type="text"
+              danger
+              :title="`删除转发群组 ${record.chat_id}`"
+              :aria-label="`删除转发群组 ${record.chat_id}`"
               ><Trash2 :size="16" /></Button></Popconfirm></template
       ></Table.Column>
     </Table>
@@ -104,11 +108,20 @@ const {
       </Table.Column>
       <Table.Column title="操作" :width="150">
         <template #default="{ record }">
-          <Button type="text" @click="openReply(record)"
+          <Button
+            type="text"
+            :title="`编辑回复 ${record.keyword}`"
+            :aria-label="`编辑回复 ${record.keyword}`"
+            @click="openReply(record)"
             ><Edit3 :size="16"
           /></Button>
           <Popconfirm title="确认删除？" @confirm="removeReply(record)"
-            ><Button type="text" danger><Trash2 :size="16" /></Button
+            ><Button
+              type="text"
+              danger
+              :title="`删除回复 ${record.keyword}`"
+              :aria-label="`删除回复 ${record.keyword}`"
+              ><Trash2 :size="16" /></Button
           ></Popconfirm>
         </template>
       </Table.Column>
@@ -135,7 +148,11 @@ const {
           ><template #default="{ record }"
             ><Button type="text" @click="openMessage(record)">编辑</Button
             ><Popconfirm title="确认删除？" @confirm="removeMessageRow(record)"
-              ><Button type="text" danger
+              ><Button
+                type="text"
+                danger
+                :title="`删除 ${record.key}`"
+                :aria-label="`删除 ${record.key}`"
                 ><Trash2 :size="16" /></Button></Popconfirm></template
         ></Table.Column>
       </Table>
@@ -149,20 +166,30 @@ const {
     @ok="saveReply"
   >
     <Form layout="vertical"
-      ><Form.Item label="关键词/正则"
-        ><Input v-model:value="replies.form.keyword" /></Form.Item
-      ><Form.Item label="回复内容"
+      ><Form.Item label="关键词/正则" html-for="reply-keyword"
+        ><Input
+          id="reply-keyword"
+          name="reply-keyword"
+          v-model:value="replies.form.keyword" /></Form.Item
+      ><Form.Item label="回复内容" html-for="reply-content"
         ><Input.TextArea
+          id="reply-content"
+          name="reply-content"
           v-model:value="replies.form.value"
           :rows="6" /></Form.Item
-      ><Form.Item label="限定用户/群号"
-        ><Input v-model:value="replies.form.number" /></Form.Item
-      ><Form.Item label="平台"
+      ><Form.Item label="限定用户/群号" html-for="reply-number"
+        ><Input
+          id="reply-number"
+          name="reply-number"
+          v-model:value="replies.form.number" /></Form.Item
+      ><Form.Item label="平台" html-for="reply-platforms"
         ><Select
+          id="reply-platforms"
           v-model:value="replies.form.platforms"
           mode="tags" /></Form.Item
-      ><Form.Item label="优先级"
+      ><Form.Item label="优先级" html-for="reply-priority"
         ><InputNumber
+          id="reply-priority"
           v-model:value="replies.form.priority"
           style="width: 100%" /></Form.Item
     ></Form>
@@ -176,28 +203,40 @@ const {
     @ok="saveCarry"
   >
     <Form layout="vertical">
-      <Form.Item label="平台" required>
+      <Form.Item label="平台" html-for="carry-platform" required>
         <Select
+          id="carry-platform"
           v-model:value="carry.form.platform"
           :options="optionMap(carry.selects.platforms)"
           @change="changeCarryPlatform"
         />
       </Form.Item>
-      <Form.Item label="群号" required>
-        <Input v-model:value="carry.form.chat_id" />
+      <Form.Item label="群号" html-for="carry-chat-id" required>
+        <Input
+          id="carry-chat-id"
+          name="carry-chat-id"
+          v-model:value="carry.form.chat_id"
+        />
       </Form.Item>
-      <Form.Item label="备注">
-        <Input.TextArea v-model:value="carry.form.remark" :rows="2" />
+      <Form.Item label="备注" html-for="carry-remark">
+        <Input.TextArea
+          id="carry-remark"
+          name="carry-remark"
+          v-model:value="carry.form.remark"
+          :rows="2"
+        />
       </Form.Item>
-      <Form.Item label="工作机器人">
+      <Form.Item label="工作机器人" html-for="carry-bots">
         <Select
+          id="carry-bots"
           v-model:value="carry.form.bots_id"
           mode="multiple"
           :options="optionMap(carry.selects.bots_id)"
         />
       </Form.Item>
-      <Form.Item label="处理脚本">
+      <Form.Item label="处理脚本" html-for="carry-scripts">
         <Select
+          id="carry-scripts"
           v-model:value="carry.form.scripts"
           mode="multiple"
           :options="recordOptions(carry.selects.scripts)"
@@ -213,18 +252,29 @@ const {
     @ok="saveMessageRow"
   >
     <Form layout="vertical"
-      ><Form.Item :label="msgState.active === 'private' ? '用户 ID' : '群号'"
+      ><Form.Item
+        :label="msgState.active === 'private' ? '用户 ID' : '群号'"
+        html-for="message-rule-key"
         ><Input
+          id="message-rule-key"
+          name="message-rule-key"
           v-model:value="msgState.form.key"
           :disabled="!!msgState.editing?.value" /></Form.Item
-      ><Form.Item label="平台"
+      ><Form.Item label="平台" html-for="message-rule-platform"
         ><Select
+          id="message-rule-platform"
           v-model:value="msgState.form.platform"
           :options="msgState.platforms" /></Form.Item
-      ><Form.Item label="说明"
-        ><Input v-model:value="msgState.form.desc" /></Form.Item
-      ><Form.Item label="启用"
-        ><Switch v-model:checked="msgState.form.enable" /></Form.Item
+      ><Form.Item label="说明" html-for="message-rule-description"
+        ><Input
+          id="message-rule-description"
+          name="message-rule-description"
+          v-model:value="msgState.form.desc" /></Form.Item
+      ><Form.Item label="启用" html-for="message-rule-enabled"
+        ><Switch
+          id="message-rule-enabled"
+          v-model:checked="msgState.form.enable"
+          aria-label="启用消息规则" /></Form.Item
     ></Form>
   </Modal>
 </template>

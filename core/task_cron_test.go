@@ -2,10 +2,13 @@ package core
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/smallfawn/sillyGirl/core/common"
 	"github.com/smallfawn/sillyGirl/utils"
 )
@@ -115,6 +118,74 @@ func TestSetTaskEnabledUpdatesPluginConfig(t *testing.T) {
 	}
 	if pluginExecutionEnabled(f) {
 		t.Fatal("plugin cron remains enabled")
+	}
+}
+
+func TestPluginCronEnableOnlyUpdateDoesNotRequireTitle(t *testing.T) {
+	uuid := "plugin-toggle-request-test-" + utils.GenUUID()
+	f := &common.Function{UUID: uuid, Type: NODE, Cron: map[string]string{"task": "0 * * * *"}}
+	previous := Functions
+	Functions = append(Functions, f)
+	t.Cleanup(func() {
+		Functions = previous
+		pluginConfigValues.Set(uuid, "")
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	handled := handleTaskEnabledOnlyUpdate(ctx, pluginCronTaskID(uuid, "task"), map[string]interface{}{
+		"enable": false,
+	})
+	if !handled {
+		t.Fatal("enable-only update was not handled")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("enable-only update status = %d; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "定时任务标题不能为空") {
+		t.Fatalf("enable-only update still requires a title: %s", recorder.Body.String())
+	}
+	if pluginExecutionEnabled(f) {
+		t.Fatal("plugin cron remains enabled after enable-only update")
+	}
+}
+
+func TestTaskEnableOnlyUpdateRejectsNonBooleanState(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	handled := handleTaskEnabledOnlyUpdate(ctx, "plugin-cron:fixture:task", map[string]interface{}{
+		"enable": "false",
+	})
+	if !handled {
+		t.Fatal("invalid enable-only update was not handled")
+	}
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid enable-only update status = %d; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "定时任务状态必须是布尔值") {
+		t.Fatalf("invalid enable-only update returned the wrong error: %s", recorder.Body.String())
+	}
+}
+
+func TestPluginCronTaskHydrationSupportsPartialUpdates(t *testing.T) {
+	uuid := "plugin-partial-update-test-" + utils.GenUUID()
+	f := &common.Function{
+		UUID:  uuid,
+		Title: "Partial Update Fixture",
+		Type:  NODE,
+		Cron:  map[string]string{"task": "0 * * * *"},
+	}
+	previous := Functions
+	Functions = append(Functions, f)
+	t.Cleanup(func() { Functions = previous })
+
+	current, platform := findScriptFunctionByTask(pluginCronTaskID(uuid, "task"), "")
+	if current == nil {
+		t.Fatal("plugin cron task was not found by its virtual task ID")
+	}
+	task := pluginCronTask(current, platform)
+	if task.Title != f.Title || task.Schedule != "0 * * * *" || task.ID == "" {
+		t.Fatalf("plugin cron task was not hydrated: %#v", task)
 	}
 }
 

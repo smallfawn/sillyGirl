@@ -318,7 +318,7 @@ func (bucket Bucket) GetInt(key string, vs ...int) int {
 	if cs != nil {
 		v, _ := cs.Result()
 		if v != "" {
-			return utils.Int(v)
+			return utils.Int(strings.TrimPrefix(v, "d:"))
 		}
 	}
 	return value
@@ -332,6 +332,7 @@ func (bucket Bucket) GetBool(key string, vs ...bool) bool {
 	cs := db.HGet(ctx, bucket.name, key)
 	if cs != nil {
 		v, _ := cs.Result()
+		v = strings.TrimPrefix(v, "b:")
 		if v == "true" {
 			value = true
 		} else if v == "false" {
