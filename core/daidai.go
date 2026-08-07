@@ -43,104 +43,99 @@ type daidaiTokenResponse struct {
 	} `json:"data"`
 }
 
-func init() {
-	GinApi(GET, "/api/admin/daidai/panels", RequireAuth, func(ctx *gin.Context) {
-		panels := getDaidaiPanels()
-		ApiList(ctx, panels, len(panels))
-	})
+func handleDaidaiPanelConnectionTest(ctx *gin.Context) {
+	panel := DaidaiPanel{}
+	if err := ctx.BindJSON(&panel); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	if err := validateDaidaiPanelInput(&panel); err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	result, err := testDaidaiPanel(panel)
+	if err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	ApiOK(ctx, result)
+}
 
-	GinApi(POST, "/api/admin/daidai/panel/test", RequireAuth, func(ctx *gin.Context) {
-		panel := DaidaiPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		if err := validateDaidaiPanelInput(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		result, err := testDaidaiPanel(panel)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		ApiOK(ctx, result)
-	})
-
-	GinApi(POST, "/api/admin/daidai/panel", RequireAuth, func(ctx *gin.Context) {
-		panel := DaidaiPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		if err := validateDaidaiPanelInput(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		result, err := testDaidaiPanel(panel)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		now := int(time.Now().Unix())
-		panels := getDaidaiPanels()
-		index := -1
-		if panel.ID != "" {
-			for i := range panels {
-				if panels[i].ID == panel.ID {
-					index = i
-					break
-				}
+func handleSaveDaidaiPanel(ctx *gin.Context) {
+	panel := DaidaiPanel{}
+	if err := ctx.BindJSON(&panel); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	panel.ID = strings.TrimSpace(ctx.Param("id"))
+	if err := validateDaidaiPanelInput(&panel); err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	result, err := testDaidaiPanel(panel)
+	if err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	now := int(time.Now().Unix())
+	panels := getDaidaiPanels()
+	index := -1
+	if panel.ID != "" {
+		for i := range panels {
+			if panels[i].ID == panel.ID {
+				index = i
+				break
 			}
 		}
-		if panel.ID == "" {
-			panel.ID = utils.GenUUID()
-			panel.CreatedAt = now
-		} else if index >= 0 {
-			if panels[index].CreatedAt != 0 {
-				panel.CreatedAt = panels[index].CreatedAt
-			} else {
-				panel.CreatedAt = now
-			}
+	}
+	if panel.ID == "" {
+		panel.ID = utils.GenUUID()
+		panel.CreatedAt = now
+	} else if index >= 0 {
+		if panels[index].CreatedAt != 0 {
+			panel.CreatedAt = panels[index].CreatedAt
 		} else {
 			panel.CreatedAt = now
 		}
-		if panel.Name == "" {
-			panel.Name = panel.Address
-		}
-		panel.UpdatedAt = now
-		panel.LastCheckedAt = now
-		panel.Status = "online"
-		panel.Message = result.Message
-		if index >= 0 {
-			panels[index] = panel
-		} else {
-			panels = append(panels, panel)
-		}
-		saveDaidaiPanels(panels)
-		ApiOK(ctx, panel)
-	})
+	} else {
+		ApiNotFound(ctx, "呆呆面板不存在")
+		return
+	}
+	if panel.Name == "" {
+		panel.Name = panel.Address
+	}
+	panel.UpdatedAt = now
+	panel.LastCheckedAt = now
+	panel.Status = "online"
+	panel.Message = result.Message
+	if index >= 0 {
+		panels[index] = panel
+	} else {
+		panels = append(panels, panel)
+	}
+	saveDaidaiPanels(panels)
+	if strings.TrimSpace(ctx.Param("id")) == "" {
+		ApiCreated(ctx, "/api/admin/panels/"+panel.ID, panel)
+		return
+	}
+	ApiOK(ctx, panel)
+}
 
-	GinApi(DELETE, "/api/admin/daidai/panel", RequireAuth, func(ctx *gin.Context) {
-		panel := DaidaiPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
+func deleteDaidaiPanel(id string) bool {
+	panels := getDaidaiPanels()
+	next := make([]DaidaiPanel, 0, len(panels))
+	found := false
+	for _, item := range panels {
+		if item.ID != id {
+			next = append(next, item)
+		} else {
+			found = true
 		}
-		if panel.ID == "" {
-			ApiFail(ctx, "缺少呆呆面板 ID")
-			return
-		}
-		panels := getDaidaiPanels()
-		next := make([]DaidaiPanel, 0, len(panels))
-		for _, item := range panels {
-			if item.ID != panel.ID {
-				next = append(next, item)
-			}
-		}
+	}
+	if found {
 		saveDaidaiPanels(next)
-		ApiOK(ctx, nil)
-	})
+	}
+	return found
 }
 
 func getDaidaiPanels() []DaidaiPanel {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -217,9 +218,9 @@ type CarryGroup struct {
 
 // CARRY API
 func init() {
-	GinApi(GET, "/api/admin/carry/groups", RequireAuth, func(ctx *gin.Context) {
-		current := utils.Int(ctx.Query("current"))
-		pageSize := utils.Int(ctx.Query("pageSize"))
+	GinApi(GET, "/api/admin/carry-groups", RequireAuth, func(ctx *gin.Context) {
+		current := utils.Int(ctx.Query("page"))
+		pageSize := utils.Int(ctx.Query("page_size"))
 		rr := CarryGroupsResult{}
 		cgs := cgs
 		rr.Total = len(cgs)
@@ -238,44 +239,7 @@ func init() {
 		}
 		ApiList(ctx, rr.Data, rr.Total, map[string]interface{}{"page": rr.Page, "time": rr.Time})
 	})
-	GinApi(GET, "/api/admin/carry/group_names", RequireAuth, func(ctx *gin.Context) {
-		cgs := cgs
-		var names = map[string]string{}
-		for _, cg := range cgs {
-			names[cg.ID] = cg.ChatName
-		}
-		ApiOK(ctx, names)
-	})
-	GinApi(GET, "/api/admin/proxy/scripts", RequireAuth, func(ctx *gin.Context) {
-		var scripts = map[string]string{}
-		functions := Functions
-		for _, function := range functions {
-			if function.UUID != "" {
-				scripts[function.UUID] = function.Title + function.Suffix
-			}
-		}
-		ApiOK(ctx, scripts)
-	})
-	var isNumeric = func(keyword string) bool {
-		for _, c := range keyword {
-			if c != '.' && (c < '0' || c > '9') {
-				return false
-			}
-		}
-		return true
-	}
-	GinApi(GET, "/api/admin/proxy/rules", RequireAuth, func(ctx *gin.Context) {
-		keyword := ctx.Query("keyword")
-		var scripts = map[string]string{}
-		scripts[keyword] = keyword
-		if strings.HasSuffix(keyword, ".") && !isNumeric(keyword) {
-			for _, suffix := range []string{"com", "cn"} {
-				scripts[keyword+suffix] = keyword + suffix
-			}
-		}
-		ApiOK(ctx, scripts)
-	})
-	GinApi(GET, "/api/admin/carry/group_selects", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/carry-group-options", RequireAuth, func(ctx *gin.Context) {
 		chat_id := ctx.Query("chat_id")
 		platform := ctx.Query("platform")
 		cgs := cgs
@@ -301,7 +265,7 @@ func init() {
 			"scripts":   scripts,
 		})
 	})
-	GinApi(POST, "/api/admin/carry/group", RequireAuth, func(ctx *gin.Context) {
+	saveCarryGroup := func(ctx *gin.Context) {
 		// 将请求的 JSON 数据解析为一个 map[string]interface{} 类型的变量
 		var updateData map[string]interface{}
 		err := ctx.BindJSON(&updateData)
@@ -309,14 +273,28 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
-		chat_id := strings.TrimSpace(fmt.Sprint(updateData["chat_id"]))
+		pathID := strings.TrimSpace(strings.TrimPrefix(ctx.Param("chat_id"), "/"))
+		creating := pathID == ""
+		chat_id := pathID
 		if chat_id == "" {
-			ApiFail(ctx, "群号不能为空")
+			chat_id = strings.TrimSpace(fmt.Sprint(updateData["chat_id"]))
+		}
+		if chat_id == "" {
+			ApiUnprocessable(ctx, "群号不能为空")
 			return
 		}
 		platform := strings.TrimSpace(fmt.Sprint(updateData["platform"]))
 		if platform == "" {
-			ApiFail(ctx, "平台不能为空")
+			ApiUnprocessable(ctx, "平台不能为空")
+			return
+		}
+		existing := strings.TrimSpace(CarryGroups.GetString(chat_id)) != ""
+		if creating && existing {
+			ApiConflict(ctx, "搬运群组已存在")
+			return
+		}
+		if !creating && !existing {
+			ApiNotFound(ctx, "搬运群组不存在")
 			return
 		}
 		var cg = CarryGroup{
@@ -358,26 +336,32 @@ func init() {
 		if cg.CreatedAt == 0 {
 			cg.CreatedAt = int(time.Now().Unix())
 		}
-		CarryGroups.Set(chat_id, utils.JsonMarshal(cg))
+		_, _, err = CarryGroups.Set(chat_id, utils.JsonMarshal(cg))
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, nil)
-	})
-	GinApi(DELETE, "/api/admin/carry/group", RequireAuth, func(ctx *gin.Context) {
+		if creating {
+			ApiCreated(ctx, "/api/admin/carry-groups/"+url.PathEscape(chat_id), cg)
+			return
+		}
+		ApiOK(ctx, cg)
+	}
+	GinApi(POST, "/api/admin/carry-groups", RequireAuth, saveCarryGroup)
+	GinApi(POST, "/api/admin/carry-groups/:chat_id", RequireAuth, saveCarryGroup)
+	GinApi(POST, "/api/admin/carry-groups/:chat_id/deletions", RequireAuth, func(ctx *gin.Context) {
 		cg := &CarryGroup{}
-		err := ctx.BindJSON(cg)
-		if err != nil {
-			ApiFail(ctx, err.Error())
+		cg.ID = strings.TrimPrefix(ctx.Param("chat_id"), "/")
+		if cg.ID == "" {
+			ApiUnprocessable(ctx, "群号不能为空")
 			return
 		}
-		if cg.ID == "" {
-			ApiFail(ctx, "群号不为空")
+		if strings.TrimSpace(CarryGroups.GetString(cg.ID)) == "" {
+			ApiNotFound(ctx, "搬运群组不存在")
 			return
 		}
 		CarryGroups.Set(cg.ID, "")
-		ApiOK(ctx, nil)
+		ApiNoContent(ctx)
 	})
 }
 

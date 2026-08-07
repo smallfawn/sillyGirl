@@ -72,28 +72,53 @@ type clawbotLoginStatus struct {
 }
 
 func init() {
-	GinApi(POST, "/api/admin/clawbot/login/start", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/clawbot-login-sessions", RequireAuth, func(ctx *gin.Context) {
 		payload := struct {
 			BotType string `json:"bot_type"`
 		}{}
-		_ = json.NewDecoder(ctx.Request.Body).Decode(&payload)
+		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			ApiFail(ctx, "请求体不是有效 JSON")
+			return
+		}
 		result, err := startClawbotLogin(ctx.Request.Context(), payload.BotType)
 		if err != nil {
+			ApiError(ctx, http.StatusBadGateway, err.Error())
+			return
+		}
+		session := strings.TrimSpace(fmt.Sprint(result["session"]))
+		ApiCreated(ctx, "/api/admin/clawbot-login-sessions/"+session, result)
+	})
+	GinApi(GET, "/api/admin/clawbot-login-sessions/:session", RequireAuth, func(ctx *gin.Context) {
+		respondClawbotLoginStatus(ctx, "", false)
+	})
+	GinApi(POST, "/api/admin/clawbot-login-sessions/:session/verification-attempts", RequireAuth, func(ctx *gin.Context) {
+		payload := struct {
+			VerifyCode string `json:"verify_code"`
+		}{}
+		if err := ctx.BindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, result)
+		respondClawbotLoginStatus(ctx, payload.VerifyCode, true)
 	})
-	GinApi(GET, "/api/admin/clawbot/login/status", RequireAuth, func(ctx *gin.Context) {
-		session := strings.TrimSpace(ctx.Query("session"))
-		verifyCode := strings.TrimSpace(ctx.Query("verify_code"))
-		result, err := pollClawbotLogin(ctx.Request.Context(), session, verifyCode)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
+}
+
+func respondClawbotLoginStatus(ctx *gin.Context, verifyCode string, accepted bool) {
+	session := strings.TrimSpace(ctx.Param("session"))
+	result, err := pollClawbotLogin(ctx.Request.Context(), session, strings.TrimSpace(verifyCode))
+	if err != nil {
+		if strings.Contains(err.Error(), "不存在") || strings.Contains(err.Error(), "失效") {
+			ApiNotFound(ctx, err.Error())
+		} else {
+			ApiError(ctx, http.StatusBadGateway, err.Error())
 		}
-		ApiOK(ctx, result)
-	})
+		return
+	}
+	if accepted {
+		ApiAccepted(ctx, "/api/admin/clawbot-login-sessions/"+session, result)
+		return
+	}
+	ApiOK(ctx, result)
 }
 
 func startClawbotLogin(ctx context.Context, botType string) (map[string]interface{}, error) {

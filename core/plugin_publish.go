@@ -15,7 +15,7 @@ import (
 
 func CheckPluginAddress(address string) error {
 	if !strings.HasSuffix(address, "list.json") {
-		address += "/api/plugins/list.json"
+		address += "/api/plugin-market/plugins"
 	}
 	data, _ := httplib.Get(address).Bytes()
 	rr := RequestPluginResult{}

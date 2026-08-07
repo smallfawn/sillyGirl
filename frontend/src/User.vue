@@ -21,6 +21,7 @@ import Tag from 'ant-design-vue/es/tag';
 import Typography from 'ant-design-vue/es/typography';
 import message from 'ant-design-vue/es/message';
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
+import AppBrand from './components/common/AppBrand.vue';
 import { Link, LogOut, Plug, QrCode, ShieldCheck } from 'lucide-vue-next';
 
 type ApiEnvelope<T> = {
@@ -325,13 +326,16 @@ async function requestJSON<T>(url: string, options: RequestInit = {}): Promise<T
     ...options,
     headers,
   });
+  if (res.status === 204) return undefined as T;
   const payload = (await res.json().catch(() => ({
     status: false,
     message: '服务响应异常',
     data: null,
   }))) as ApiEnvelope<T>;
   if (!res.ok || payload.status === false) {
-    throw new UserRequestError(payload.message || '请求失败', payload.data);
+    const problem = payload as ApiEnvelope<T> & { detail?: string; title?: string; errors?: unknown };
+    const errorData = payload.data ?? (problem.errors ? { errors: problem.errors } : null);
+    throw new UserRequestError(problem.detail || payload.message || problem.title || '请求失败', errorData);
   }
   return payload.data;
 }
@@ -400,7 +404,7 @@ async function openPluginUserForm(plugin: OpenPlugin) {
   pluginUserForm.recordID = '';
   pluginUserForm.errors = {};
   try {
-    const view = await requestJSON<PluginUserFormView>(`/api/user/plugin/form?uuid=${encodeURIComponent(plugin.id)}`);
+    const view = await requestJSON<PluginUserFormView>(`/api/user/plugins/${encodeURIComponent(plugin.id)}/form`);
     pluginUserForm.view = view;
     pluginUserForm.values = userFormDefaultValues(view);
   } catch (error) {
@@ -456,9 +460,12 @@ async function savePluginUserForm() {
   if (!pluginUserForm.plugin || !validatePluginUserValues()) return;
   pluginUserForm.saving = true;
   try {
-    await requestJSON('/api/user/plugin/form', {
-      method: 'PUT',
-      body: JSON.stringify({ uuid: pluginUserForm.plugin.id, record_id: pluginUserForm.recordID, value: pluginUserForm.values }),
+    const recordPath = pluginUserForm.recordID
+      ? `/api/user/plugins/${encodeURIComponent(pluginUserForm.plugin.id)}/form-records/${encodeURIComponent(pluginUserForm.recordID)}`
+      : `/api/user/plugins/${encodeURIComponent(pluginUserForm.plugin.id)}/form-records`;
+    await requestJSON(recordPath, {
+      method: pluginUserForm.recordID ? 'PUT' : 'POST',
+      body: JSON.stringify({ record_id: pluginUserForm.recordID, value: pluginUserForm.values }),
     });
     message.success(pluginUserForm.recordID ? '参数已更新' : '参数已提交');
     await openPluginUserForm(pluginUserForm.plugin);
@@ -484,7 +491,7 @@ async function deletePluginUserRecord(record: UserFormRecord) {
     okType: 'danger',
     cancelText: '取消',
     async onOk() {
-      await requestJSON('/api/user/plugin/form', { method: 'DELETE', body: JSON.stringify({ uuid: pluginUserForm.plugin!.id, record_id: record.id }) });
+      await requestJSON(`/api/user/plugins/${encodeURIComponent(pluginUserForm.plugin!.id)}/form-records/${encodeURIComponent(record.id)}/deletions`, { method: 'POST' });
       message.success('记录已删除');
       await openPluginUserForm(pluginUserForm.plugin!);
     },
@@ -496,9 +503,9 @@ async function togglePluginAuthorization(plugin: OpenPlugin, authorized: boolean
   plugin.authorized = authorized;
   authorizingPluginIDs.value = new Set([...authorizingPluginIDs.value, plugin.id]);
   try {
-    await requestJSON('/api/user/plugin/authorization', {
-      method: 'PUT',
-      body: JSON.stringify({ uuid: plugin.id, authorized }),
+    await requestJSON(`/api/user/plugins/${encodeURIComponent(plugin.id)}/authorization`, {
+      method: 'POST',
+      body: JSON.stringify({ authorized }),
     });
     message.success(authorized
       ? `已允许「${plugin.title || plugin.id}」读取你的 smallcat 账号`
@@ -515,9 +522,8 @@ async function togglePluginAuthorization(plugin: OpenPlugin, authorized: boolean
 
 async function logout() {
   try {
-    await requestJSON<null>('/api/user/outlogin', {
+    await requestJSON<null>('/api/user/sessions/current/deletions', {
       method: 'POST',
-      body: '{}',
     });
   } catch (_) {
   } finally {
@@ -528,18 +534,17 @@ async function logout() {
 
 async function saveBinding(platform: 'qq' | 'telegram') {
   const value = platform === 'qq' ? bindForm.qq : bindForm.telegram;
-  const data = await requestJSON<Bindings>('/api/user/bind', {
-    method: 'PUT',
-    body: JSON.stringify({ platform, value }),
+  const data = await requestJSON<Bindings>(`/api/user/bindings/${platform}`, {
+    method: 'POST',
+    body: JSON.stringify({ value }),
   });
   Object.assign(bindings, data);
   message.success('绑定已保存');
 }
 
 async function removeBinding(platform: 'qq' | 'telegram') {
-  const data = await requestJSON<Bindings>('/api/user/bind', {
-    method: 'DELETE',
-    body: JSON.stringify({ platform }),
+  const data = await requestJSON<Bindings>(`/api/user/bindings/${platform}/deletions`, {
+    method: 'POST',
   });
   Object.assign(bindings, data);
   if (platform === 'qq') bindForm.qq = '';
@@ -557,7 +562,7 @@ async function openSmallcatLogin() {
   smallcat.uuid = '';
   smallcat.qrLoading = true;
   try {
-    const data = await requestJSON<unknown>('/api/user/smallcat/qr/start', {
+    const data = await requestJSON<unknown>('/api/user/smallcat-login-sessions', {
       method: 'POST',
       body: JSON.stringify({ panel: selectedPanel.value, type: smallcat.qrType }),
     });
@@ -582,9 +587,9 @@ async function confirmSmallcatLogin() {
   }
   smallcat.confirmLoading = true;
   try {
-    const data = await requestJSON<{ openid: string; bindings: Bindings }>('/api/user/smallcat/login/confirm', {
+    const data = await requestJSON<{ openid: string; bindings: Bindings }>(`/api/user/smallcat-login-sessions/${selectedPanel.value}/${encodeURIComponent(smallcat.uuid.trim())}/confirmations`, {
       method: 'POST',
-      body: JSON.stringify({ panel: selectedPanel.value, uuid: smallcat.uuid.trim() }),
+      body: '{}',
     });
     Object.assign(bindings, data.bindings || { smallcat_openid: data.openid, smallcat_openids: data.openid ? [data.openid] : [] });
     smallcat.qrOpen = false;
@@ -631,10 +636,7 @@ onMounted(() => {
     <AntApp>
       <div class="user-page">
         <header class="user-topbar">
-          <a class="user-brand" href="/">
-            <span class="user-brand-mark" role="img" aria-label="傻妞 Logo"></span>
-            <span>SillyGirl</span>
-          </a>
+          <AppBrand class="user-brand" href="/" />
           <Space v-if="user" align="center">
             <Avatar :size="34" class="user-avatar">{{ userInitial }}</Avatar>
             <span class="user-name">{{ user.nickname || user.username }}</span>
@@ -938,20 +940,9 @@ onMounted(() => {
   font-weight: 700;
 }
 
-.user-brand-mark,
 .user-avatar {
   background: #111827;
   color: #ffffff;
-}
-
-.user-brand-mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: #ffffff url("../logo.png") center 45% / 150% auto no-repeat;
-  box-shadow: 0 1px 4px rgb(148 81 48 / 18%);
 }
 
 .user-content {

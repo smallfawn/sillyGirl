@@ -30,8 +30,12 @@ type Bucket struct {
 	name string
 }
 
+func newMasterStorageValuesRequest() *httplib.BeegoHTTPRequest {
+	return httplib.NewBeegoRequest(master+"/api/admin/storage/values", http.MethodPost)
+}
+
 var toMaster = func(bucket, key, value string) (string, bool, error) {
-	req := httplib.Put(master + "/api/admin/storage")
+	req := newMasterStorageValuesRequest()
 	web_token := sillyGirl.GetString("web_token")
 	if web_token == "" {
 		return "", false, errors.New("请先在本体可视化登录！")
@@ -50,12 +54,22 @@ var toMaster = func(bucket, key, value string) (string, bool, error) {
 		return "", false, errors.New("啊，与本体失联了~")
 	}
 	var message string
-	message, _ = jsonparser.GetString(data, "messages", key)
-	errStr, _ := jsonparser.GetString(data, "errors", key)
+	message, _ = jsonparser.GetString(data, "data", "messages", key)
+	if message == "" {
+		message, _ = jsonparser.GetString(data, "messages", key)
+	}
+	errStr, _ := jsonparser.GetString(data, "data", "errors", key)
+	if errStr == "" {
+		errStr, _ = jsonparser.GetString(data, "errors", key)
+	}
 	if errStr != "" {
 		err = errors.New(errStr)
 	}
-	return message, true, err
+	changed, changedErr := jsonparser.GetBoolean(data, "data", "changes", key)
+	if changedErr != nil {
+		changed, _ = jsonparser.GetBoolean(data, "changes", key)
+	}
+	return message, changed, err
 }
 
 var db *redis.Client

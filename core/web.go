@@ -13,8 +13,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/gzip"
@@ -38,7 +40,7 @@ func Cors() gin.HandlerFunc {
 			c.Header("Vary", "Origin")
 		}
 		c.Header("Access-Control-Allow-Headers", "Content-Type,AccessToken,X-CSRF-Token, Authorization, Token")
-		c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE,UPDATE") //服务器支持的所有跨域请求的方
+		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
 		if method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -131,17 +133,19 @@ func initWeb() {
 	}
 	gin.SetMode(gin.ReleaseMode)
 	Server = gin.New()
+	Server.HandleMethodNotAllowed = true
 	if err := configureTrustedHTTPProxies(Server); err != nil {
 		logs.Warn("可信代理配置无效，已忽略：%v", err)
 	}
 	Server.Use(Cors())
 	Server.Use(SecurityHeaders())
 	Server.Use(gzip.Gzip(gzip.DefaultCompression))
-	Server.GET("/api/file/*filename", FindFile)
-	Server.GET("/api/decode/:random", Base642Binary)
+	registerAPIRequests(Server, apiRouteSnapshot())
+	Server.GET("/api/files/*filename", FindFile)
+	Server.GET("/api/binary-content/:random", Base642Binary)
 
-	Server.GET("/api/plugins/download", func(c *gin.Context) {
-		uuid := c.Query("uuid")
+	Server.GET("/api/plugin-downloads/:uuid", func(c *gin.Context) {
+		uuid := c.Param("uuid")
 		for _, f := range Functions {
 			if f.UUID == uuid && f.Public {
 				plugin_downloads.Set(f.UUID, plugin_downloads.GetInt(f.UUID)+1)
@@ -151,6 +155,7 @@ func initWeb() {
 				} else {
 					dir := filepath.Dir(f.Path)
 					if _, err := os.Stat(dir); err != nil { //执行压缩
+						ApiNotFound(c, "插件包不存在")
 						return
 					}
 					dir = strings.ReplaceAll(dir, "\\", "/")
@@ -224,12 +229,12 @@ func initWeb() {
 						return err
 					})
 					if err != nil {
-						c.String(http.StatusInternalServerError, fmt.Sprintf("ZIP creation failed: %s", err))
+						ApiInternalError(c, fmt.Sprintf("ZIP creation failed: %s", err))
 						return
 					}
 					err = w.Close()
 					if err != nil {
-						c.String(http.StatusInternalServerError, fmt.Sprintf("ZIP creation failed: %s", err))
+						ApiInternalError(c, fmt.Sprintf("ZIP creation failed: %s", err))
 						return
 					}
 					c.Data(http.StatusOK, "application/zip", buf.Bytes())
@@ -237,16 +242,14 @@ func initWeb() {
 				}
 			}
 		}
+		ApiNotFound(c, "公开插件不存在")
 	})
-	Server.GET("/api/plugins/download/:uuid", func(c *gin.Context) {
-		uuid := c.Param("uuid")
-		for _, f := range Functions {
-			if f.UUID == uuid && f.Public {
-				plugin_downloads.Set(f.UUID, plugin_downloads.GetInt(f.UUID)+1)
-				c.String(200, publicScript(plugins.GetString(f.UUID)))
-				return
-			}
+	Server.NoMethod(func(c *gin.Context) {
+		methods := allowedHTTPMethods(Server.Routes(), c.Request.URL.Path)
+		if len(methods) != 0 {
+			c.Header("Allow", strings.Join(methods, ", "))
 		}
+		ApiError(c, http.StatusMethodNotAllowed, "请求方法不受支持")
 	})
 	Server.NoRoute(func(c *gin.Context) {
 		if c.Request.Method == http.MethodGet && c.Request.URL.Path == "/" {
@@ -257,7 +260,6 @@ func initWeb() {
 			serveUser(c)
 			return
 		}
-		c.Status(200)
 		if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
 			if serveEmbeddedFile(c, "admin"+c.Request.URL.Path) {
 				return
@@ -267,20 +269,39 @@ func initWeb() {
 			if serveEmbeddedFile(c, strings.Trim(c.Request.URL.Path, "/")) {
 				return
 			}
-			data, err := static.ReadFile("admin/index.html")
-			if err == nil {
-				c.Header("Content-Type", "text/html; charset=utf-8")
-				c.Writer.Write(data)
+			if serveAdminSPA(c) {
 				return
 			}
 		}
-		for _, req := range ss {
-			if c.Request.URL.Path == req.Path && (req.Method == c.Request.Method || req.Method == "ANY") {
+		matchedPath := false
+		allowed := []string{}
+		for _, req := range apiRouteSnapshot() {
+			params, matched := matchHTTPRoutePath(req.Path, c.Request.URL.Path)
+			if !matched {
+				continue
+			}
+			matchedPath = true
+			if req.Method == c.Request.Method || req.Method == ANY {
+				c.Params = params
 				req.Handle(c)
 				return
 			}
+			allowed = append(allowed, req.Method)
 		}
-		c.String(404, "页面被喵咪劫走了") //
+		if matchedPath {
+			allowed = append(allowed, http.MethodOptions)
+			allowed = uniqueSortedHTTPMethods(allowed)
+			if len(allowed) != 0 {
+				c.Header("Allow", strings.Join(allowed, ", "))
+			}
+			ApiError(c, http.StatusMethodNotAllowed, "请求方法不受支持")
+			return
+		}
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			ApiError(c, http.StatusNotFound, "资源不存在")
+			return
+		}
+		c.String(http.StatusNotFound, "页面被喵咪劫走了")
 	})
 
 	port, normalizedPort := canonicalHTTPPortValue(sillyGirl.GetString("port"))
@@ -345,6 +366,18 @@ func initWeb() {
 			logs.Error("Http服务运行失败：%s", err.Error())
 		}
 	}()
+}
+
+func serveAdminSPA(c *gin.Context) bool {
+	data, err := static.ReadFile("admin/index.html")
+	if err != nil {
+		return false
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusOK)
+	_, _ = c.Writer.Write(data)
+	return true
 }
 
 func serveHome(c *gin.Context) {
@@ -442,7 +475,10 @@ type Req struct {
 	Handle func(c *gin.Context)
 }
 
-var ss = []Req{}
+var (
+	ss      = []Req{}
+	ssMutex sync.RWMutex
+)
 
 type Auth struct {
 	ID        int
@@ -454,22 +490,21 @@ type Auth struct {
 }
 
 const (
-	GET    = "GET"
-	POST   = "POST"
-	DELETE = "DELETE"
-	PUT    = "PUT"
-	ANY    = "ANY"
+	GET  = "GET"
+	POST = "POST"
+	ANY  = "ANY"
 )
 
 func GinApi(method string, path string, fs ...func(c *gin.Context)) {
-	ss = append(ss, Req{
+	req := Req{
 		Method: method,
 		Path:   path,
 		Handle: func(c *gin.Context) {
 			defer func() {
 				if err := recover(); err != nil {
+					logs.Error("API handler panic %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 					if !c.Writer.Written() {
-						ApiError(c, http.StatusInternalServerError, fmt.Sprint(err))
+						ApiInternalError(c, "服务器内部错误")
 					}
 				}
 			}()
@@ -480,7 +515,83 @@ func GinApi(method string, path string, fs ...func(c *gin.Context)) {
 				}
 			}
 		},
-	})
+	}
+	ssMutex.Lock()
+	ss = append(ss, req)
+	ssMutex.Unlock()
+}
+
+func apiRouteSnapshot() []Req {
+	ssMutex.RLock()
+	defer ssMutex.RUnlock()
+	return append([]Req(nil), ss...)
+}
+
+func registerAPIRequests(router *gin.Engine, requests []Req) {
+	for _, req := range requests {
+		if req.Method == ANY {
+			router.Any(req.Path, req.Handle)
+			continue
+		}
+		router.Handle(req.Method, req.Path, req.Handle)
+	}
+}
+
+func matchHTTPRoutePath(pattern, actual string) (gin.Params, bool) {
+	patternSegments := strings.Split(strings.Trim(pattern, "/"), "/")
+	actualSegments := strings.Split(strings.Trim(actual, "/"), "/")
+	params := gin.Params{}
+	for index, segment := range patternSegments {
+		if strings.HasPrefix(segment, "*") {
+			if index != len(patternSegments)-1 || index >= len(actualSegments) {
+				return nil, false
+			}
+			params = append(params, gin.Param{Key: strings.TrimPrefix(segment, "*"), Value: "/" + strings.Join(actualSegments[index:], "/")})
+			return params, true
+		}
+		if index >= len(actualSegments) {
+			return nil, false
+		}
+		if strings.HasPrefix(segment, ":") {
+			if actualSegments[index] == "" {
+				return nil, false
+			}
+			params = append(params, gin.Param{Key: strings.TrimPrefix(segment, ":"), Value: actualSegments[index]})
+			continue
+		}
+		if segment != actualSegments[index] {
+			return nil, false
+		}
+	}
+	return params, len(patternSegments) == len(actualSegments)
+}
+
+func allowedHTTPMethods(routes gin.RoutesInfo, path string) []string {
+	methods := []string{}
+	for _, route := range routes {
+		if _, matched := matchHTTPRoutePath(route.Path, path); matched {
+			methods = append(methods, route.Method)
+		}
+	}
+	if len(methods) > 0 {
+		methods = append(methods, http.MethodOptions)
+	}
+	return uniqueSortedHTTPMethods(methods)
+}
+
+func uniqueSortedHTTPMethods(methods []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(methods))
+	for _, method := range methods {
+		method = strings.TrimSpace(method)
+		if method == "" || seen[method] || method == ANY {
+			continue
+		}
+		seen[method] = true
+		result = append(result, method)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func getLocalIP() string {

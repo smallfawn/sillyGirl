@@ -49,11 +49,11 @@ func init() {
 		})
 		return nil
 	})
-	GinApi(GET, "/api/admin/reply/list", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/replies", RequireAuth, func(ctx *gin.Context) {
 		repliesLock.RLock()
 		defer repliesLock.RUnlock()
-		page, _ := strconv.Atoi(ctx.DefaultQuery("current", "1"))
-		perPage, _ := strconv.Atoi(ctx.DefaultQuery("pageSize", "20"))
+		page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+		perPage, _ := strconv.Atoi(ctx.DefaultQuery("page_size", "20"))
 		keyword := ctx.Query("keyword")
 		value := ctx.Query("value")
 		// class_ := ctx.Query("class")
@@ -99,12 +99,12 @@ func init() {
 		}
 		ApiList(ctx, paginatedReplies, len(filteredReplies), map[string]interface{}{
 			"page":      page,
-			"pageSize":  perPage,
+			"page_size": perPage,
 			"platforms": getPltsLabel(),
 		})
 	})
 
-	GinApi(POST, "/api/admin/reply", RequireAuth, func(ctx *gin.Context) {
+	saveReply := func(ctx *gin.Context) {
 		repliesLock.Lock()
 		defer repliesLock.Unlock()
 		var reply Reply
@@ -113,6 +113,13 @@ func init() {
 		if err := json.Unmarshal(data, &reply); err != nil {
 			ApiFail(ctx, err.Error())
 			return
+		}
+		pathID := strings.TrimSpace(ctx.Param("id"))
+		creating := pathID == ""
+		if pathID != "" {
+			reply.ID = utils.Int(pathID)
+		} else {
+			reply.ID = 0
 		}
 		json.Unmarshal(data, &v)
 		has := func(str string) bool {
@@ -153,14 +160,17 @@ func init() {
 			reply = *existingReply
 			err := REPLY.Create(&reply)
 			if err != nil {
-				ApiFail(ctx, err.Error())
+				ApiInternalError(ctx, err.Error())
 				return
 			}
+		} else if !creating {
+			ApiNotFound(ctx, "回复规则不存在")
+			return
 		} else {
 			reply.CreatedAt = int(time.Now().Unix())
 			err := REPLY.Create(&reply)
 			if err != nil {
-				ApiFail(ctx, err.Error())
+				ApiInternalError(ctx, err.Error())
 				return
 			}
 			replies = append(replies, reply)
@@ -168,21 +178,33 @@ func init() {
 		sort.Slice(replies, func(i, j int) bool {
 			return replies[i].Priority > replies[j].Priority
 		})
-		ApiOK(ctx, nil)
-	})
+		if creating {
+			ApiCreated(ctx, "/api/admin/replies/"+strconv.Itoa(reply.ID), reply)
+			return
+		}
+		ApiOK(ctx, reply)
+	}
+	GinApi(POST, "/api/admin/replies", RequireAuth, saveReply)
+	GinApi(POST, "/api/admin/replies/:id", RequireAuth, saveReply)
 	//删除功能
-	GinApi(DELETE, "/api/admin/reply", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/replies/:id/deletions", RequireAuth, func(ctx *gin.Context) {
 		repliesLock.Lock()
 		defer repliesLock.Unlock()
-		id := utils.Int(ctx.Query("id"))
+		id := utils.Int(ctx.Param("id"))
+		found := false
 		for i, r := range replies {
 			if r.ID == id {
 				REPLY.Set(r.ID, nil)
 				replies = append(replies[:i], replies[i+1:]...)
+				found = true
 				break
 			}
 		}
-		ApiOK(ctx, nil)
+		if !found {
+			ApiNotFound(ctx, "回复规则不存在")
+			return
+		}
+		ApiNoContent(ctx)
 	})
 }
 

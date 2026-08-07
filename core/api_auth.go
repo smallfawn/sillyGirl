@@ -101,16 +101,16 @@ func init() {
 		return nil
 	})
 	///可视化部分
-	GinApi(GET, "/api/admin/setup/status", func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/setup", func(ctx *gin.Context) {
 		ApiOK(ctx, map[string]interface{}{
 			"initialized": strings.TrimSpace(password) != "",
 		})
 	})
-	GinApi(POST, "/api/admin/register", func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/setup", func(ctx *gin.Context) {
 		setupLock.Lock()
 		defer setupLock.Unlock()
 		if strings.TrimSpace(password) != "" {
-			ApiFail(ctx, "后台账号已初始化")
+			ApiConflict(ctx, "后台账号已初始化")
 			return
 		}
 		payload := struct {
@@ -123,11 +123,11 @@ func init() {
 		}
 		payload.Username = strings.TrimSpace(payload.Username)
 		if payload.Username == "" {
-			ApiFail(ctx, "账号不能为空")
+			ApiUnprocessable(ctx, "账号不能为空")
 			return
 		}
 		if strings.TrimSpace(payload.Password) == "" {
-			ApiFail(ctx, "密码不能为空")
+			ApiUnprocessable(ctx, "密码不能为空")
 			return
 		}
 		sillyGirl.Set("name", payload.Username)
@@ -135,10 +135,10 @@ func init() {
 		name = payload.Username
 		token, err := createAdminJWTSession(ctx, name)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, map[string]interface{}{
+		ApiCreated(ctx, "/api/admin/sessions/current", map[string]interface{}{
 			"status":           "ok",
 			"type":             "account",
 			"currentAuthority": "admin",
@@ -154,28 +154,23 @@ func init() {
 		json.NewDecoder(ctx.Request.Body).Decode(&auth)
 		auth.Username = strings.TrimSpace(auth.Username)
 		if strings.TrimSpace(password) == "" {
-			ApiOK(ctx, map[string]interface{}{
-				"status":           "setup_required",
-				"type":             "account",
-				"currentAuthority": "guest",
-				"setupRequired":    true,
-			})
+			ApiConflict(ctx, "后台尚未初始化")
 			return
 		}
 		attemptKey := "admin:" + auth.Username
 		if loginAttemptBlocked(ctx, attemptKey) {
-			ApiFail(ctx, "登录失败次数过多，请稍后再试")
+			ApiError(ctx, http.StatusTooManyRequests, "登录失败次数过多，请稍后再试")
 			return
 		}
 		if verifyAdminPassword(auth.Password) && auth.Username == name {
 			clearLoginAttempts(ctx, attemptKey)
 			token, err := createAdminJWTSession(ctx, name)
 			if err != nil {
-				ApiFail(ctx, err.Error())
+				ApiInternalError(ctx, err.Error())
 				return
 			}
 			console.Log("登录成功，当前有效令牌数%d，总数%d", len(ValidAuths()), len(auths))
-			ApiOK(ctx, map[string]interface{}{
+			ApiCreated(ctx, "/api/admin/sessions/current", map[string]interface{}{
 				"status":           "ok",
 				"type":             "account",
 				"currentAuthority": "admin",
@@ -184,20 +179,20 @@ func init() {
 			})
 		} else {
 			recordFailedLoginAttempt(ctx, attemptKey)
-			ApiFail(ctx, "账号或密码错误")
+			ApiUnauthorized(ctx, "账号或密码错误")
 		}
 	}
-	GinApi(POST, "/api/admin/login", adminLoginHandler)
-	GinApi(POST, "/api/admin/outlogin", DestroyAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/sessions", adminLoginHandler)
+	GinApi(POST, "/api/admin/sessions/current/deletions", DestroyAuth, func(ctx *gin.Context) {
 		sillyGirl.Set("web_token", "")
-		ApiOK(ctx, nil)
+		ApiNoContent(ctx)
 	})
 	pluginNextUuid := sillyGirl.GetString("pluginNextUuid")
 	if pluginNextUuid == "" {
 		pluginNextUuid = utils.GenUUID()
 		sillyGirl.Set("pluginNextUuid", pluginNextUuid)
 	}
-	GinApi(GET, "/api/admin/currentUser", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/sessions/current", RequireAuth, func(ctx *gin.Context) {
 		rs := []Route{}
 		for _, f := range Functions {
 			if f.UUID == pluginNextUuid {

@@ -94,8 +94,9 @@ type sendMessageRequest struct {
 }
 
 type sendMessageResponse struct {
-	Ret    int    `json:"ret,omitempty"`
-	ErrMsg string `json:"errmsg,omitempty"`
+	Ret     int    `json:"ret,omitempty"`
+	ErrCode int    `json:"errcode,omitempty"`
+	ErrMsg  string `json:"errmsg,omitempty"`
 }
 
 type getUploadURLRequest struct {
@@ -430,8 +431,8 @@ func (a *apiClient) sendItem(ctx context.Context, toUserID string, contextToken 
 	if err != nil {
 		return "", err
 	}
-	if resp.Ret != 0 {
-		return "", fmt.Errorf("ret=%d errmsg=%s", resp.Ret, resp.ErrMsg)
+	if resp.Ret != 0 || resp.ErrCode != 0 {
+		return "", fmt.Errorf("ret=%d errcode=%d errmsg=%s", resp.Ret, resp.ErrCode, resp.ErrMsg)
 	}
 	return clientID, nil
 }
@@ -492,8 +493,11 @@ func (a *apiClient) uploadImage(ctx context.Context, toUserID string, raw []byte
 	}
 	return cdnMedia{
 		EncryptQueryParam: encryptedParam,
-		AESKey:            base64.StdEncoding.EncodeToString(aesKey),
-		EncryptType:       1,
+		// The message protocol expects the lowercase hexadecimal AES key text
+		// encoded as base64. Encoding the 16 raw key bytes makes the message
+		// appear successful while WeChat renders the image as expired.
+		AESKey:      base64.StdEncoding.EncodeToString([]byte(hex.EncodeToString(aesKey))),
+		EncryptType: 1,
 	}, encryptedSize, nil
 }
 

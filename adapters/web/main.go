@@ -154,8 +154,8 @@ func init() {
 		initWebBot()
 	}()
 	go cleanupWebUsers()
-	core.GinApi(core.GET, "/api/web_chat", receiveWebChat)
-	core.GinApi(core.POST, "/api/web_chat", receiveWebChat)
+	core.GinApi(core.GET, "/api/web-chat/messages", receiveWebChat)
+	core.GinApi(core.POST, "/api/web-chat/messages", receiveWebChat)
 }
 
 func receiveWebChat(ctx *gin.Context) {
@@ -188,7 +188,7 @@ func receiveWebChat(ctx *gin.Context) {
 			core.CONETNT: content,
 		})
 		if !legacySend {
-			core.ApiOK(ctx, []WebMessage{})
+			core.ApiAccepted(ctx, "", []WebMessage{})
 			return
 		}
 	}

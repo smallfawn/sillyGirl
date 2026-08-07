@@ -17,6 +17,11 @@ func Init() {
 	rememberLatestAppVersion(currentAppVersion(), versionAcceleratedURLs(remoteVersionRawURL)[0])
 	go refreshAppVersionLoop()
 	console.Log("当前版本: %s", currentAppVersion())
+	// Register every HTTP API before Gin freezes its routing trees and starts
+	// serving. These two groups used to be registered after initWeb, which forced
+	// them through the legacy exact-string NoRoute dispatcher.
+	initWebPluginList()
+	initMarketPluginEditor()
 	initWeb()
 	initCarry()
 	sillyGirl.Set("started_at", time.Now().Format("2006-01-02 15:04:05"))
@@ -50,8 +55,6 @@ func Init() {
 	initReboot()
 	initListenReply()
 	// initPluginFile()
-	initWebPluginList()
-	initMarketPluginEditor()
 	go initPluginList()
 	initPluginPublish()
 

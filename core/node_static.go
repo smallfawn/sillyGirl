@@ -105,13 +105,13 @@ func Base642Binary(c *gin.Context) {
 	random := c.Param("random")
 	s, ok := temp.Get("base64_" + random).(string)
 	if !ok {
-		c.String(http.StatusBadRequest, "Invalid input")
+		ApiNotFound(c, "临时二进制内容不存在")
 		return
 	}
 	input := strings.TrimPrefix(s, "base64://")
 	data, err := base64.StdEncoding.DecodeString(input)
 	if err != nil {
-		c.String(http.StatusBadRequest, "Invalid input")
+		ApiInternalError(c, "临时二进制内容格式无效")
 		return
 	}
 	// 解析图片格式

@@ -176,7 +176,7 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
     # WebSocket / 长轮询支持
-    location /api/web_chat {
+    location /api/web-chat/messages {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;

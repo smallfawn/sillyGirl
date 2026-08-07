@@ -23,7 +23,7 @@ type openPluginRecord struct {
 }
 
 func init() {
-	GinApi(PUT, "/api/admin/plugin/open", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/plugins/:uuid/access", RequireAuth, func(ctx *gin.Context) {
 		payload := struct {
 			UUID string `json:"uuid"`
 			Open bool   `json:"open"`
@@ -32,21 +32,22 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
+		payload.UUID = ctx.Param("uuid")
 		payload.UUID = strings.TrimSpace(payload.UUID)
 		plugin := installedPluginByUUID(payload.UUID)
 		if plugin == nil {
-			ApiFail(ctx, "插件未安装")
+			ApiNotFound(ctx, "插件未安装")
 			return
 		}
 		if payload.Open && !plugin.UsesSmallCat && !plugin.HasUserForm {
-			ApiFail(ctx, "插件没有用户表单，也未使用 smallcat")
+			ApiUnprocessable(ctx, "插件没有用户表单，也未使用 smallcat")
 			return
 		}
 		previous := plugin.Open
 		plugin.Open = payload.Open
 		if _, _, err := plugin_open.Set(payload.UUID, payload.Open); err != nil {
 			plugin.Open = previous
-			ApiFail(ctx, "保存插件开放状态失败："+err.Error())
+			ApiInternalError(ctx, "保存插件开放状态失败："+err.Error())
 			return
 		}
 		ApiOK(ctx, gin.H{
@@ -55,7 +56,7 @@ func init() {
 		})
 	})
 
-	GinApi(GET, "/api/open/plugins", func(ctx *gin.Context) {
+	GinApi(GET, "/api/public/plugins", func(ctx *gin.Context) {
 		ApiOK(ctx, openPluginRecords(Functions))
 	})
 }

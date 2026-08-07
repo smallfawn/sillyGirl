@@ -1,0 +1,1 @@
+function e(e){return e?new Date(e*1e3).toLocaleString():`-`}export{e as t};

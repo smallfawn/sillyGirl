@@ -23,9 +23,17 @@
 
 Base URL: `http://host:port/api`
 
-### 统一响应
+### 约定
 
-除文件下载等原始内容接口外，HTTP API 统一返回：
+- 资源名使用小写复数名词和 kebab-case；资源标识放在路径参数中。
+- API 业务路由只使用 `GET` 和 `POST`：`GET` 安全读取；`POST` 创建资源、提交资源表示或创建处理任务。
+- 对现有资源的变更使用 `POST /resources/:id`；删除被建模为 deletion 子资源，使用 `POST /resources/:id/deletions`，不使用动作式 URL。
+- 分页、筛选和可选关联数据使用查询参数；不使用 `/list`、动词路径、扩展名路由或 `?id=` 定位单资源。
+- 被替换的旧路由不保留兼容别名。
+- 创建成功返回 `201 Created` 和新资源的 `Location`；异步任务返回 `202 Accepted`；成功删除且不返回表示时使用 `204 No Content`。
+- 不存在、冲突、语义校验失败和服务端异常分别返回 `404`、`409`、`422`、`500`，不再用 `200` 包装错误。
+
+除文件下载等原始内容接口外，响应使用统一 envelope：
 
 ```json
 {
@@ -35,165 +43,149 @@ Base URL: `http://host:port/api`
 }
 ```
 
-失败时：
+错误响应使用 `application/problem+json`：
 
 ```json
 {
-  "status": false,
-  "message": "失败原因",
-  "data": null
+  "type": "about:blank",
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "字段校验失败",
+  "instance": "/api/admin/tasks/task-1",
+  "errors": { "schedule": "Cron 表达式格式错误" }
 }
 ```
 
-### 认证
+需要登录的 Admin 和 User 资源通过 `Authorization: Bearer <token>` 认证。
 
-部分 API 需要认证，通过请求头传递：
+### Admin 认证与系统资源
 
-```
-Authorization: Bearer <token>
-```
+| Method | Resource | 说明 |
+|---|---|---|
+| `GET`, `POST` | `/api/admin/setup` | 查询或完成首次初始化 |
+| `POST` | `/api/admin/sessions` | 创建管理会话 |
+| `GET` | `/api/admin/sessions/current` | 读取当前管理会话 |
+| `POST` | `/api/admin/sessions/current/deletions` | 创建当前管理会话的删除记录并结束会话 |
+| `GET`, `POST` | `/api/admin/settings` | 读取或提交系统设置单例 |
+| `POST` | `/api/admin/system-update-jobs` | 创建更新任务 |
+| `GET` | `/api/admin/system-update-jobs/:id` | 读取更新任务 |
+| `POST` | `/api/admin/system-restart-jobs` | 创建重启任务 |
+| `GET` | `/api/admin/system-restart-jobs/:id` | 读取重启任务 |
+| `GET` | `/api/admin/system-backups/current` | 下载当前系统备份 |
+| `POST` | `/api/admin/clawbot-login-sessions` | 创建 ClawBot 登录会话 |
+| `GET` | `/api/admin/clawbot-login-sessions/:session` | 读取登录状态 |
+| `POST` | `/api/admin/clawbot-login-sessions/:session/verification-attempts` | 提交验证码尝试 |
 
-Token 获取方式：
-- 首次访问 Admin 面板时自动生成
-- 存储在 Bucket `sillyGirl` 的 `api_key` 字段中
+### Admin 业务资源
 
-### Bucket API
+| Method | Resource |
+|---|---|
+| `GET`, `POST` | `/api/admin/users` |
+| `POST` | `/api/admin/users/:username` |
+| `POST` | `/api/admin/users/:username/deletions` |
+| `GET`, `POST` | `/api/admin/tasks` |
+| `POST` | `/api/admin/tasks/:task_id` |
+| `POST` | `/api/admin/tasks/:task_id/deletions` |
+| `GET` | `/api/admin/task-options?task_id=:task_id` |
+| `POST` | `/api/admin/tasks/:task_id/executions` |
+| `GET`, `POST` | `/api/admin/replies` |
+| `POST` | `/api/admin/replies/:id` |
+| `POST` | `/api/admin/replies/:id/deletions` |
+| `GET`, `POST` | `/api/admin/carry-groups` |
+| `POST` | `/api/admin/carry-groups/:chat_id` |
+| `POST` | `/api/admin/carry-groups/:chat_id/deletions` |
+| `GET` | `/api/admin/carry-group-options` |
+| `GET`, `POST` | `/api/admin/masters` |
+| `POST` | `/api/admin/masters/:platform/:number/deletions` |
+| `GET`, `POST` | `/api/admin/panels` |
+| `POST` | `/api/admin/panels/:id` |
+| `POST` | `/api/admin/panels/:id/deletions` |
+| `GET` | `/api/admin/panels/:id/accounts` |
+| `POST` | `/api/admin/panel-connection-tests` |
+| `POST` | `/api/admin/panel-status-checks` |
+| `GET`, `POST` | `/api/admin/plugin-settings/:uuid` |
+| `POST` | `/api/admin/plugin-settings/:uuid/deletions` |
+| `GET` | `/api/admin/plugin-settings` |
+| `POST` | `/api/admin/local-plugins` |
+| `GET`, `POST` | `/api/admin/local-plugins/:id` |
+| `POST` | `/api/admin/local-plugins/:id/deletions` |
+| `POST` | `/api/admin/plugins/:uuid/access` |
+| `GET` | `/api/admin/dependencies?runtime=:runtime&plugin=:plugin` |
+| `POST` | `/api/admin/dependencies` |
+| `POST` | `/api/admin/dependency-deletions/:runtime/:plugin/:package` |
+| `GET`, `POST` | `/api/admin/dependency-registries/:runtime` |
+| `POST` | `/api/admin/dependency-registries/:runtime/options` |
+| `POST` | `/api/admin/dependency-registries/:runtime/option-deletions/:registry` |
+| `POST` | `/api/admin/scripts` |
+| `GET`, `POST` | `/api/admin/scripts/:id` |
+| `POST` | `/api/admin/scripts/:id/deletions` |
+| `GET`, `POST` | `/api/admin/plugin-market/sources` |
+| `POST` | `/api/admin/plugin-market/source-deletions/:address` |
+| `GET` | `/api/admin/plugin-market/plugins` |
+| `GET`, `POST` | `/api/admin/plugin-market/github-proxy` |
+| `POST` | `/api/admin/plugin-market/github-proxy-options` |
+| `POST` | `/api/admin/plugin-market/github-proxy-option-deletions/:proxy` |
+| `GET`, `POST` | `/api/admin/storage/values` |
+| `GET` | `/api/admin/storage/entries` |
+| `GET`, `POST` | `/api/admin/storage/buckets` |
+| `POST` | `/api/admin/storage/buckets/:bucket/deletions` |
+| `GET` | `/api/admin/message-rules/:kind` |
+| `POST` | `/api/admin/message-rules/:kind/:key` |
+| `POST` | `/api/admin/message-rules/:kind/:key/deletions` |
+| `GET` | `/api/admin/bots` |
 
-#### 获取键值
+面板集合使用请求体字段 `type: "qinglong" | "daidai" | "smallcat"` 区分具体类型。`GET /api/admin/panels` 一次返回三类面板，不再并发请求 provider 专用接口。
 
-```
-GET /api/bucket/:name/:key
-```
+### User 资源
 
-**参数**：
-- `name` - Bucket 名称
-- `key` - 键名
+| Method | Resource |
+|---|---|
+| `POST` | `/api/user/accounts` |
+| `POST` | `/api/user/sessions` |
+| `POST` | `/api/user/sessions/current/deletions` |
+| `GET` | `/api/user/profile` |
+| `POST` | `/api/user/bindings/:platform` |
+| `POST` | `/api/user/bindings/:platform/deletions` |
+| `GET` | `/api/user/plugins` |
+| `POST` | `/api/user/plugins/:uuid/authorization` |
+| `GET` | `/api/user/plugins/:uuid/smallcat-accounts` |
+| `GET` | `/api/user/plugins/:uuid/form` |
+| `POST` | `/api/user/plugins/:uuid/form-records` |
+| `POST` | `/api/user/plugins/:uuid/form-records/:record_id` |
+| `POST` | `/api/user/plugins/:uuid/form-records/:record_id/deletions` |
+| `GET` | `/api/user/smallcat-panels` |
+| `POST` | `/api/user/smallcat-login-sessions` |
+| `GET` | `/api/user/smallcat-login-sessions/:panel/:uuid` |
+| `POST` | `/api/user/smallcat-login-sessions/:panel/:uuid/confirmations` |
+| `POST` | `/api/user/smallcat-accounts` |
+| `POST` | `/api/user/smallcat-verification-codes` |
 
-**响应**：
-```json
-{
-  "value": "string"
-}
-```
+### Public 资源
 
-#### 设置键值
+| Method | Resource | 响应 |
+|---|---|---|
+| `GET` | `/api/health` | 健康状态 |
+| `GET` | `/api/public/plugins` | 已开放插件 |
+| `GET` | `/api/plugin-market/plugins` | 联邦插件市场数据 |
+| `GET` | `/api/plugin-downloads/:uuid` | JavaScript 或 ZIP |
+| `GET` | `/api/files/*filename` | 插件静态文件 |
+| `GET` | `/api/binary-content/:token` | 临时二进制内容 |
+| `GET` | `/api/web-chat/messages?rid=...` | 长轮询接收消息 |
+| `POST` | `/api/web-chat/messages` | 创建聊天消息 |
 
-```
-POST /api/bucket/:name/:key
-Content-Type: application/json
-
-{"value": "new_value"}
-```
-
-**响应**：
-```json
-{
-  "changed": true,
-  "message": ""
-}
-```
-
-#### 删除键
-
-```
-DELETE /api/bucket/:name/:key
-```
-
-#### 获取所有键名
-
-```
-GET /api/bucket/:name/keys
-```
-
-**响应**：
-```json
-{
-  "keys": ["key1", "key2"]
-}
-```
-
-### Plugin API
-
-#### 下载插件
-
-```
-GET /api/plugins/download?uuid=<uuid>
-```
-
-下载指定 UUID 的公开插件代码。
-
-**响应**：插件 JavaScript 源代码（text/plain）或 ZIP 文件（application/zip）
-
-```
-GET /api/plugins/download/:uuid
-```
-
-同上，使用路径参数。
-
-### File API
-
-#### Base64 解码
-
-```
-GET /api/decode/:random
-```
-
-用于 Admin 面板的资源解码。
-
-#### 文件查找
-
-```
-GET /api/file/:filename
-```
-
-## WebSocket
-
-### Web 聊天
-
-```
-GET /api/web_chat?rid=<room_id>&ctt=<content>
-```
-
-这是 SillyGirl 的 WebSocket 替代实现，基于 HTTP 长轮询：
-
-- `rid` - 房间 ID / 用户标识
-- `ctt` - 要发送的消息内容（可选，为空时仅接收）
-
-**请求示例**：
+Web Chat 发送示例：
 
 ```bash
-# 发送消息并接收回复
-curl "http://localhost:8080/api/web_chat?rid=user123&ctt=你好"
-
-# 仅接收消息（长轮询，最多等待4秒）
-curl "http://localhost:8080/api/web_chat?rid=user123"
+curl -X POST http://localhost:8080/api/web-chat/messages \
+  -H 'Content-Type: application/json' \
+  -d '{"rid":"user123","ctt":"你好"}'
 ```
 
-**响应格式**：
+仅接收消息：
 
-```json
-{
-  "status": true,
-  "message": "成功",
-  "data": [
-    {
-      "t": "chat",
-      "c": "Hello World!",
-      "m": []
-    }
-  ]
-}
+```bash
+curl 'http://localhost:8080/api/web-chat/messages?rid=user123'
 ```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `t` | string | 消息类型：`chat`/`info`/`warn`/`error`/`debug` |
-| `c` | string | 消息内容 |
-| `m` | string[] | 图片 URL 列表 |
-
-### 管理面板实时通信
-
-Admin 面板通过 WebSocket 与后端实时同步日志、插件状态和配置变更。连接由前端在加载时自动建立。
 
 ## gRPC API
 

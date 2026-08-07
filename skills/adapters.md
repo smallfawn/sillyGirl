@@ -242,7 +242,7 @@ ClawBot adapter uses Tencent OpenClaw Weixin iLink HTTP APIs:
 
 ## Web Adapter Pattern
 
-Web adapter uses `/api/web_chat` long polling:
+Web adapter uses `/api/web-chat/messages` long polling:
 
 - Register once as `adapter.Init("web", "default", nil)`.
 - Use SillyGirl auth cookie/JWT to decide whether a web user is admin.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
@@ -52,10 +53,11 @@ func addSettingOption(storageKey string, raw string, normalize settingOptionNorm
 		return "", errors.New("地址不能为空")
 	}
 	rows := customSettingOptions(storageKey)
-	if !Contains(rows, value) {
-		rows = append(rows, value)
-		saveCustomSettingOptions(storageKey, rows)
+	if Contains(rows, value) {
+		return "", errors.New("地址已存在")
 	}
+	rows = append(rows, value)
+	saveCustomSettingOptions(storageKey, rows)
 	return value, nil
 }
 
@@ -83,6 +85,9 @@ func removeSettingOption(storageKey string, raw string, defaults []string, norma
 		}
 	}
 	rows := customSettingOptions(storageKey)
+	if !Contains(rows, value) {
+		return "", errors.New("地址不存在")
+	}
 	next := rows[:0]
 	for _, item := range rows {
 		if item != value {
@@ -91,6 +96,20 @@ func removeSettingOption(storageKey string, raw string, defaults []string, norma
 	}
 	saveCustomSettingOptions(storageKey, next)
 	return value, nil
+}
+
+func respondSettingOptionError(ctx *gin.Context, err error) {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "已存在"):
+		ApiConflict(ctx, message)
+	case strings.Contains(message, "不存在"):
+		ApiNotFound(ctx, message)
+	case strings.Contains(message, "不能删除"):
+		ApiForbidden(ctx, message)
+	default:
+		ApiUnprocessable(ctx, message)
+	}
 }
 
 func customSettingOptions(storageKey string) []string {

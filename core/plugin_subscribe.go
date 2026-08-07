@@ -39,22 +39,24 @@ var builtinGithubAccelerators = []string{
 }
 
 type RequestPluginResult struct {
-	Success bool               `json:"success,omitempty"`
-	Code    int                `json:"code,omitempty"`
-	Message string             `json:"message,omitempty"`
-	Data    []*common.Function `json:"data"`
-	Page    int                `json:"page"`
-	Total   int                `json:"total"`
-	Tab1    int                `json:"tab1"`
-	Tab2    int                `json:"tab2"`
-	Tab3    int                `json:"tab3"`
-	Latest  int                `json:"latest"`
-	Private int                `json:"private"`
-	All     int                `json:"all"`
-	Tab     string             `json:"tab"`
-	Time    time.Time          `json:"time"`
-	Class   map[string]int     `json:"class"`
-	Origins map[string]string  `json:"origins"`
+	Success  bool                  `json:"success,omitempty"`
+	Code     int                   `json:"code,omitempty"`
+	Message  string                `json:"message,omitempty"`
+	Data     []*common.Function    `json:"data"`
+	Page     int                   `json:"page"`
+	Total    int                   `json:"total"`
+	Tab1     int                   `json:"tab1"`
+	Tab2     int                   `json:"tab2"`
+	Tab3     int                   `json:"tab3"`
+	Latest   int                   `json:"latest"`
+	Private  int                   `json:"private"`
+	All      int                   `json:"all"`
+	Tab      string                `json:"tab"`
+	Time     time.Time             `json:"time"`
+	Class    map[string]int        `json:"class"`
+	Origins  map[string]string     `json:"origins"`
+	Sources  []string              `json:"sources,omitempty"`
+	Settings []*PluginConfigRecord `json:"settings,omitempty"`
 }
 
 var plugin_list = []*common.Function{}
@@ -153,17 +155,17 @@ func initPluginList() {
 var plugin_downloads = MakeBucket("plugin_downloads")
 
 func initWebPluginList() {
-	GinApi(GET, "/api/admin/plugins/sources", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/plugin-market/sources", RequireAuth, func(ctx *gin.Context) {
 		ApiOK(ctx, pluginSourceAddresses())
 	})
-	GinApi(GET, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/plugin-market/github-proxy", RequireAuth, func(ctx *gin.Context) {
 		proxy := githubAcceleratorPrefix()
 		ApiOK(ctx, map[string]interface{}{
 			"proxy":   proxy,
 			"options": settingOptions(pluginSourceGithubProxyOptionsKey, builtinGithubAccelerators, proxy, normalizeGithubAcceleratorPrefix),
 		})
 	})
-	GinApi(PUT, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/plugin-market/github-proxy", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
@@ -171,38 +173,43 @@ func initWebPluginList() {
 		}
 		proxy, err := normalizeGithubAcceleratorPrefix(payload["proxy"])
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		sillyGirl.Set(pluginSourceGithubProxyKey, proxy)
 		ApiOK(ctx, map[string]interface{}{"proxy": proxy})
 	})
-	GinApi(POST, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/plugin-market/github-proxy-options", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
-		proxy, err := addSettingOption(pluginSourceGithubProxyOptionsKey, payload["proxy"], normalizeGithubAcceleratorPrefix)
+		normalized, err := normalizeGithubAcceleratorPrefix(payload["proxy"])
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, map[string]interface{}{
+		if Contains(settingOptions(pluginSourceGithubProxyOptionsKey, builtinGithubAccelerators, githubAcceleratorPrefix(), normalizeGithubAcceleratorPrefix), normalized) {
+			ApiConflict(ctx, "地址已存在")
+			return
+		}
+		proxy, err := addSettingOption(pluginSourceGithubProxyOptionsKey, normalized, normalizeGithubAcceleratorPrefix)
+		if err != nil {
+			respondSettingOptionError(ctx, err)
+			return
+		}
+		ApiCreated(ctx, "/api/admin/plugin-market/github-proxy-options/"+url.PathEscape(proxy), map[string]interface{}{
 			"proxy":   githubAcceleratorPrefix(),
 			"added":   proxy,
 			"options": settingOptions(pluginSourceGithubProxyOptionsKey, builtinGithubAccelerators, githubAcceleratorPrefix(), normalizeGithubAcceleratorPrefix),
 		})
 	})
-	GinApi(DELETE, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
-		payload := map[string]string{}
-		if err := ctx.BindJSON(&payload); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		proxy, err := removeSettingOption(pluginSourceGithubProxyOptionsKey, payload["proxy"], builtinGithubAccelerators, normalizeGithubAcceleratorPrefix)
+	GinApi(POST, "/api/admin/plugin-market/github-proxy-option-deletions/*proxy", RequireAuth, func(ctx *gin.Context) {
+		proxyValue := strings.TrimPrefix(ctx.Param("proxy"), "/")
+		proxy, err := removeSettingOption(pluginSourceGithubProxyOptionsKey, proxyValue, builtinGithubAccelerators, normalizeGithubAcceleratorPrefix)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			respondSettingOptionError(ctx, err)
 			return
 		}
 		if proxy == githubAcceleratorPrefix() {
@@ -214,7 +221,7 @@ func initWebPluginList() {
 			"options": settingOptions(pluginSourceGithubProxyOptionsKey, builtinGithubAccelerators, githubAcceleratorPrefix(), normalizeGithubAcceleratorPrefix),
 		})
 	})
-	GinApi(POST, "/api/admin/plugins/source", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/plugin-market/sources", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
@@ -222,263 +229,286 @@ func initWebPluginList() {
 		}
 		address := normalizePluginSourceAddress(payload["address"])
 		if address == "" {
-			ApiFail(ctx, "插件源地址不能为空")
+			ApiUnprocessable(ctx, "插件源地址不能为空")
 			return
 		}
 		items, err := pluginSourceItems(address)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		sources := pluginSourceAddresses()
-		if !Contains(sources, address) {
-			sources = append(sources, address)
-			savePluginSourceAddresses(sources)
-		}
-		plugin_list = append(plugin_list[:0], listPluginSources()...)
-		ApiOK(ctx, map[string]interface{}{"address": address, "count": len(items)})
-	})
-	GinApi(DELETE, "/api/admin/plugins/source", RequireAuth, func(ctx *gin.Context) {
-		payload := map[string]string{}
-		if err := ctx.BindJSON(&payload); err != nil {
-			ApiFail(ctx, err.Error())
+		if Contains(sources, address) {
+			ApiConflict(ctx, "插件源已存在")
 			return
 		}
-		address := normalizePluginSourceAddress(payload["address"])
+		sources = append(sources, address)
+		savePluginSourceAddresses(sources)
+		plugin_list = append(plugin_list[:0], listPluginSources()...)
+		ApiCreated(ctx, "/api/admin/plugin-market/sources/"+url.PathEscape(address), map[string]interface{}{"address": address, "count": len(items)})
+	})
+	GinApi(POST, "/api/admin/plugin-market/source-deletions/*address", RequireAuth, func(ctx *gin.Context) {
+		address := normalizePluginSourceAddress(strings.TrimPrefix(ctx.Param("address"), "/"))
 		next := []string{}
+		found := false
 		for _, source := range pluginSourceAddresses() {
 			if source != address {
 				next = append(next, source)
+			} else {
+				found = true
 			}
+		}
+		if !found {
+			ApiNotFound(ctx, "插件源不存在")
+			return
 		}
 		savePluginSourceAddresses(next)
 		plugin_list = append(plugin_list[:0], listPluginSources()...)
-		ApiOK(ctx, nil)
+		ApiNoContent(ctx)
 	})
-	GinApi(GET, "/api/plugins/list.json", func(ctx *gin.Context) {
-		// ctx.QueryArray()
-		origins := ctx.QueryArray("origin[]")
-		current := utils.Int(ctx.Query("current"))
-		pageSize := utils.Int(ctx.Query("pageSize"))
-		activeKey := ctx.Query("activeKey")
-		init := ctx.Query("init")
-		keyword := ctx.Query("keyword")
-		class := ctx.Query("class")
-		mclass := ctx.Query("mclass")
-		rr := RequestPluginResult{}
-		if pageSize <= 0 {
-			pageSize = 10
-		} else if pageSize > 200 {
-			pageSize = 200
-		}
-		if current < 0 {
-			current = 1
-		}
-		if class == "" {
-			class = "全部"
-		}
-		rr.Page = current
-		rr.Data = []*common.Function{}
-		if current != 0 {
-			if current == 1 && init != "false" {
-				initPluginList()
-			}
-			privatePlugins := localPrivatePlugins(plugin_list, Functions)
-			rr.Private = len(privatePlugins)
-			marketPlugins := append([]*common.Function(nil), plugin_list...)
-			if activeKey == "private" {
-				marketPlugins = privatePlugins
-			} else {
-				// “全部”和安装状态标签应包含本地插件；“非公开”仍可单独筛选。
-				marketPlugins = append(append([]*common.Function(nil), privatePlugins...), marketPlugins...)
-			}
-			var list []*common.Function
-			if keyword == "" {
-				if len(origins) == 0 {
-					list = append(list, marketPlugins...)
+	GinApi(GET, "/api/plugin-market/plugins", handlePluginMarketPlugins)
+}
 
-				} else {
-					for _, f := range marketPlugins {
+func handlePluginMarketPlugins(ctx *gin.Context) {
+	// ctx.QueryArray()
+	origins := ctx.QueryArray("origin[]")
+	current := utils.Int(ctx.Query("page"))
+	pageSize := utils.Int(ctx.Query("page_size"))
+	activeKey := ctx.Query("status")
+	keyword := ctx.Query("keyword")
+	class := ctx.Query("class")
+	mclass := ctx.Query("mclass")
+	rr := RequestPluginResult{}
+	if ctx.Request.Method == http.MethodPost || ctx.Request.URL.Path == "/api/plugin-market/plugins" {
+		initPluginList()
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	} else if pageSize > 200 {
+		pageSize = 200
+	}
+	if current < 0 {
+		current = 1
+	}
+	if class == "" {
+		class = "全部"
+	}
+	rr.Page = current
+	rr.Data = []*common.Function{}
+	if current != 0 {
+		privatePlugins := localPrivatePlugins(plugin_list, Functions)
+		rr.Private = len(privatePlugins)
+		marketPlugins := append([]*common.Function(nil), plugin_list...)
+		if activeKey == "private" {
+			marketPlugins = privatePlugins
+		} else {
+			// “全部”和安装状态标签应包含本地插件；“非公开”仍可单独筛选。
+			marketPlugins = append(append([]*common.Function(nil), privatePlugins...), marketPlugins...)
+		}
+		var list []*common.Function
+		if keyword == "" {
+			if len(origins) == 0 {
+				list = append(list, marketPlugins...)
+
+			} else {
+				for _, f := range marketPlugins {
+					if Contains(origins, f.Organization) {
+						list = append(list, f)
+					}
+				}
+			}
+		} else {
+			if len(origins) == 0 {
+				for _, f := range marketPlugins {
+					if pluginMatchesKeyword(f, keyword) {
+						list = append(list, f)
+					}
+				}
+			} else {
+				for _, f := range marketPlugins {
+					if pluginMatchesKeyword(f, keyword) {
 						if Contains(origins, f.Organization) {
 							list = append(list, f)
 						}
 					}
 				}
-			} else {
-				if len(origins) == 0 {
-					for _, f := range marketPlugins {
-						if pluginMatchesKeyword(f, keyword) {
-							list = append(list, f)
-						}
-					}
-				} else {
-					for _, f := range marketPlugins {
-						if pluginMatchesKeyword(f, keyword) {
-							if Contains(origins, f.Organization) {
-								list = append(list, f)
-							}
-						}
-					}
-				}
-
 			}
-			rr.Total = len(list)
-			tab1 := []*common.Function{}
-			tab2 := []*common.Function{}
-			tab3 := []*common.Function{}
-			fc := []*common.Function{}
-			fc = append(fc, Functions...)
-			classes := map[string][]*common.Function{}
-			classesNum := map[string]int{}
-			for i := range list {
-				if len(list[i].Classes) == 0 {
-					class := "未分类"
+
+		}
+		rr.Total = len(list)
+		tab1 := []*common.Function{}
+		tab2 := []*common.Function{}
+		tab3 := []*common.Function{}
+		fc := []*common.Function{}
+		fc = append(fc, Functions...)
+		classes := map[string][]*common.Function{}
+		classesNum := map[string]int{}
+		for i := range list {
+			if len(list[i].Classes) == 0 {
+				class := "未分类"
+				if _, ok := classes[class]; !ok {
+					classes[class] = []*common.Function{}
+				}
+				classes[class] = append(classes[class], list[i])
+			} else {
+				for _, class := range list[i].Classes {
+					class = strings.TrimRight(class, "类")
 					if _, ok := classes[class]; !ok {
 						classes[class] = []*common.Function{}
 					}
 					classes[class] = append(classes[class], list[i])
-				} else {
-					for _, class := range list[i].Classes {
-						class = strings.TrimRight(class, "类")
-						if _, ok := classes[class]; !ok {
-							classes[class] = []*common.Function{}
-						}
-						classes[class] = append(classes[class], list[i])
-					}
 				}
 			}
+		}
 
-			for class, fs := range classes {
-				classesNum[class] = len(fs)
+		for class, fs := range classes {
+			classesNum[class] = len(fs)
+		}
+		classesNum["全部"] = len(list)
+		if class != "全部" {
+			list = classes[class]
+		}
+		latest := latestPluginMarketItems(list, latestPluginMarketLimit)
+		rr.Latest = len(latest)
+		rr.Class = classesNum
+		var origins = map[string]string{}
+		for i := range list { //处理第二分类
+			if list[i].Organization != "" {
+				origins[list[i].Organization] = list[i].Organization
 			}
-			classesNum["全部"] = len(list)
-			if class != "全部" {
-				list = classes[class]
-			}
-			latest := latestPluginMarketItems(list, latestPluginMarketLimit)
-			rr.Latest = len(latest)
-			rr.Class = classesNum
-			var origins = map[string]string{}
-			for i := range list { //处理第二分类
-				if list[i].Organization != "" {
-					origins[list[i].Organization] = list[i].Organization
-				}
-				ded := false
-				for j := range fc {
-					if list[i].UUID == fc[j].UUID {
-						if list[i].Version != fc[j].Version {
-							tab3 = append(tab3, list[i])
-						}
-						ded = true
-						break
+			ded := false
+			for j := range fc {
+				if list[i].UUID == fc[j].UUID {
+					if list[i].Version != fc[j].Version {
+						tab3 = append(tab3, list[i])
 					}
-				}
-				if ded {
-					tab1 = append(tab1, list[i]) //已安装
-				} else {
-					tab2 = append(tab2, list[i])
+					ded = true
+					break
 				}
 			}
-			rr.Origins = origins
-			rr.All = len(list)
-			rr.Tab1 = len(tab1)
-			rr.Tab2 = len(tab2)
-			rr.Tab3 = len(tab3)
-			if activeKey == "private" {
-				rr.All = len(plugin_list)
-				rr.Tab1, rr.Tab2, rr.Tab3 = pluginMarketCounts(plugin_list, fc)
+			if ded {
+				tab1 = append(tab1, list[i]) //已安装
+			} else {
+				tab2 = append(tab2, list[i])
 			}
-			if activeKey == "tab1" {
-				list = tab1
-			} else if activeKey == "tab2" {
+		}
+		rr.Origins = origins
+		rr.All = len(list)
+		rr.Tab1 = len(tab1)
+		rr.Tab2 = len(tab2)
+		rr.Tab3 = len(tab3)
+		if activeKey == "private" {
+			rr.All = len(plugin_list)
+			rr.Tab1, rr.Tab2, rr.Tab3 = pluginMarketCounts(plugin_list, fc)
+		}
+		if activeKey == "tab1" {
+			list = tab1
+		} else if activeKey == "tab2" {
+			list = tab2
+		} else if activeKey == "tab3" {
+			list = tab3
+		} else if activeKey == "latest" {
+			list = latest
+		}
+		tab := ""
+		if mclass == "true" {
+			if rr.Tab2 > rr.Tab1 {
 				list = tab2
-			} else if activeKey == "tab3" {
-				list = tab3
-			} else if activeKey == "latest" {
-				list = latest
+				tab = "tab2"
+			} else {
+				list = tab1
+				tab = "tab1"
 			}
-			tab := ""
-			if mclass == "true" {
-				if rr.Tab2 > rr.Tab1 {
-					list = tab2
-					tab = "tab2"
-				} else {
-					list = tab1
-					tab = "tab1"
-				}
-			}
-			rr.Tab = tab
-			rr.Total = len(list)
-			if len(list) == 0 {
-				ApiOK(ctx, rr)
-				return
-			}
-			if last := (rr.Total + pageSize - 1) / pageSize; current > last {
-				current = last
-			}
-			rr.Page = current
-			begin := (current - 1) * pageSize
-			end := (current) * pageSize
-			if end > rr.Total {
-				end = rr.Total
-			}
-			if begin > end {
-				begin = end
-			}
-			rr.Data = append(rr.Data, list[begin:end]...)
-			publics := []string{}
-			for _, f := range Functions {
-				if f.Public && f.UUID != "" {
-					publics = append(publics, f.UUID)
-				}
-			}
-			for i := range rr.Data {
-				rr.Data[i].Icon = pluginIconOrDefault(rr.Data[i].Icon)
-				rr.Data[i].HasForm = false
-				rr.Data[i].HasUserForm = false
-				rr.Data[i].ConfigRegistered = getPluginConfigRecord(rr.Data[i].UUID) != nil
-				rr.Data[i].UsesSmallCat = false
-				rr.Data[i].Running = false
-				for j := range fc {
-					if rr.Data[i].UUID == fc[j].UUID {
-						rr.Data[i].Admin = fc[j].Admin
-						rr.Data[i].Cron = fc[j].Cron
-						rr.Data[i].Messages = GetPluginMessage(rr.Data[i].UUID)
-						rr.Data[i].CurrentVersion = fc[j].Version
-						rr.Data[i].LatestVersion = rr.Data[i].Version
-						if rr.Data[i].Version != fc[j].Version {
-							rr.Data[i].Status = 1
-							if rr.Data[i].UpdateContent == "" {
-								rr.Data[i].UpdateContent = firstNonEmpty(rr.Data[i].Description, "发现新版本")
-							}
-						} else {
-							rr.Data[i].Status = 2
-						}
-						if rr.Data[i].Status != 1 && Contains(publics, rr.Data[i].UUID) {
-							rr.Data[i].Status = 6
-						}
-						if fc[j].HasForm {
-							rr.Data[i].HasForm = true
-						}
-						rr.Data[i].HasUserForm = fc[j].HasUserForm
-						rr.Data[i].UsesSmallCat = fc[j].UsesSmallCat
-						if fc[j].Running {
-							rr.Data[i].Running = true
-						}
-						rr.Data[i].Debug = plugin_debug.GetString(rr.Data[i].UUID) == "b:true"
-						rr.Data[i].Disable = fc[j].Disable
-						rr.Data[i].Open = fc[j].Open && (fc[j].UsesSmallCat || fc[j].HasUserForm)
-					}
-				}
-				rr.Data[i].Description = parseReply2(rr.Data[i].Description)
-			}
-
+		}
+		rr.Tab = tab
+		rr.Total = len(list)
+		if len(list) == 0 {
+			includePluginMarketResources(ctx, &rr)
 			ApiOK(ctx, rr)
 			return
 		}
+		if last := (rr.Total + pageSize - 1) / pageSize; current > last {
+			current = last
+		}
+		rr.Page = current
+		begin := (current - 1) * pageSize
+		end := (current) * pageSize
+		if end > rr.Total {
+			end = rr.Total
+		}
+		if begin > end {
+			begin = end
+		}
+		rr.Data = append(rr.Data, list[begin:end]...)
+		publics := []string{}
+		for _, f := range Functions {
+			if f.Public && f.UUID != "" {
+				publics = append(publics, f.UUID)
+			}
+		}
+		for i := range rr.Data {
+			rr.Data[i].Icon = pluginIconOrDefault(rr.Data[i].Icon)
+			rr.Data[i].HasForm = false
+			rr.Data[i].HasUserForm = false
+			rr.Data[i].ConfigRegistered = getPluginConfigRecord(rr.Data[i].UUID) != nil
+			rr.Data[i].UsesSmallCat = false
+			rr.Data[i].Running = false
+			for j := range fc {
+				if rr.Data[i].UUID == fc[j].UUID {
+					rr.Data[i].Admin = fc[j].Admin
+					rr.Data[i].Cron = fc[j].Cron
+					rr.Data[i].Messages = GetPluginMessage(rr.Data[i].UUID)
+					rr.Data[i].CurrentVersion = fc[j].Version
+					rr.Data[i].LatestVersion = rr.Data[i].Version
+					if rr.Data[i].Version != fc[j].Version {
+						rr.Data[i].Status = 1
+						if rr.Data[i].UpdateContent == "" {
+							rr.Data[i].UpdateContent = firstNonEmpty(rr.Data[i].Description, "发现新版本")
+						}
+					} else {
+						rr.Data[i].Status = 2
+					}
+					if rr.Data[i].Status != 1 && Contains(publics, rr.Data[i].UUID) {
+						rr.Data[i].Status = 6
+					}
+					if fc[j].HasForm {
+						rr.Data[i].HasForm = true
+					}
+					rr.Data[i].HasUserForm = fc[j].HasUserForm
+					rr.Data[i].UsesSmallCat = fc[j].UsesSmallCat
+					if fc[j].Running {
+						rr.Data[i].Running = true
+					}
+					rr.Data[i].Debug = plugin_debug.GetString(rr.Data[i].UUID) == "b:true"
+					rr.Data[i].Disable = fc[j].Disable
+					rr.Data[i].Open = fc[j].Open && (fc[j].UsesSmallCat || fc[j].HasUserForm)
+				}
+			}
+			rr.Data[i].Description = parseReply2(rr.Data[i].Description)
+		}
 
-		ApiOK(ctx, GetPublicResponse())
-	})
+		includePluginMarketResources(ctx, &rr)
+		ApiOK(ctx, rr)
+		return
+	}
+
+	ApiOK(ctx, GetPublicResponse())
+}
+
+func includePluginMarketResources(ctx *gin.Context, response *RequestPluginResult) {
+	if !strings.HasPrefix(ctx.Request.URL.Path, "/api/admin/") {
+		return
+	}
+	include := map[string]bool{}
+	for _, name := range strings.Split(ctx.Query("include"), ",") {
+		include[strings.TrimSpace(name)] = true
+	}
+	if include["sources"] {
+		response.Sources = pluginSourceAddresses()
+	}
+	if include["settings"] {
+		response.Settings = getPluginConfigRecords()
+	}
 }
 
 func pluginMarketCounts(market []*common.Function, installed []*common.Function) (installedCount, missingCount, updateCount int) {
@@ -606,7 +636,7 @@ func linkPluginSourceItems(address string) ([]*common.Function, error) {
 	}
 	listURL := publisher.Address
 	if !strings.HasSuffix(listURL, "list.json") {
-		listURL = strings.TrimRight(listURL, "/") + "/api/plugins/list.json"
+		listURL = strings.TrimRight(listURL, "/") + "/api/plugin-market/plugins"
 	}
 	req, err := http.NewRequest(http.MethodGet, listURL, nil)
 	if err != nil {

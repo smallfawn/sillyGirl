@@ -76,7 +76,7 @@ func init() {
 		ApiOK(ctx, userOpenPluginRecords(user))
 	})
 
-	GinApi(PUT, "/api/user/plugin/authorization", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/plugins/:uuid/authorization", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
@@ -90,14 +90,15 @@ func init() {
 			ApiFail(ctx, "请求体不是有效 JSON")
 			return
 		}
+		payload.UUID = ctx.Param("uuid")
 		payload.UUID = strings.TrimSpace(payload.UUID)
 		plugin := installedPluginByUUID(payload.UUID)
 		if plugin == nil || !plugin.Open || plugin.Disable || !plugin.UsesSmallCat {
-			ApiFail(ctx, "插件未开放")
+			ApiNotFound(ctx, "插件未开放")
 			return
 		}
 		if err := setPluginUserSmallcatAuthorization(user, plugin.UUID, payload.Authorized); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, gin.H{
@@ -111,16 +112,16 @@ func init() {
 	// exposes the current user's bound openids after that user grants the plugin
 	// smallcat:read. Operations such as getCode keep using their existing route
 	// and do not require an additional per-operation grant.
-	GinApi(GET, "/api/user/plugin/smallcat", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/user/plugins/:uuid/smallcat-accounts", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
-		uuid := strings.TrimSpace(ctx.Query("uuid"))
+		uuid := strings.TrimSpace(ctx.Param("uuid"))
 		plugin := installedPluginByUUID(uuid)
 		if plugin == nil || !plugin.Open || plugin.Disable || !plugin.UsesSmallCat {
-			ApiFail(ctx, "插件未开放")
+			ApiNotFound(ctx, "插件未开放")
 			return
 		}
 		if !pluginUserSmallcatAuthorized(user.ID, uuid) {

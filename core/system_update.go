@@ -52,6 +52,7 @@ type systemUpdateResult struct {
 }
 
 type systemUpdateSnapshot struct {
+	ID        string              `json:"id"`
 	Running   bool                `json:"running"`
 	Status    string              `json:"status"`
 	Percent   int                 `json:"percent"`
@@ -61,6 +62,17 @@ type systemUpdateSnapshot struct {
 	StartedAt int64               `json:"started_at"`
 	UpdatedAt int64               `json:"updated_at"`
 }
+
+type systemRestartJob struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+var systemRestartState = struct {
+	sync.Mutex
+	Job systemRestartJob
+}{}
 
 var systemUpdateState = struct {
 	sync.Mutex
@@ -81,16 +93,28 @@ func init() {
 			"started_at": sillyGirl.GetString("started_at"),
 		})
 	})
-	GinApi(POST, "/api/admin/system/update", RequireAuth, func(ctx *gin.Context) {
-		ApiOK(ctx, startSystemUpdateJob())
+	GinApi(POST, "/api/admin/system-update-jobs", RequireAuth, func(ctx *gin.Context) {
+		snapshot, created := startSystemUpdateJob()
+		if !created {
+			ApiConflict(ctx, "已有系统更新任务正在运行")
+			return
+		}
+		ApiAccepted(ctx, "/api/admin/system-update-jobs/"+snapshot.ID, snapshot)
 	})
-	GinApi(GET, "/api/admin/system/update/status", RequireAuth, func(ctx *gin.Context) {
-		ApiOK(ctx, systemUpdateSnapshotCopy())
+	GinApi(GET, "/api/admin/system-update-jobs/:id", RequireAuth, func(ctx *gin.Context) {
+		snapshot := systemUpdateSnapshotCopy()
+		if snapshot.ID == "" || snapshot.ID != strings.TrimSpace(ctx.Param("id")) {
+			ApiNotFound(ctx, "系统更新任务不存在")
+			return
+		}
+		ApiOK(ctx, snapshot)
 	})
-	GinApi(POST, "/api/admin/system/restart", RequireAuth, func(ctx *gin.Context) {
-		ApiOK(ctx, map[string]interface{}{
-			"message": "重启已触发，请等待 1-2 分钟后刷新页面",
-		})
+	GinApi(POST, "/api/admin/system-restart-jobs", RequireAuth, func(ctx *gin.Context) {
+		job := systemRestartJob{ID: utils.GenUUID(), Status: "accepted", CreatedAt: time.Now().Unix()}
+		systemRestartState.Lock()
+		systemRestartState.Job = job
+		systemRestartState.Unlock()
+		ApiAccepted(ctx, "/api/admin/system-restart-jobs/"+job.ID, job)
 		go func() {
 			time.Sleep(time.Second)
 			if runtime.GOOS == "windows" && readyExecutablePath() != "" {
@@ -100,17 +124,28 @@ func init() {
 			utils.Daemon()
 		}()
 	})
+	GinApi(GET, "/api/admin/system-restart-jobs/:id", RequireAuth, func(ctx *gin.Context) {
+		systemRestartState.Lock()
+		job := systemRestartState.Job
+		systemRestartState.Unlock()
+		if job.ID == "" || job.ID != strings.TrimSpace(ctx.Param("id")) {
+			ApiNotFound(ctx, "系统重启任务不存在")
+			return
+		}
+		ApiOK(ctx, job)
+	})
 }
 
-func startSystemUpdateJob() systemUpdateSnapshot {
+func startSystemUpdateJob() (systemUpdateSnapshot, bool) {
 	systemUpdateState.Lock()
 	if systemUpdateState.Running {
 		snapshot := systemUpdateState.systemUpdateSnapshot
 		systemUpdateState.Unlock()
-		return snapshot
+		return snapshot, false
 	}
 	now := time.Now().Unix()
 	systemUpdateState.systemUpdateSnapshot = systemUpdateSnapshot{
+		ID:        utils.GenUUID(),
 		Running:   true,
 		Status:    "running",
 		Percent:   3,
@@ -138,7 +173,7 @@ func startSystemUpdateJob() systemUpdateSnapshot {
 		systemUpdateState.Message = "更新完成，请选择是否立即重启"
 		systemUpdateState.Result = result
 	}()
-	return snapshot
+	return snapshot, true
 }
 
 func setSystemUpdateProgress(percent int, message string) {

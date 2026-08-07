@@ -234,18 +234,20 @@ storage.Watch(bucket, "key", func(old, new, key string) *Final {
 基于 Gin 的 HTTP 服务，承担多个职责：
 
 1. **Admin 面板**：嵌入的 Vue 静态资源（`//go:embed admin/*`）
-2. **REST API**：`/api/plugins/download`、文件服务等
-3. **WebSocket**：`/api/web_chat` 长轮询实现实时聊天
+2. **REST API**：`/api/plugin-downloads/:uuid`、文件服务等
+3. **长轮询**：`/api/web-chat/messages` 实现实时聊天
 4. **动态端口**：支持运行时通过 Bucket 修改监听端口，平滑重启
+
+业务 API 采用受限 REST 约定：仅注册 `GET` 与 `POST`。读取使用 `GET`，创建或提交资源表示使用 `POST`；删除操作通过 `POST` 创建 `deletions` 子资源。CORS 只公布 `GET, POST, OPTIONS`。
 
 **NoRoute 处理逻辑**：
 
 ```
 请求到达
-  → 匹配 /admin/* 静态资源
-  → 匹配 GinApi 注册的固定路由
-  → 匹配 WebSocket 升级
-  → 返回 404
+  → Gin 路由树匹配 GinApi 注册的静态、参数和 wildcard 路由
+  → NoMethod 返回 405、Allow 和 application/problem+json
+  → NoRoute 匹配 /admin/* 静态资源或运行期追加路由
+  → API 返回 problem+json 404；页面返回文本 404
 ```
 
 ### gRPC Services
@@ -391,6 +393,18 @@ SillyGirl 的存储层采用三层架构：
 - 通过 `sillyGirl.storage` 配置切换后端
 - 切换前会自动测试 Redis 连通性
 - 数据不自动迁移，切换后端后原数据不可见
+
+## 前端组件架构
+
+后台入口采用 shell、功能视图和 domain composable 三层结构：
+
+- `frontend/src/App.vue` 只保留认证态、导航和当前视图挂载；
+- `frontend/src/components/admin/views/` 按 11 个后台菜单资源拆分，并通过 `defineAsyncComponent` 按需加载；
+- `frontend/src/composables/admin/` 管理共享 controller 和独立资源状态；
+- Admin、Home、User 三个入口复用 `components/common/AppBrand.vue`；
+- CodeMirror 仅在首次打开插件编辑器时动态加载，不进入后台首页 preload 链。
+
+目录约定、扩展步骤和自动门禁见 [`frontend/ARCHITECTURE.md`](../frontend/ARCHITECTURE.md)。
 
 ## 安全与隔离
 

@@ -27,27 +27,27 @@ var (
 )
 
 func initMarketPluginEditor() {
-	GinApi(GET, "/api/admin/plugins/local/script", RequireAuth, getMarketPluginScript)
-	GinApi(POST, "/api/admin/plugins/local/script", RequireAuth, createMarketPluginScript)
-	GinApi(PUT, "/api/admin/plugins/local/script", RequireAuth, saveMarketPluginScript)
-	GinApi(DELETE, "/api/admin/plugins/local/script", RequireAuth, deleteMarketPluginScript)
+	GinApi(GET, "/api/admin/local-plugins/:id", RequireAuth, getMarketPluginScript)
+	GinApi(POST, "/api/admin/local-plugins", RequireAuth, createMarketPluginScript)
+	GinApi(POST, "/api/admin/local-plugins/:id", RequireAuth, saveMarketPluginScript)
+	GinApi(POST, "/api/admin/local-plugins/:id/deletions", RequireAuth, deleteMarketPluginScript)
 }
 
 func getMarketPluginScript(ctx *gin.Context) {
-	id := strings.TrimSpace(ctx.Query("id"))
+	id := strings.TrimSpace(ctx.Param("id"))
 	if id == "" {
-		ApiFail(ctx, "缺少插件 ID")
+		ApiUnprocessable(ctx, "缺少插件 ID")
 		return
 	}
 	if f, err := nodeFunctionByID(id); err == nil {
 		path, err := checkedNodeScriptPath(f.Path)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, map[string]interface{}{
@@ -64,12 +64,12 @@ func getMarketPluginScript(ctx *gin.Context) {
 	}
 	f := marketPluginByID(id)
 	if f == nil {
-		ApiFail(ctx, "插件市场未找到该插件")
+		ApiNotFound(ctx, "插件市场未找到该插件")
 		return
 	}
 	content, class, err := readMarketPluginRemoteContent(f)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		ApiBadGateway(ctx, err.Error())
 		return
 	}
 	ApiOK(ctx, map[string]interface{}{
@@ -91,20 +91,24 @@ func createMarketPluginScript(ctx *gin.Context) {
 	}
 	content, err := validateAndNormalizeLocalPluginContent(req.Content)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		ApiUnprocessable(ctx, err.Error())
 		return
 	}
 	class := normalizeMarketPluginScriptType(req.Type, req.Name, content)
 	if err := validateLocalPluginRequestName(req.Name, content, class); err != nil {
-		ApiFail(ctx, err.Error())
+		ApiUnprocessable(ctx, err.Error())
 		return
 	}
 	f, path, err := writeNewLocalMarketPlugin(req.Name, class, content)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		if strings.Contains(err.Error(), "存在") {
+			ApiConflict(ctx, err.Error())
+		} else {
+			ApiInternalError(ctx, err.Error())
+		}
 		return
 	}
-	ApiOK(ctx, map[string]interface{}{"id": f.UUID, "title": f.Title, "type": f.Type, "path": path})
+	ApiCreated(ctx, "/api/admin/local-plugins/"+f.UUID, map[string]interface{}{"id": f.UUID, "title": f.Title, "type": f.Type, "path": path})
 }
 
 func saveMarketPluginScript(ctx *gin.Context) {
@@ -113,63 +117,50 @@ func saveMarketPluginScript(ctx *gin.Context) {
 		ApiFail(ctx, err.Error())
 		return
 	}
+	req.ID = strings.TrimSpace(ctx.Param("id"))
 	content, err := validateAndNormalizeLocalPluginContent(req.Content)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		ApiUnprocessable(ctx, err.Error())
 		return
 	}
 	if f, err := nodeFunctionByID(req.ID); err == nil {
 		path, err := checkedNodeScriptPath(f.Path)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		if err := AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), f.Type); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, map[string]interface{}{"id": f.UUID, "title": f.Title, "type": f.Type, "path": path})
 		return
 	}
-	class := normalizeMarketPluginScriptType(req.Type, req.Name, content)
-	if err := validateLocalPluginRequestName(req.Name, content, class); err != nil {
-		ApiFail(ctx, err.Error())
-		return
-	}
-	f, path, err := writeNewLocalMarketPlugin(req.Name, class, content)
-	if err != nil {
-		ApiFail(ctx, err.Error())
-		return
-	}
-	ApiOK(ctx, map[string]interface{}{"id": f.UUID, "title": f.Title, "type": f.Type, "path": path})
+	ApiNotFound(ctx, "本地插件不存在")
 }
 
 func deleteMarketPluginScript(ctx *gin.Context) {
-	req := marketPluginScriptRequest{}
-	if err := ctx.BindJSON(&req); err != nil {
-		ApiFail(ctx, err.Error())
-		return
-	}
+	req := marketPluginScriptRequest{ID: strings.TrimSpace(ctx.Param("id"))}
 	f, err := nodeFunctionByID(req.ID)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		ApiNotFound(ctx, err.Error())
 		return
 	}
 	path, err := checkedNodeScriptPath(f.Path)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		ApiInternalError(ctx, err.Error())
 		return
 	}
 	if err := removeNodePluginScript(path); err != nil {
-		ApiFail(ctx, err.Error())
+		ApiInternalError(ctx, err.Error())
 		return
 	}
 	AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), UNKNOWN)
-	ApiOK(ctx, nil)
+	ApiNoContent(ctx)
 }
 
 func marketPluginByID(id string) *common.Function {

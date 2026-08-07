@@ -15,10 +15,9 @@ const authTokenKey = 'sillygirl_admin_jwt';
 const authExpiresAtKey = 'sillygirl_admin_expires_at';
 const adminAuthExpiredEvent = 'sillygirl:admin-auth-expired';
 const adminAuthPublicPaths = new Set([
-  '/api/admin/login',
-  '/api/admin/register',
-  '/api/admin/setup/status',
-  '/api/admin/outlogin',
+  '/api/admin/sessions',
+  '/api/admin/setup',
+  '/api/admin/sessions/current',
 ]);
 
 let authExpiredNotifiedAt = 0;
@@ -97,10 +96,11 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
     headers,
   });
   const contentType = res.headers.get('content-type') || '';
-  const data = contentType.includes('application/json') ? await res.json() : await res.text();
+  const isJSON = contentType.includes('/json') || contentType.includes('+json');
+  const data = res.status === 204 ? null : isJSON ? await res.json() : await res.text();
   const errorText = typeof data === 'string'
     ? data
-    : data?.message || data?.errorMessage || data?.msg || data?.error || res.statusText || '请求失败';
+    : data?.detail || data?.message || data?.title || data?.errorMessage || data?.msg || data?.error || res.statusText || '请求失败';
   if (!res.ok) {
     if (adminProtected && res.status === 401) {
       handleAdminAuthExpired();
@@ -124,24 +124,10 @@ export function post<T>(url: string, data?: unknown) {
   });
 }
 
-export function put<T>(url: string, data?: unknown) {
-  return request<T>(url, {
-    method: 'PUT',
-    body: data === undefined ? undefined : JSON.stringify(data),
-  });
-}
-
-export function del<T>(url: string, data?: unknown) {
-  return request<T>(url, {
-    method: 'DELETE',
-    body: data === undefined ? undefined : JSON.stringify(data),
-  });
-}
-
 export async function saveStorage(updates: Record<string, unknown>, uuid?: string) {
   const query = uuid ? `?uuid=${encodeURIComponent(uuid)}` : '';
-  const res = await put<{ data?: { messages?: Record<string, string>; errors?: Record<string, string>; changes?: Record<string, boolean> }; messages?: Record<string, string>; errors?: Record<string, string> }>(
-    `/api/admin/storage${query}`,
+  const res = await post<{ data?: { messages?: Record<string, string>; errors?: Record<string, string>; changes?: Record<string, boolean> }; messages?: Record<string, string>; errors?: Record<string, string> }>(
+    `/api/admin/storage/values${query}`,
     updates,
   );
   const payload = res.data || res;
@@ -158,5 +144,5 @@ export async function saveStorage(updates: Record<string, unknown>, uuid?: strin
 }
 
 export function readStorage<T = Record<string, unknown>>(keys: string) {
-  return get<{ status: boolean; message: string; data: T }>(`/api/admin/storage?keys=${encodeURIComponent(keys)}`);
+  return get<{ status: boolean; message: string; data: T }>(`/api/admin/storage/values?keys=${encodeURIComponent(keys)}`);
 }

@@ -1,11 +1,13 @@
 {
   "name": "sillygirl-admin",
   "private": true,
-  "version": "1.0.7",
+  "version": "1.0.8",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "check:components": "node scripts/check-component-architecture.mjs",
+    "smoke:assets": "node scripts/smoke-built-assets.mjs",
+    "build": "npm run check:components && tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

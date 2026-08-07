@@ -41,104 +41,99 @@ type qinglongTokenResponse struct {
 	Message string `json:"message"`
 }
 
-func init() {
-	GinApi(GET, "/api/admin/qinglong/panels", RequireAuth, func(ctx *gin.Context) {
-		panels := getQinglongPanels()
-		ApiList(ctx, panels, len(panels))
-	})
+func handleQinglongPanelConnectionTest(ctx *gin.Context) {
+	panel := QinglongPanel{}
+	if err := ctx.BindJSON(&panel); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	if err := validateQinglongPanelInput(&panel); err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	result, err := testQinglongPanel(panel)
+	if err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	ApiOK(ctx, result)
+}
 
-	GinApi(POST, "/api/admin/qinglong/panel/test", RequireAuth, func(ctx *gin.Context) {
-		panel := QinglongPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		if err := validateQinglongPanelInput(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		result, err := testQinglongPanel(panel)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		ApiOK(ctx, result)
-	})
-
-	GinApi(POST, "/api/admin/qinglong/panel", RequireAuth, func(ctx *gin.Context) {
-		panel := QinglongPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		if err := validateQinglongPanelInput(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		result, err := testQinglongPanel(panel)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		now := int(time.Now().Unix())
-		panels := getQinglongPanels()
-		index := -1
-		if panel.ID != "" {
-			for i := range panels {
-				if panels[i].ID == panel.ID {
-					index = i
-					break
-				}
+func handleSaveQinglongPanel(ctx *gin.Context) {
+	panel := QinglongPanel{}
+	if err := ctx.BindJSON(&panel); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	panel.ID = strings.TrimSpace(ctx.Param("id"))
+	if err := validateQinglongPanelInput(&panel); err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	result, err := testQinglongPanel(panel)
+	if err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	now := int(time.Now().Unix())
+	panels := getQinglongPanels()
+	index := -1
+	if panel.ID != "" {
+		for i := range panels {
+			if panels[i].ID == panel.ID {
+				index = i
+				break
 			}
 		}
-		if panel.ID == "" {
-			panel.ID = utils.GenUUID()
-			panel.CreatedAt = now
-		} else if index >= 0 {
-			if panels[index].CreatedAt != 0 {
-				panel.CreatedAt = panels[index].CreatedAt
-			} else {
-				panel.CreatedAt = now
-			}
+	}
+	if panel.ID == "" {
+		panel.ID = utils.GenUUID()
+		panel.CreatedAt = now
+	} else if index >= 0 {
+		if panels[index].CreatedAt != 0 {
+			panel.CreatedAt = panels[index].CreatedAt
 		} else {
 			panel.CreatedAt = now
 		}
-		if panel.Name == "" {
-			panel.Name = panel.Address
-		}
-		panel.UpdatedAt = now
-		panel.LastCheckedAt = now
-		panel.Status = "online"
-		panel.Message = result.Message
-		if index >= 0 {
-			panels[index] = panel
-		} else {
-			panels = append(panels, panel)
-		}
-		saveQinglongPanels(panels)
-		ApiOK(ctx, panel)
-	})
+	} else {
+		ApiNotFound(ctx, "青龙面板不存在")
+		return
+	}
+	if panel.Name == "" {
+		panel.Name = panel.Address
+	}
+	panel.UpdatedAt = now
+	panel.LastCheckedAt = now
+	panel.Status = "online"
+	panel.Message = result.Message
+	if index >= 0 {
+		panels[index] = panel
+	} else {
+		panels = append(panels, panel)
+	}
+	saveQinglongPanels(panels)
+	if strings.TrimSpace(ctx.Param("id")) == "" {
+		ApiCreated(ctx, "/api/admin/panels/"+panel.ID, panel)
+		return
+	}
+	ApiOK(ctx, panel)
+}
 
-	GinApi(DELETE, "/api/admin/qinglong/panel", RequireAuth, func(ctx *gin.Context) {
-		panel := QinglongPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
+func deleteQinglongPanel(id string) bool {
+	panels := getQinglongPanels()
+	next := make([]QinglongPanel, 0, len(panels))
+	found := false
+	for _, item := range panels {
+		if item.ID != id {
+			next = append(next, item)
+		} else {
+			found = true
 		}
-		if panel.ID == "" {
-			ApiFail(ctx, "缺少青龙面板 ID")
-			return
-		}
-		panels := getQinglongPanels()
-		next := make([]QinglongPanel, 0, len(panels))
-		for _, item := range panels {
-			if item.ID != panel.ID {
-				next = append(next, item)
-			}
-		}
+	}
+	if found {
 		saveQinglongPanels(next)
-		ApiOK(ctx, nil)
-	})
+	}
+	return found
 }
 
 func getQinglongPanels() []QinglongPanel {

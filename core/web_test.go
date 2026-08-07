@@ -67,3 +67,22 @@ func TestHTTPServerHasSlowlorisTimeouts(t *testing.T) {
 		t.Fatalf("IdleTimeout = %v", srv.IdleTimeout)
 	}
 }
+
+func TestServeAdminSPAUsesSuccessfulDocumentStatus(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/containers/qinglong", nil)
+
+	if !serveAdminSPA(ctx) {
+		t.Fatal("serveAdminSPA did not serve embedded admin/index.html")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("admin SPA status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("admin SPA content type = %q", got)
+	}
+	if recorder.Body.Len() == 0 {
+		t.Fatal("admin SPA response body is empty")
+	}
+}
