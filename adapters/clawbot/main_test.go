@@ -137,8 +137,19 @@ func TestSendImageUploadAndMessage(t *testing.T) {
 	if sentItem.ImageItem.Media.EncryptQueryParam != "download-param" || sentItem.ImageItem.Media.EncryptType != 1 || sentItem.ImageItem.MidSize != aesEcbPaddedSize(len(rawImage)) {
 		t.Fatalf("unexpected image media: %#v", sentItem.ImageItem)
 	}
-	if got, err := base64.StdEncoding.DecodeString(sentItem.ImageItem.Media.AESKey); err != nil || string(got) != string(uploadAESKey) {
+	if got, err := base64.StdEncoding.DecodeString(sentItem.ImageItem.Media.AESKey); err != nil || string(got) != hex.EncodeToString(uploadAESKey) {
 		t.Fatalf("message AES key mismatch: %q %v", sentItem.ImageItem.Media.AESKey, err)
+	}
+}
+
+func TestSendMessageRejectsErrCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"ret":0,"errcode":-14,"errmsg":"expired"}`)
+	}))
+	defer server.Close()
+	client := &apiClient{baseURL: server.URL, token: "test-token", client: server.Client()}
+	if _, err := client.sendText(t.Context(), "user-1", "context-1", "", "hello"); err == nil || !strings.Contains(err.Error(), "errcode=-14") {
+		t.Fatalf("sendmessage errcode was not surfaced: %v", err)
 	}
 }
 

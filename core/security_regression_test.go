@@ -90,12 +90,12 @@ func TestLoginAttemptLimitBlocksAccountSprayingFromOneIP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for i := 0; i < maxLoginAttempts; i++ {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-		ctx.Request = httptest.NewRequest("POST", "/api/user/login", nil)
+		ctx.Request = httptest.NewRequest("POST", "/api/user/sessions", nil)
 		ctx.Request.RemoteAddr = "203.0.113.25:4321"
 		recordFailedLoginAttempt(ctx, fmt.Sprintf("user:random-%d", i))
 	}
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest("POST", "/api/user/login", nil)
+	ctx.Request = httptest.NewRequest("POST", "/api/user/sessions", nil)
 	ctx.Request.RemoteAddr = "203.0.113.25:9999"
 	if !loginAttemptBlocked(ctx, "user:another-account") {
 		t.Fatal("per-IP limiter allowed username spraying")
@@ -166,7 +166,7 @@ func TestDecodePluginUserFormJSONRejectsOversizeAndTrailingValue(t *testing.T) {
 		`{"value":"` + strings.Repeat("x", maxPluginUserFormBodyBytes) + `"}`,
 	} {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-		ctx.Request = httptest.NewRequest("PUT", "/api/user/plugin/form", strings.NewReader(body))
+		ctx.Request = httptest.NewRequest("POST", "/api/user/plugins/fixture/form-records", strings.NewReader(body))
 		var payload map[string]interface{}
 		if err := decodePluginUserFormJSON(ctx, &payload); err == nil {
 			t.Fatalf("invalid request body was accepted")

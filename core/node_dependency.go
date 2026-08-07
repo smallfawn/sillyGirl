@@ -148,57 +148,25 @@ var nodeCommandCache = struct {
 var nodeRuntimeNodePathCache sync.Map
 
 func init() {
-	GinApi(GET, "/api/admin/plugin/dependencies", RequireAuth, handlePluginDependencies)
-	GinApi(GET, "/api/admin/node/dependencies", RequireAuth, handlePluginDependencies)
+	GinApi(GET, "/api/admin/dependencies", RequireAuth, handlePluginDependencies)
+	GinApi(POST, "/api/admin/dependencies", RequireAuth, handleInstallPluginDependency)
+	GinApi(POST, "/api/admin/dependency-deletions/:runtime/:plugin/*package", RequireAuth, handleRemovePluginDependency)
 
-	GinApi(GET, "/api/admin/plugin/dependency/registry", RequireAuth, handlePluginDependencyRegistry)
-	GinApi(PUT, "/api/admin/plugin/dependency/registry", RequireAuth, handleSetPluginDependencyRegistry)
-	GinApi(POST, "/api/admin/plugin/dependency/registry", RequireAuth, handleAddPluginDependencyRegistryOption)
-	GinApi(DELETE, "/api/admin/plugin/dependency/registry", RequireAuth, handleRemovePluginDependencyRegistryOption)
+	GinApi(GET, "/api/admin/dependency-registries/:runtime", RequireAuth, handlePluginDependencyRegistry)
+	GinApi(POST, "/api/admin/dependency-registries/:runtime", RequireAuth, handleSetPluginDependencyRegistry)
+	GinApi(POST, "/api/admin/dependency-registries/:runtime/options", RequireAuth, handleAddPluginDependencyRegistryOption)
+	GinApi(POST, "/api/admin/dependency-registries/:runtime/option-deletions/*registry", RequireAuth, handleRemovePluginDependencyRegistryOption)
 
-	GinApi(PUT, "/api/admin/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
-		req := struct {
-			Registry string `json:"registry"`
-		}{}
-		if err := ctx.BindJSON(&req); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		registry, err := normalizePnpmRegistry(req.Registry)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		sillyGirl.Set("pnpm_registry", registry)
-		ApiOK(ctx, map[string]string{"registry": registry})
-	})
-
-	GinApi(GET, "/api/admin/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
-		registry := pnpmRegistry()
-		ApiOK(ctx, map[string]interface{}{
-			"registry": registry,
-			"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, registry, normalizePnpmRegistry),
-		})
-	})
-	GinApi(POST, "/api/admin/node/dependency/registry", RequireAuth, handleAddNodeDependencyRegistryOption)
-	GinApi(DELETE, "/api/admin/node/dependency/registry", RequireAuth, handleRemoveNodeDependencyRegistryOption)
-
-	GinApi(POST, "/api/admin/plugin/dependency", RequireAuth, handleInstallPluginDependency)
-	GinApi(POST, "/api/admin/node/dependency", RequireAuth, handleInstallPluginDependency)
-
-	GinApi(DELETE, "/api/admin/plugin/dependency", RequireAuth, handleRemovePluginDependency)
-	GinApi(DELETE, "/api/admin/node/dependency", RequireAuth, handleRemovePluginDependency)
-
-	GinApi(GET, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
-		id := strings.TrimSpace(ctx.Query("id"))
+	GinApi(GET, "/api/admin/scripts/:id", RequireAuth, func(ctx *gin.Context) {
+		id := strings.TrimSpace(ctx.Param("id"))
 		f, err := nodeFunctionByID(id)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		data, err := os.ReadFile(f.Path)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, map[string]interface{}{
@@ -210,12 +178,12 @@ func init() {
 		})
 	})
 
-	GinApi(POST, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/scripts", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		_ = ctx.BindJSON(&req)
 		fileName, err := normalizeNodeScriptFileName(req.Name)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
@@ -224,70 +192,72 @@ func init() {
 		fileName = pluginName + filepath.Ext(fileName)
 		_, index, err := createNodePlugin(pluginName, title, fileName, class)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			if strings.Contains(err.Error(), "存在") {
+				ApiConflict(ctx, err.Error())
+			} else {
+				ApiInternalError(ctx, err.Error())
+			}
 			return
 		}
 		if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), pluginName, class); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, map[string]interface{}{
-			"id":     nameUuid(pluginName),
+		id := nameUuid(pluginName)
+		ApiCreated(ctx, "/api/admin/scripts/"+id, map[string]interface{}{
+			"id":     id,
 			"plugin": pluginName,
 			"path":   index,
 			"file":   filepath.Base(index),
 		})
 	})
 
-	GinApi(PUT, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/scripts/:id", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
+		req.ID = strings.TrimSpace(ctx.Param("id"))
 		f, err := nodeFunctionByID(req.ID)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		path, err := checkedNodeScriptPath(f.Path)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		if err := os.WriteFile(path, []byte(req.Content), 0644); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		if err := AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), f.Type); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, nil)
 	})
 
-	GinApi(DELETE, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
-		req := nodeScriptRequest{}
-		if err := ctx.BindJSON(&req); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
+	GinApi(POST, "/api/admin/scripts/:id/deletions", RequireAuth, func(ctx *gin.Context) {
+		req := nodeScriptRequest{ID: strings.TrimSpace(ctx.Param("id"))}
 		f, err := nodeFunctionByID(req.ID)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		path, err := checkedNodeScriptPath(f.Path)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		if err := removeNodePluginScript(path); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), UNKNOWN)
-		ApiOK(ctx, nil)
+		ApiNoContent(ctx)
 	})
 }
 
@@ -311,19 +281,19 @@ func handlePluginDependencies(ctx *gin.Context) {
 	if pluginName != "" {
 		plugin, err := dependencyPluginByName(plugins, pluginName, runtime)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		deps, err := readPluginDependencies(runtime, plugin)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		data["dependencies"] = deps
 	} else {
 		rows, err := readSharedPluginDependencies(runtime, plugins)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		data["dependencies"] = rows
@@ -332,7 +302,7 @@ func handlePluginDependencies(ctx *gin.Context) {
 }
 
 func handlePluginDependencyRegistry(ctx *gin.Context) {
-	runtime := normalizeDependencyRuntime(ctx.Query("runtime"))
+	runtime := normalizeDependencyRuntime(firstNonEmpty(ctx.Param("runtime"), ctx.Query("runtime")))
 	if runtime == PYTHON {
 		registry := pipxRegistry()
 		ApiOK(ctx, map[string]interface{}{
@@ -357,11 +327,14 @@ func handleSetPluginDependencyRegistry(ctx *gin.Context) {
 		ApiFail(ctx, err.Error())
 		return
 	}
+	if req.Runtime == "" {
+		req.Runtime = ctx.Param("runtime")
+	}
 	runtime := normalizeDependencyRuntime(req.Runtime)
 	if runtime == PYTHON {
 		registry, err := normalizePipxRegistry(req.Registry)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		sillyGirl.Set("pipx_registry", registry)
@@ -371,54 +344,11 @@ func handleSetPluginDependencyRegistry(ctx *gin.Context) {
 	}
 	registry, err := normalizePnpmRegistry(req.Registry)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		ApiUnprocessable(ctx, err.Error())
 		return
 	}
 	sillyGirl.Set("pnpm_registry", registry)
 	ApiOK(ctx, map[string]string{"registry": registry})
-}
-
-func handleAddNodeDependencyRegistryOption(ctx *gin.Context) {
-	req := struct {
-		Registry string `json:"registry"`
-	}{}
-	if err := ctx.BindJSON(&req); err != nil {
-		ApiFail(ctx, err.Error())
-		return
-	}
-	registry, err := addSettingOption(pnpmRegistryOptionsKey, req.Registry, normalizePnpmRegistry)
-	if err != nil {
-		ApiFail(ctx, err.Error())
-		return
-	}
-	ApiOK(ctx, map[string]interface{}{
-		"registry": pnpmRegistry(),
-		"added":    registry,
-		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry),
-	})
-}
-
-func handleRemoveNodeDependencyRegistryOption(ctx *gin.Context) {
-	req := struct {
-		Registry string `json:"registry"`
-	}{}
-	if err := ctx.BindJSON(&req); err != nil {
-		ApiFail(ctx, err.Error())
-		return
-	}
-	registry, err := removeSettingOption(pnpmRegistryOptionsKey, req.Registry, builtinPnpmRegistries, normalizePnpmRegistry)
-	if err != nil {
-		ApiFail(ctx, err.Error())
-		return
-	}
-	if registry == pnpmRegistry() {
-		sillyGirl.Set("pnpm_registry", defaultPnpmRegistry)
-	}
-	ApiOK(ctx, map[string]interface{}{
-		"registry": pnpmRegistry(),
-		"removed":  registry,
-		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry),
-	})
 }
 
 func handleAddPluginDependencyRegistryOption(ctx *gin.Context) {
@@ -430,26 +360,47 @@ func handleAddPluginDependencyRegistryOption(ctx *gin.Context) {
 		ApiFail(ctx, err.Error())
 		return
 	}
+	if req.Runtime == "" {
+		req.Runtime = ctx.Param("runtime")
+	}
 	runtime := normalizeDependencyRuntime(req.Runtime)
 	if runtime == PYTHON {
-		registry, err := addSettingOption(pipxRegistryOptionsKey, req.Registry, normalizePipxRegistry)
+		normalized, err := normalizePipxRegistry(req.Registry)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, map[string]interface{}{
+		if Contains(settingOptions(pipxRegistryOptionsKey, builtinPipxRegistries, pipxRegistry(), normalizePipxRegistry), normalized) {
+			ApiConflict(ctx, "地址已存在")
+			return
+		}
+		registry, err := addSettingOption(pipxRegistryOptionsKey, normalized, normalizePipxRegistry)
+		if err != nil {
+			respondSettingOptionError(ctx, err)
+			return
+		}
+		ApiCreated(ctx, "/api/admin/dependency-registries/python/options/"+url.PathEscape(registry), map[string]interface{}{
 			"registry": pipxRegistry(),
 			"added":    registry,
 			"options":  settingOptions(pipxRegistryOptionsKey, builtinPipxRegistries, pipxRegistry(), normalizePipxRegistry),
 		})
 		return
 	}
-	registry, err := addSettingOption(pnpmRegistryOptionsKey, req.Registry, normalizePnpmRegistry)
+	normalized, err := normalizePnpmRegistry(req.Registry)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		ApiUnprocessable(ctx, err.Error())
 		return
 	}
-	ApiOK(ctx, map[string]interface{}{
+	if Contains(settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry), normalized) {
+		ApiConflict(ctx, "地址已存在")
+		return
+	}
+	registry, err := addSettingOption(pnpmRegistryOptionsKey, normalized, normalizePnpmRegistry)
+	if err != nil {
+		respondSettingOptionError(ctx, err)
+		return
+	}
+	ApiCreated(ctx, "/api/admin/dependency-registries/node/options/"+url.PathEscape(registry), map[string]interface{}{
 		"registry": pnpmRegistry(),
 		"added":    registry,
 		"options":  settingOptions(pnpmRegistryOptionsKey, builtinPnpmRegistries, pnpmRegistry(), normalizePnpmRegistry),
@@ -461,15 +412,19 @@ func handleRemovePluginDependencyRegistryOption(ctx *gin.Context) {
 		Runtime  string `json:"runtime"`
 		Registry string `json:"registry"`
 	}{}
-	if err := ctx.BindJSON(&req); err != nil {
-		ApiFail(ctx, err.Error())
-		return
+	req.Runtime = ctx.Param("runtime")
+	req.Registry = strings.TrimPrefix(ctx.Param("registry"), "/")
+	if req.Registry == "" {
+		if err := ctx.BindJSON(&req); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
 	}
 	runtime := normalizeDependencyRuntime(req.Runtime)
 	if runtime == PYTHON {
 		registry, err := removeSettingOption(pipxRegistryOptionsKey, req.Registry, builtinPipxRegistries, normalizePipxRegistry)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			respondSettingOptionError(ctx, err)
 			return
 		}
 		if registry == pipxRegistry() {
@@ -485,7 +440,7 @@ func handleRemovePluginDependencyRegistryOption(ctx *gin.Context) {
 	}
 	registry, err := removeSettingOption(pnpmRegistryOptionsKey, req.Registry, builtinPnpmRegistries, normalizePnpmRegistry)
 	if err != nil {
-		ApiFail(ctx, err.Error())
+		respondSettingOptionError(ctx, err)
 		return
 	}
 	if registry == pnpmRegistry() {
@@ -517,17 +472,18 @@ func handleInstallPluginDependency(ctx *gin.Context) {
 		if strings.TrimSpace(output) != "" {
 			message += "：" + strings.TrimSpace(output)
 		}
-		ApiFail(ctx, message)
+		ApiUnprocessable(ctx, message)
 		return
 	}
-	ApiOK(ctx, output)
+	location := "/api/admin/dependencies/" + url.PathEscape(runtime) + "/" + url.PathEscape(firstNonEmpty(req.Plugin, "__shared__")) + "/" + url.PathEscape(req.Package)
+	ApiCreated(ctx, location, output)
 }
 
 func handleRemovePluginDependency(ctx *gin.Context) {
-	req := nodeDependencyRequest{}
-	if err := ctx.BindJSON(&req); err != nil {
-		ApiFail(ctx, err.Error())
-		return
+	req := nodeDependencyRequest{
+		Runtime: ctx.Param("runtime"),
+		Plugin:  ctx.Param("plugin"),
+		Package: strings.TrimPrefix(ctx.Param("package"), "/"),
 	}
 	runtime := normalizeDependencyRuntime(req.Runtime)
 	output := ""
@@ -542,10 +498,10 @@ func handleRemovePluginDependency(ctx *gin.Context) {
 		if strings.TrimSpace(output) != "" {
 			message += "：" + strings.TrimSpace(output)
 		}
-		ApiFail(ctx, message)
+		ApiUnprocessable(ctx, message)
 		return
 	}
-	ApiOK(ctx, output)
+	ApiNoContent(ctx)
 }
 
 func normalizeDependencyRuntime(runtime string) string {

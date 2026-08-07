@@ -32,7 +32,7 @@ func TestWebUserEnqueueKeepsNewestWithoutBlocking(t *testing.T) {
 func TestWebChatRequestPOST(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/web_chat", strings.NewReader(`{"rid":" admin-test_123 ","ctt":" listen "}`))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/web-chat/messages", strings.NewReader(`{"rid":" admin-test_123 ","ctt":" listen "}`))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	rid, content, legacy, err := webChatRequest(ctx)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestWebChatRequestPOST(t *testing.T) {
 func TestWebChatRequestRejectsEmptyPOST(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/web_chat", strings.NewReader(`{"rid":"admin-test_123","ctt":"  "}`))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/web-chat/messages", strings.NewReader(`{"rid":"admin-test_123","ctt":"  "}`))
 	if _, _, _, err := webChatRequest(ctx); err == nil {
 		t.Fatal("empty POST message should be rejected")
 	}
@@ -63,7 +63,7 @@ func TestAnonymousPollRejectedWhenPublicChatDisabled(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/web_chat?rid=anonymous-probe_123", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/web-chat/messages?rid=anonymous-probe_123", nil)
 	started := time.Now()
 	receiveWebChat(ctx)
 	if recorder.Code != http.StatusUnauthorized {

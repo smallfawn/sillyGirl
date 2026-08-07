@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -96,12 +97,28 @@ func paginationBounds(page int, perPage int, total int) (int, int, int, int) {
 	return page, perPage, start, end
 }
 
+func storageBucketOptions() []map[string]interface{} {
+	buckets := sillyGirl.Buckets()
+	sort.Strings(buckets)
+	options := []map[string]interface{}{}
+	for _, bucket := range buckets {
+		if bucket == "plugins" {
+			continue
+		}
+		options = append(options, map[string]interface{}{
+			"value": bucket,
+			"text":  "[桶] " + bucket,
+		})
+	}
+	return options
+}
+
 func init() {
 	var sillyGirl = MakeBucket("sillyGirl")
-	GinApi(GET, "/api/admin/storage/list", RequireAuth, func(ctx *gin.Context) {
-		page, _ := strconv.Atoi(ctx.DefaultQuery("current", "1"))
-		perPage, _ := strconv.Atoi(ctx.DefaultQuery("pageSize", "20"))
-		keys := ctx.Query("keys")
+	GinApi(GET, "/api/admin/storage/entries", RequireAuth, func(ctx *gin.Context) {
+		page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+		perPage, _ := strconv.Atoi(ctx.DefaultQuery("page_size", "20"))
+		keys := ctx.Query("bucket")
 		search := ctx.Query("search")
 		data := []map[string]string{}
 		arr := strings.Split(keys, ",")
@@ -159,9 +176,16 @@ func init() {
 			res[i]["index"] = fmt.Sprint(index)
 			index++
 		}
-		ApiList(ctx, res, len(data), map[string]interface{}{"page": page, "pageSize": perPage})
+		extras := map[string]interface{}{"page": page, "page_size": perPage}
+		if strings.Contains(ctx.Query("include"), "buckets") {
+			extras["buckets"] = storageBucketOptions()
+		}
+		ApiList(ctx, res, len(data), extras)
 	})
-	GinApi(GET, "/api/admin/storage", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/storage/buckets", RequireAuth, func(ctx *gin.Context) {
+		ApiOK(ctx, storageBucketOptions())
+	})
+	GinApi(GET, "/api/admin/storage/values", RequireAuth, func(ctx *gin.Context) {
 		keys := ctx.Query("keys")
 		if keys == "" {
 			buckets := sillyGirl.Buckets()
@@ -248,7 +272,7 @@ func init() {
 		}
 		ApiOK(ctx, data)
 	})
-	GinApi(PUT, "/api/admin/storage", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/storage/values", RequireAuth, func(ctx *gin.Context) {
 		uuid := ctx.Query("uuid")
 		if uuid != "" {
 			for _, f := range Functions {
@@ -299,13 +323,17 @@ func init() {
 
 			}
 		}
-		ApiOK(ctx, map[string]interface{}{
-			"messages": messages,
-			"errors":   errors,
-			"changes":  changes,
-		})
+		if len(errors) != 0 {
+			ApiProblem(ctx, http.StatusUnprocessableEntity, "部分存储项更新失败", map[string]interface{}{
+				"messages": messages,
+				"errors":   errors,
+				"changes":  changes,
+			})
+			return
+		}
+		ApiOK(ctx, map[string]interface{}{"messages": messages, "errors": errors, "changes": changes})
 	})
-	GinApi(POST, "/api/admin/storage/bucket", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/storage/buckets", RequireAuth, func(ctx *gin.Context) {
 		req := storageBucketRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
@@ -313,34 +341,29 @@ func init() {
 		}
 		name, err := normalizeStorageBucketName(req.Bucket)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		for _, bucket := range sillyGirl.Buckets() {
 			if bucket == name {
-				ApiFail(ctx, "存储桶已存在")
+				ApiConflict(ctx, "存储桶已存在")
 				return
 			}
 		}
 		if _, _, err := MakeBucket(name).Set2(storageBucketMarkerKey, "1"); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, nil)
+		ApiCreated(ctx, "/api/admin/storage/buckets/"+name, gin.H{"bucket": name})
 	})
-	GinApi(DELETE, "/api/admin/storage/bucket", RequireAuth, func(ctx *gin.Context) {
-		req := storageBucketRequest{}
-		if err := ctx.BindJSON(&req); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		name, err := normalizeStorageBucketName(req.Bucket)
+	GinApi(POST, "/api/admin/storage/buckets/:bucket/deletions", RequireAuth, func(ctx *gin.Context) {
+		name, err := normalizeStorageBucketName(ctx.Param("bucket"))
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		if message, ok := protectedStorageBuckets[name]; ok {
-			ApiFail(ctx, message)
+			ApiForbidden(ctx, message)
 			return
 		}
 		found := false
@@ -351,13 +374,13 @@ func init() {
 			}
 		}
 		if !found {
-			ApiFail(ctx, "存储桶不存在")
+			ApiNotFound(ctx, "存储桶不存在")
 			return
 		}
 		if err := MakeBucket(name).Delete(); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, nil)
+		ApiNoContent(ctx)
 	})
 }

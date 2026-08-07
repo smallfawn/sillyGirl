@@ -53,139 +53,126 @@ type PublicSmallcatPanel struct {
 	Message string `json:"message"`
 }
 
-func init() {
-	GinApi(GET, "/api/admin/smallcat/panels", RequireAuth, func(ctx *gin.Context) {
-		panels := getSmallcatPanels()
-		refreshSmallcatPanelsStatus(panels)
-		ApiList(ctx, redactSmallcatPanels(panels), len(panels))
-	})
+func handleSmallcatPanelConnectionTest(ctx *gin.Context) {
+	panel := SmallcatPanel{}
+	if err := ctx.BindJSON(&panel); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	hydrateSmallcatPanelAPIAuth(&panel)
+	if err := validateSmallcatPanelInput(&panel); err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	result, err := testSmallcatPanel(panel)
+	if err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	result.APIAuth = ""
+	ApiOK(ctx, result)
+}
 
-	GinApi(POST, "/api/admin/smallcat/panel/test", RequireAuth, func(ctx *gin.Context) {
-		panel := SmallcatPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		hydrateSmallcatPanelAPIAuth(&panel)
-		if err := validateSmallcatPanelInput(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		result, err := testSmallcatPanel(panel)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		result.APIAuth = ""
-		ApiOK(ctx, result)
+func handleSmallcatPanelAccounts(ctx *gin.Context) {
+	id := strings.TrimSpace(ctx.Param("id"))
+	panel := storedSmallcatPanelByID(id)
+	if panel == nil {
+		ApiNotFound(ctx, "smallcat 不存在")
+		return
+	}
+	openids, err := fetchSmallcatAccountOpenIDs(panel)
+	if err != nil {
+		ApiBadGateway(ctx, err.Error())
+		return
+	}
+	ApiOK(ctx, gin.H{
+		"openids": openids,
+		"total":   len(openids),
 	})
+}
 
-	GinApi(POST, "/api/admin/smallcat/panel/accounts", RequireAuth, func(ctx *gin.Context) {
-		payload := struct {
-			ID string `json:"id"`
-		}{}
-		if err := ctx.BindJSON(&payload); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		payload.ID = strings.TrimSpace(payload.ID)
-		panel := storedSmallcatPanelByID(payload.ID)
-		if panel == nil {
-			ApiFail(ctx, "smallcat 不存在")
-			return
-		}
-		openids, err := fetchSmallcatAccountOpenIDs(panel)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		ApiOK(ctx, gin.H{
-			"openids": openids,
-			"total":   len(openids),
-		})
-	})
-
-	GinApi(POST, "/api/admin/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
-		panel := SmallcatPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		hydrateSmallcatPanelAPIAuth(&panel)
-		if err := validateSmallcatPanelInput(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		result, err := testSmallcatPanel(panel)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		now := int(time.Now().Unix())
-		panels := getSmallcatPanels()
-		index := -1
-		if panel.ID != "" {
-			for i := range panels {
-				if panels[i].ID == panel.ID {
-					index = i
-					break
-				}
+func handleSaveSmallcatPanel(ctx *gin.Context) {
+	panel := SmallcatPanel{}
+	if err := ctx.BindJSON(&panel); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	panel.ID = strings.TrimSpace(ctx.Param("id"))
+	hydrateSmallcatPanelAPIAuth(&panel)
+	if err := validateSmallcatPanelInput(&panel); err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	result, err := testSmallcatPanel(panel)
+	if err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	now := int(time.Now().Unix())
+	panels := getSmallcatPanels()
+	index := -1
+	if panel.ID != "" {
+		for i := range panels {
+			if panels[i].ID == panel.ID {
+				index = i
+				break
 			}
 		}
-		if panel.ID == "" {
-			panel.ID = utils.GenUUID()
-			panel.CreatedAt = now
-		} else if index >= 0 {
-			if panels[index].CreatedAt != 0 {
-				panel.CreatedAt = panels[index].CreatedAt
-			} else {
-				panel.CreatedAt = now
-			}
+	}
+	if panel.ID == "" {
+		panel.ID = utils.GenUUID()
+		panel.CreatedAt = now
+	} else if index >= 0 {
+		if panels[index].CreatedAt != 0 {
+			panel.CreatedAt = panels[index].CreatedAt
 		} else {
 			panel.CreatedAt = now
 		}
-		if panel.Name == "" {
-			panel.Name = panel.Address
-		}
-		panel.UpdatedAt = now
-		panel.LastCheckedAt = now
-		panel.Status = "online"
-		panel.Message = result.Message
-		panel.Group = result.Group
-		panel.Namespace = result.Namespace
-		panel.AccountLimit = result.AccountLimit
-		panel.AccountUsed = result.AccountUsed
-		panel.CreditBalance = result.CreditBalance
-		if index >= 0 {
-			panels[index] = panel
-		} else {
-			panels = append(panels, panel)
-		}
-		saveSmallcatPanels(panels)
-		panel.APIAuth = ""
-		ApiOK(ctx, panel)
-	})
+	} else {
+		ApiNotFound(ctx, "smallcat 不存在")
+		return
+	}
+	if panel.Name == "" {
+		panel.Name = panel.Address
+	}
+	panel.UpdatedAt = now
+	panel.LastCheckedAt = now
+	panel.Status = "online"
+	panel.Message = result.Message
+	panel.Group = result.Group
+	panel.Namespace = result.Namespace
+	panel.AccountLimit = result.AccountLimit
+	panel.AccountUsed = result.AccountUsed
+	panel.CreditBalance = result.CreditBalance
+	if index >= 0 {
+		panels[index] = panel
+	} else {
+		panels = append(panels, panel)
+	}
+	saveSmallcatPanels(panels)
+	panel.APIAuth = ""
+	if strings.TrimSpace(ctx.Param("id")) == "" {
+		ApiCreated(ctx, "/api/admin/panels/"+panel.ID, panel)
+		return
+	}
+	ApiOK(ctx, panel)
+}
 
-	GinApi(DELETE, "/api/admin/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
-		panel := SmallcatPanel{}
-		if err := ctx.BindJSON(&panel); err != nil {
-			ApiFail(ctx, err.Error())
-			return
+func deleteSmallcatPanel(id string) bool {
+	panels := getSmallcatPanels()
+	next := make([]SmallcatPanel, 0, len(panels))
+	found := false
+	for _, item := range panels {
+		if item.ID != id {
+			next = append(next, item)
+		} else {
+			found = true
 		}
-		if panel.ID == "" {
-			ApiFail(ctx, "缺少 smallcat ID")
-			return
-		}
-		panels := getSmallcatPanels()
-		next := make([]SmallcatPanel, 0, len(panels))
-		for _, item := range panels {
-			if item.ID != panel.ID {
-				next = append(next, item)
-			}
-		}
+	}
+	if found {
 		saveSmallcatPanels(next)
-		ApiOK(ctx, nil)
-	})
+	}
+	return found
 }
 
 func getSmallcatPanels() []SmallcatPanel {

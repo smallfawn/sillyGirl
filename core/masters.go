@@ -1,6 +1,7 @@
 package core
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +17,7 @@ type Master struct {
 }
 
 func init() {
-	GinApi(GET, "/api/admin/master/list", RequireAuth, func(c *gin.Context) {
+	GinApi(GET, "/api/admin/masters", RequireAuth, func(c *gin.Context) {
 		plts := getPltsArray()
 		ms := []Master{}
 		i := 1
@@ -44,11 +45,14 @@ func init() {
 			"platforms": getPltsLabel(),
 		})
 	})
-	GinApi(POST, "/api/admin/master", RequireAuth, func(c *gin.Context) {
+	GinApi(POST, "/api/admin/masters", RequireAuth, func(c *gin.Context) {
 		m := Master{}
-		c.BindJSON(&m)
+		if err := c.BindJSON(&m); err != nil {
+			ApiFail(c, err.Error())
+			return
+		}
 		if m.ID == "" {
-			ApiFail(c, "缺少号码字段")
+			ApiUnprocessable(c, "缺少号码字段")
 			return
 		}
 		if m.Platform == "" {
@@ -59,20 +63,26 @@ func init() {
 			}
 		}
 		if m.Platform == "" {
-			ApiFail(c, "缺少平台字段")
+			ApiUnprocessable(c, "缺少平台字段")
 			return
 		}
 		v := MakeBucket(m.Platform)
 		masters := strings.Split(v.GetString("masters"), "&")
-		v.Set("masters", strings.Join(utils.Unique(masters, m.ID), "&"))
+		if Contains(masters, m.ID) {
+			ApiConflict(c, "管理员已存在")
+			return
+		}
+		if _, _, err := v.Set("masters", strings.Join(utils.Unique(masters, m.ID), "&")); err != nil {
+			ApiInternalError(c, err.Error())
+			return
+		}
 
-		ApiOK(c, nil)
+		ApiCreated(c, "/api/admin/masters/"+url.PathEscape(m.Platform)+"/"+url.PathEscape(m.ID), m)
 	})
-	GinApi(DELETE, "/api/admin/master", RequireAuth, func(c *gin.Context) {
-		m := Master{}
-		c.BindJSON(&m)
+	GinApi(POST, "/api/admin/masters/:platform/:number/deletions", RequireAuth, func(c *gin.Context) {
+		m := Master{Platform: c.Param("platform"), ID: c.Param("number")}
 		if m.ID == "" {
-			ApiFail(c, "缺少账号字段")
+			ApiUnprocessable(c, "缺少账号字段")
 			return
 		}
 		if m.Platform == "" {
@@ -83,13 +93,20 @@ func init() {
 			}
 		}
 		if m.Platform == "" {
-			ApiFail(c, "缺少平台字段")
+			ApiUnprocessable(c, "缺少平台字段")
 			return
 		}
 		v := MakeBucket(m.Platform)
 		masters := strings.Split(v.GetString("masters"), "&")
-		v.Set("masters", strings.Join(utils.Remove(masters, m.ID), "&"))
+		if !Contains(masters, m.ID) {
+			ApiNotFound(c, "管理员不存在")
+			return
+		}
+		if _, _, err := v.Set("masters", strings.Join(utils.Remove(masters, m.ID), "&")); err != nil {
+			ApiInternalError(c, err.Error())
+			return
+		}
 
-		ApiOK(c, nil)
+		ApiNoContent(c)
 	})
 }

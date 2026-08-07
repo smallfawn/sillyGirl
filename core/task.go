@@ -326,8 +326,8 @@ func init() {
 		return nil
 	})
 	GinApi(GET, "/api/admin/tasks", RequireAuth, func(ctx *gin.Context) {
-		current := utils.Int(ctx.Query("current"))
-		pageSize := utils.Int(ctx.Query("pageSize"))
+		current := utils.Int(ctx.Query("page"))
+		pageSize := utils.Int(ctx.Query("page_size"))
 		rr := TasksResult{}
 		rows := append([]*Tasks{}, pts...)
 		rows = append(rows, pluginCronTasks()...)
@@ -357,7 +357,7 @@ func init() {
 		}
 		ApiList(ctx, rr.Data, rr.Total, map[string]interface{}{"page": rr.Page, "time": rr.Time})
 	})
-	GinApi(POST, "/api/admin/tasks", RequireAuth, func(ctx *gin.Context) {
+	saveTask := func(ctx *gin.Context) {
 		// 将请求的 JSON 数据解析为一个 map[string]interface{} 类型的变量
 		var updateData map[string]interface{}
 		err := ctx.BindJSON(&updateData)
@@ -365,9 +365,13 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
-		task_id := strings.TrimSpace(fmt.Sprint(updateData["task_id"]))
-		if task_id == "" || task_id == "<nil>" {
+		task_id := strings.TrimSpace(ctx.Param("task_id"))
+		creating := task_id == ""
+		if creating {
 			task_id = "task-" + utils.GenUUID()
+		} else if _, _, pluginTask := parsePluginCronTaskID(task_id); !pluginTask && strings.TrimSpace(tasks.GetString(task_id)) == "" {
+			ApiNotFound(ctx, "定时任务不存在")
+			return
 		}
 		var tp = Tasks{
 			ID: task_id,
@@ -387,7 +391,7 @@ func init() {
 				if v, ok := value.(string); ok {
 					tp.Schedule = strings.TrimSpace(v)
 					if err := validateTaskSchedule(tp.Schedule); err != nil {
-						ApiFail(ctx, err.Error())
+						ApiUnprocessable(ctx, err.Error())
 						return
 					}
 				}
@@ -395,7 +399,7 @@ func init() {
 				ss := []Sender{}
 				err := json.Unmarshal(utils.JsonMarshal(value), &ss)
 				if err != nil {
-					ApiFail(ctx, "Senders错误："+err.Error())
+					ApiUnprocessable(ctx, "Senders错误："+err.Error())
 					return
 				}
 				tp.Senders = ss
@@ -421,82 +425,81 @@ func init() {
 			tp.CreatedAt = int(time.Now().Unix())
 		}
 		if tp.Title == "" {
-			ApiFail(ctx, "定时任务标题不能为空")
+			ApiUnprocessable(ctx, "定时任务标题不能为空")
 			return
 		}
 		if err := validateTaskSchedule(tp.Schedule); err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		if _, _, pluginCronTask := parsePluginCronTaskID(task_id); pluginCronTask {
 			f, platform := findScriptFunctionByTask(task_id, tp.Command)
 			if f == nil {
-				ApiFail(ctx, "定时任务脚本不存在")
+				ApiNotFound(ctx, "定时任务脚本不存在")
 				return
 			}
 			if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
-				ApiFail(ctx, err.Error())
+				ApiInternalError(ctx, err.Error())
 				return
 			}
 			if task_id != "" {
-				tasks.Set(task_id, "")
+				if _, _, err := tasks.Set(task_id, ""); err != nil {
+					ApiInternalError(ctx, err.Error())
+					return
+				}
 			}
-			ApiOK(ctx, nil)
+			ApiOK(ctx, tp)
 			return
 		}
-		tasks.Set(task_id, utils.JsonMarshal(tp))
+		_, _, err = tasks.Set(task_id, utils.JsonMarshal(tp))
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, nil)
-	})
-	GinApi(PUT, "/api/admin/tasks/enable", RequireAuth, func(ctx *gin.Context) {
-		var req struct {
-			TaskID string `json:"task_id"`
-			Enable bool   `json:"enable"`
-		}
-		if err := ctx.BindJSON(&req); err != nil {
-			ApiFail(ctx, err.Error())
+		if creating {
+			ApiCreated(ctx, "/api/admin/tasks/"+task_id, tp)
 			return
 		}
-		if err := setTaskEnabled(req.TaskID, req.Enable); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		ApiOK(ctx, gin.H{"task_id": req.TaskID, "enable": req.Enable})
-	})
-	GinApi(DELETE, "/api/admin/tasks", RequireAuth, func(ctx *gin.Context) {
-		pt := &Tasks{}
-		err := ctx.BindJSON(pt)
-		if err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
+		ApiOK(ctx, tp)
+	}
+	GinApi(POST, "/api/admin/tasks", RequireAuth, saveTask)
+	GinApi(POST, "/api/admin/tasks/:task_id", RequireAuth, saveTask)
+	GinApi(POST, "/api/admin/tasks/:task_id/deletions", RequireAuth, func(ctx *gin.Context) {
+		pt := &Tasks{ID: strings.TrimSpace(ctx.Param("task_id"))}
 		if pt.ID == "" {
-			ApiFail(ctx, "任务ID不为空")
+			ApiUnprocessable(ctx, "任务 ID 不能为空")
 			return
 		}
 		if _, _, pluginCronTask := parsePluginCronTaskID(pt.ID); pluginCronTask {
 			f, platform := findScriptFunctionByTask(pt.ID, pt.Command)
 			if f == nil {
-				ApiFail(ctx, "定时任务脚本不存在")
+				ApiNotFound(ctx, "定时任务脚本不存在")
 				return
 			}
 			if err := updatePluginCronAnnotation(f, platform, ""); err != nil {
-				ApiFail(ctx, err.Error())
+				ApiInternalError(ctx, err.Error())
 				return
 			}
-			tasks.Set(pt.ID, "")
-			ApiOK(ctx, nil)
+			if _, _, err := tasks.Set(pt.ID, ""); err != nil {
+				ApiInternalError(ctx, err.Error())
+				return
+			}
+			ApiNoContent(ctx)
 			return
 		}
-		tasks.Set(pt.ID, "")
-		ApiOK(ctx, nil)
+		if strings.TrimSpace(tasks.GetString(pt.ID)) == "" {
+			ApiNotFound(ctx, "定时任务不存在")
+			return
+		}
+		if _, _, err := tasks.Set(pt.ID, ""); err != nil {
+			ApiInternalError(ctx, err.Error())
+			return
+		}
+		ApiNoContent(ctx)
 	})
-	GinApi(GET, "/api/admin/task/selects", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/task-options", RequireAuth, func(ctx *gin.Context) {
 		var scripts = map[string]string{}
-		var task_id = ctx.Query("task_id")
+		var task_id = strings.TrimSpace(ctx.Query("task_id"))
 		var pts = pts
 		var chat_ids = []string{}
 		var user_ids = []string{}
@@ -568,12 +571,17 @@ func init() {
 			"group_names": group_names,
 		})
 	})
-	GinApi(GET, "/api/admin/tasks/run", RequireAuth, func(ctx *gin.Context) {
-		if err := runTaskNow(ctx.Query("task_id")); err != nil {
-			ApiFail(ctx, err.Error())
+	GinApi(POST, "/api/admin/tasks/:task_id/executions", RequireAuth, func(ctx *gin.Context) {
+		taskID := strings.TrimSpace(ctx.Param("task_id"))
+		if err := runTaskNow(taskID); err != nil {
+			if strings.Contains(err.Error(), "不存在") {
+				ApiNotFound(ctx, err.Error())
+			} else {
+				ApiUnprocessable(ctx, err.Error())
+			}
 			return
 		}
-		ApiOK(ctx, nil)
+		ApiOK(ctx, gin.H{"task_id": taskID, "status": "completed"})
 	})
 
 }

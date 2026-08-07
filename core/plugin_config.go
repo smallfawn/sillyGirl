@@ -24,53 +24,58 @@ type PluginConfigRecord struct {
 }
 
 func init() {
-	GinApi(GET, "/api/admin/plugin/configs", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/plugin-settings", RequireAuth, func(ctx *gin.Context) {
 		ApiOK(ctx, getPluginConfigRecords())
 	})
-	GinApi(GET, "/api/admin/plugin/config", RequireAuth, func(ctx *gin.Context) {
-		uuid := ctx.Query("uuid")
+	GinApi(GET, "/api/admin/plugin-settings/:uuid", RequireAuth, func(ctx *gin.Context) {
+		uuid := ctx.Param("uuid")
 		record := getPluginConfigRecord(uuid)
 		if record == nil {
-			ApiFail(ctx, "配置不存在，请先运行一次插件或在脚本顶层声明 new form({...})")
+			ApiNotFound(ctx, "插件配置不存在")
 			return
 		}
-		ApiOK(ctx, record)
+		if ctx.Query("include") == "panels" {
+			ApiOK(ctx, gin.H{"config": record, "panels": getAdminPanels(false)})
+		} else {
+			ApiOK(ctx, record)
+		}
 	})
-	GinApi(PUT, "/api/admin/plugin/config", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/plugin-settings/:uuid", RequireAuth, func(ctx *gin.Context) {
 		var req struct {
-			UUID  string                 `json:"uuid"`
 			Value map[string]interface{} `json:"value"`
 		}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
-		if req.UUID == "" {
-			ApiFail(ctx, "缺少插件 UUID")
+		uuid := strings.TrimSpace(ctx.Param("uuid"))
+		if uuid == "" {
+			ApiUnprocessable(ctx, "缺少插件 UUID")
 			return
 		}
-		if _, _, err := SetBucketKeyValue(pluginConfigValues, req.UUID, req.Value); err != nil {
-			ApiFail(ctx, "保存插件配置失败："+err.Error())
+		if getPluginConfigRecord(uuid) == nil {
+			ApiNotFound(ctx, "插件配置不存在")
 			return
 		}
-		ApiOK(ctx, nil)
+		if _, _, err := SetBucketKeyValue(pluginConfigValues, uuid, req.Value); err != nil {
+			ApiInternalError(ctx, "保存插件配置失败："+err.Error())
+			return
+		}
+		ApiOK(ctx, getPluginConfigRecord(uuid))
 	})
-	GinApi(DELETE, "/api/admin/plugin/config", RequireAuth, func(ctx *gin.Context) {
-		var req struct {
-			UUID         string `json:"uuid"`
-			DeleteSchema bool   `json:"delete_schema"`
-		}
-		if err := ctx.BindJSON(&req); err != nil {
-			ApiFail(ctx, err.Error())
+	GinApi(POST, "/api/admin/plugin-settings/:uuid/deletions", RequireAuth, func(ctx *gin.Context) {
+		uuid := strings.TrimSpace(ctx.Param("uuid"))
+		if uuid == "" {
+			ApiUnprocessable(ctx, "缺少插件 UUID")
 			return
 		}
-		req.UUID = strings.TrimSpace(req.UUID)
-		if req.UUID == "" {
-			ApiFail(ctx, "缺少插件 UUID")
+		if getPluginConfigRecord(uuid) == nil {
+			ApiNotFound(ctx, "插件配置不存在")
 			return
 		}
-		deletePluginConfig(req.UUID, req.DeleteSchema)
-		ApiOK(ctx, gin.H{"uuid": req.UUID, "delete_schema": req.DeleteSchema})
+		deleteSchema := ctx.Query("delete_schema") == "true"
+		deletePluginConfig(uuid, deleteSchema)
+		ApiNoContent(ctx)
 	})
 }
 

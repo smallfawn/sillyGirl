@@ -54,15 +54,15 @@ type pluginUserFormView struct {
 }
 
 func init() {
-	GinApi(GET, "/api/user/plugin/form", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/user/plugins/:uuid/form", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
-		plugin, definition, err := accessiblePluginUserForm(ctx.Query("uuid"))
+		plugin, definition, err := accessiblePluginUserForm(ctx.Param("uuid"))
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, pluginUserFormView{
@@ -73,7 +73,7 @@ func init() {
 		})
 	})
 
-	GinApi(PUT, "/api/user/plugin/form", RequireUserAuth, func(ctx *gin.Context) {
+	savePluginUserFormRecord := func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
@@ -88,18 +88,26 @@ func init() {
 			ApiFail(ctx, "请求体无效或超过 1 MiB")
 			return
 		}
+		payload.UUID = ctx.Param("uuid")
+		recordID := strings.TrimSpace(ctx.Param("record_id"))
+		creating := recordID == ""
+		if recordID != "" {
+			payload.RecordID = recordID
+		} else {
+			payload.RecordID = ""
+		}
 		plugin, definition, err := accessiblePluginUserForm(payload.UUID)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		values, fieldErrors := validatePluginUserForm(definition.Schema, payload.Value)
 		if len(fieldErrors) != 0 {
-			ctx.JSON(http.StatusBadRequest, gin.H{"status": false, "message": "表单验证失败", "data": gin.H{"errors": fieldErrors}})
+			ApiValidationError(ctx, "表单验证失败", fieldErrors)
 			return
 		}
 		if fieldErrors = runPluginUserFormValidators(ctx.Request.Context(), plugin, definition, user, values); len(fieldErrors) != 0 {
-			ctx.JSON(http.StatusBadRequest, gin.H{"status": false, "message": "表单验证失败", "data": gin.H{"errors": fieldErrors}})
+			ApiValidationError(ctx, "表单验证失败", fieldErrors)
 			return
 		}
 		pluginUserFormRecordsMu.Lock()
@@ -115,7 +123,7 @@ func init() {
 				}
 			}
 			if index < 0 {
-				ApiFail(ctx, "提交记录不存在")
+				ApiNotFound(ctx, "提交记录不存在")
 				return
 			}
 		} else if len(definition.KeyBy) != 0 {
@@ -130,6 +138,10 @@ func init() {
 			index = 0
 		}
 		if index >= 0 {
+			if creating {
+				ApiConflict(ctx, "相同键值的提交记录已存在")
+				return
+			}
 			records[index].Values = values
 			records[index].UpdatedAt = now
 		} else {
@@ -138,36 +150,39 @@ func init() {
 				limit = 1
 			}
 			if len(records) >= limit {
-				ApiFail(ctx, fmt.Sprintf("最多提交 %d 条记录", limit))
+				ApiConflict(ctx, fmt.Sprintf("最多提交 %d 条记录", limit))
 				return
 			}
 			records = append(records, pluginUserFormRecord{ID: utils.GenUUID(), Values: values, CreatedAt: now, UpdatedAt: now})
 			index = len(records) - 1
 		}
 		if err := savePluginUserRecords(user.ID, plugin.UUID, records); err != nil {
-			ApiFail(ctx, "保存失败："+err.Error())
+			ApiInternalError(ctx, "保存失败："+err.Error())
+			return
+		}
+		if creating {
+			location := "/api/user/plugins/" + plugin.UUID + "/form-records/" + records[index].ID
+			ApiCreated(ctx, location, records[index])
 			return
 		}
 		ApiOK(ctx, records[index])
-	})
+	}
+	GinApi(POST, "/api/user/plugins/:uuid/form-records", RequireUserAuth, savePluginUserFormRecord)
+	GinApi(POST, "/api/user/plugins/:uuid/form-records/:record_id", RequireUserAuth, savePluginUserFormRecord)
 
-	GinApi(DELETE, "/api/user/plugin/form", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/plugins/:uuid/form-records/:record_id/deletions", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
 		payload := struct {
-			UUID     string `json:"uuid"`
-			RecordID string `json:"record_id"`
-		}{}
-		if err := decodePluginUserFormJSON(ctx, &payload); err != nil {
-			ApiFail(ctx, "请求体无效或超过 1 MiB")
-			return
-		}
+			UUID     string
+			RecordID string
+		}{UUID: ctx.Param("uuid"), RecordID: ctx.Param("record_id")}
 		plugin, _, err := accessiblePluginUserForm(payload.UUID)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		pluginUserFormRecordsMu.Lock()
@@ -180,14 +195,14 @@ func init() {
 			}
 		}
 		if len(filtered) == len(records) {
-			ApiFail(ctx, "提交记录不存在")
+			ApiNotFound(ctx, "提交记录不存在")
 			return
 		}
 		if err := savePluginUserRecords(user.ID, plugin.UUID, filtered); err != nil {
-			ApiFail(ctx, "删除失败："+err.Error())
+			ApiInternalError(ctx, "删除失败："+err.Error())
 			return
 		}
-		ApiOK(ctx, nil)
+		ApiNoContent(ctx)
 	})
 }
 

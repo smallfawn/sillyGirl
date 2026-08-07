@@ -90,7 +90,7 @@ func TestFindFileServesChildFile(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/file/assets/app.js", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/files/assets/app.js", nil)
 	c.Params = gin.Params{{Key: "filename", Value: "assets/app.js"}}
 	FindFile(c)
 
@@ -116,9 +116,9 @@ func TestFindFileRouteServesNestedAsset(t *testing.T) {
 	defer remStatic(uuid)
 
 	router := gin.New()
-	router.GET("/api/file/*filename", FindFile)
+	router.GET("/api/files/*filename", FindFile)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/file/assets/app.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/files/assets/app.js", nil)
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {

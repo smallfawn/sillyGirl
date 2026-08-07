@@ -49,7 +49,7 @@ type systemBackupEntry struct {
 }
 
 func init() {
-	GinApi(GET, "/api/admin/backup", RequireAuth, downloadSystemBackup)
+	GinApi(GET, "/api/admin/system-backups/current", RequireAuth, downloadSystemBackup)
 }
 
 func downloadSystemBackup(ctx *gin.Context) {

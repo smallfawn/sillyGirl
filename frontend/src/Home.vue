@@ -14,6 +14,7 @@ import Tag from 'ant-design-vue/es/tag';
 import Typography from 'ant-design-vue/es/typography';
 import message from 'ant-design-vue/es/message';
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
+import AppBrand from './components/common/AppBrand.vue';
 import { Bell, MessageSquare, Plug, ShieldCheck, User } from 'lucide-vue-next';
 
 type ApiEnvelope<T> = {
@@ -98,13 +99,15 @@ async function requestJSON<T>(url: string, options: RequestInit = {}): Promise<T
     ...options,
     headers,
   });
+  if (res.status === 204) return undefined as T;
   const payload = (await res.json().catch(() => ({
     status: false,
     message: '服务响应异常',
     data: null,
   }))) as ApiEnvelope<T>;
   if (!res.ok || payload.status === false) {
-    throw new Error(payload.message || '请求失败');
+    const problem = payload as ApiEnvelope<T> & { detail?: string; title?: string };
+    throw new Error(problem.detail || payload.message || problem.title || '请求失败');
   }
   return payload.data;
 }
@@ -124,7 +127,7 @@ function clearAuth() {
 async function login() {
   loading.value = true;
   try {
-    const data = await requestJSON<AuthPayload>('/api/user/login', {
+    const data = await requestJSON<AuthPayload>('/api/user/sessions', {
       method: 'POST',
       body: JSON.stringify({
         username: loginForm.username.trim(),
@@ -144,7 +147,7 @@ async function login() {
 async function register() {
   loading.value = true;
   try {
-    const data = await requestJSON<AuthPayload>('/api/user/register', {
+    const data = await requestJSON<AuthPayload>('/api/user/accounts', {
       method: 'POST',
       body: JSON.stringify({
         username: registerForm.username.trim(),
@@ -164,9 +167,8 @@ async function register() {
 
 async function logout() {
   try {
-    await requestJSON<null>('/api/user/outlogin', {
+    await requestJSON<null>('/api/user/sessions/current/deletions', {
       method: 'POST',
-      body: '{}',
     });
   } catch (_) {
   } finally {
@@ -181,7 +183,7 @@ async function loadCurrentUser() {
     return;
   }
   try {
-    const data = await requestJSON<{ user: PublicUser }>('/api/user/me');
+    const data = await requestJSON<{ user: PublicUser }>('/api/user/profile');
     currentUser.value = data.user;
   } catch (_) {
     clearAuth();
@@ -190,7 +192,7 @@ async function loadCurrentUser() {
 
 async function loadOpenPlugins() {
   try {
-    openPlugins.value = await requestJSON<OpenPlugin[]>('/api/open/plugins');
+    openPlugins.value = await requestJSON<OpenPlugin[]>('/api/public/plugins');
   } catch (_) {
     openPlugins.value = [];
   }
@@ -207,10 +209,7 @@ onMounted(() => {
     <AntApp>
       <div class="home-page">
         <header class="home-topbar">
-          <a class="home-brand" href="/">
-            <span class="home-brand-mark" role="img" aria-label="傻妞 Logo"></span>
-            <span>SillyGirl</span>
-          </a>
+          <AppBrand class="home-brand" href="/" />
           <Space wrap>
             <Button type="primary" href="#account">用户入口</Button>
           </Space>
@@ -422,16 +421,6 @@ onMounted(() => {
   color: #1f2937;
   font-weight: 700;
   letter-spacing: 0;
-}
-
-.home-brand-mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: #ffffff url("../logo.png") center 45% / 150% auto no-repeat;
-  box-shadow: 0 1px 4px rgb(148 81 48 / 18%);
 }
 
 .home-content {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -83,7 +84,7 @@ func init() {
 	GinApi(GET, "/api/admin/users", RequireAuth, func(ctx *gin.Context) {
 		rows, err := listNormalUsers()
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, gin.H{
@@ -100,13 +101,17 @@ func init() {
 		}
 		user, err := createNormalUser(payload.Username, payload.Password, payload.Nickname)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			if strings.Contains(err.Error(), "已存在") {
+				ApiConflict(ctx, err.Error())
+			} else {
+				ApiUnprocessable(ctx, err.Error())
+			}
 			return
 		}
 		bindings, err := replaceNormalUserBindings(user.Username, payload.QQ, payload.Telegram, payload.SmallcatOpenIDs)
 		if err != nil {
 			_ = deleteNormalUser(user.Username)
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		if payload.Disabled != nil && user.Disabled != *payload.Disabled {
@@ -114,43 +119,46 @@ func init() {
 			user.UpdatedAt = time.Now().Unix()
 			if _, _, err := userBucket.Set(normalUserStorageKey(user.Username), utils.JsonMarshal(user)); err != nil {
 				_ = deleteNormalUser(user.Username)
-				ApiFail(ctx, err.Error())
+				ApiInternalError(ctx, err.Error())
 				return
 			}
 		}
-		ApiOK(ctx, adminNormalUserRowFor(user, bindings))
+		ApiCreated(ctx, "/api/admin/users/"+url.PathEscape(user.Username), adminNormalUserRowFor(user, bindings))
 	})
 
-	GinApi(PUT, "/api/admin/users", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/users/:username", RequireAuth, func(ctx *gin.Context) {
 		payload := adminNormalUserPayload{}
 		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
 			ApiFail(ctx, "请求体不是有效 JSON")
 			return
 		}
+		payload.Username = ctx.Param("username")
 		user, bindings, err := updateNormalUserByAdmin(payload)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			if strings.Contains(err.Error(), "不存在") {
+				ApiNotFound(ctx, err.Error())
+			} else {
+				ApiUnprocessable(ctx, err.Error())
+			}
 			return
 		}
 		ApiOK(ctx, adminNormalUserRowFor(user, bindings))
 	})
 
-	GinApi(DELETE, "/api/admin/users", RequireAuth, func(ctx *gin.Context) {
-		payload := struct {
-			Username string `json:"username"`
-		}{}
-		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
-			ApiFail(ctx, "请求体不是有效 JSON")
+	GinApi(POST, "/api/admin/users/:username/deletions", RequireAuth, func(ctx *gin.Context) {
+		username := ctx.Param("username")
+		if err := deleteNormalUser(username); err != nil {
+			if strings.Contains(err.Error(), "不存在") {
+				ApiNotFound(ctx, err.Error())
+			} else {
+				ApiUnprocessable(ctx, err.Error())
+			}
 			return
 		}
-		if err := deleteNormalUser(payload.Username); err != nil {
-			ApiFail(ctx, err.Error())
-			return
-		}
-		ApiOK(ctx, gin.H{"username": normalizeNormalUsername(payload.Username)})
+		ApiNoContent(ctx)
 	})
 
-	GinApi(POST, "/api/user/register", func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/accounts", func(ctx *gin.Context) {
 		payload := struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
@@ -162,22 +170,26 @@ func init() {
 		}
 		user, err := createNormalUser(payload.Username, payload.Password, payload.Nickname)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			if strings.Contains(err.Error(), "已存在") {
+				ApiConflict(ctx, err.Error())
+			} else {
+				ApiUnprocessable(ctx, err.Error())
+			}
 			return
 		}
 		token, err := createUserJWTCookie(ctx, user)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, gin.H{
+		ApiCreated(ctx, "/api/user/profile", gin.H{
 			"token":     token,
 			"expiresIn": userJWTExpireSeconds,
 			"user":      toPublicNormalUser(user),
 		})
 	})
 
-	GinApi(POST, "/api/user/login", func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/sessions", func(ctx *gin.Context) {
 		payload := struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
@@ -188,36 +200,25 @@ func init() {
 		}
 		attemptKey := "user:" + normalizeNormalUsername(payload.Username)
 		if loginAttemptBlocked(ctx, attemptKey) {
-			ApiFail(ctx, "登录失败次数过多，请稍后再试")
+			ApiError(ctx, http.StatusTooManyRequests, "登录失败次数过多，请稍后再试")
 			return
 		}
 		user, err := verifyNormalUser(payload.Username, payload.Password)
 		if err != nil {
 			recordFailedLoginAttempt(ctx, attemptKey)
-			ApiFail(ctx, "账号或密码错误")
+			ApiUnauthorized(ctx, "账号或密码错误")
 			return
 		}
 		clearLoginAttempts(ctx, attemptKey)
 		token, err := createUserJWTCookie(ctx, user)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, gin.H{
+		ApiCreated(ctx, "/api/user/sessions/current", gin.H{
 			"token":     token,
 			"expiresIn": userJWTExpireSeconds,
 			"user":      toPublicNormalUser(user),
-		})
-	})
-
-	GinApi(GET, "/api/user/me", RequireUserAuth, func(ctx *gin.Context) {
-		user, ok := ctx.Get("normal_user")
-		if !ok {
-			ApiError(ctx, http.StatusUnauthorized, "请先登录")
-			return
-		}
-		ApiOK(ctx, gin.H{
-			"user": toPublicNormalUser(user.(*normalUser)),
 		})
 	})
 
@@ -242,62 +243,56 @@ func init() {
 		})
 	})
 
-	GinApi(PUT, "/api/user/bind", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/bindings/:platform", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
 		payload := struct {
-			Platform string `json:"platform"`
-			Value    string `json:"value"`
+			Value string `json:"value"`
 		}{}
 		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
 			ApiFail(ctx, "请求体不是有效 JSON")
 			return
 		}
-		if !isPublicUserBindingPlatform(payload.Platform) {
-			ApiFail(ctx, "普通用户只能绑定 QQ 或 Telegram；smallcat 请通过扫码登录")
+		platform := ctx.Param("platform")
+		if !isPublicUserBindingPlatform(platform) {
+			ApiUnprocessable(ctx, "普通用户只能绑定 QQ 或 Telegram；smallcat 请通过扫码登录")
 			return
 		}
-		bindings, err := updateNormalUserBinding(user.Username, payload.Platform, payload.Value)
+		bindings, err := updateNormalUserBinding(user.Username, platform, payload.Value)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, bindings)
 	})
 
-	GinApi(DELETE, "/api/user/bind", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/bindings/:platform/deletions", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
-		payload := struct {
-			Platform string `json:"platform"`
-		}{}
-		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
-			ApiFail(ctx, "请求体不是有效 JSON")
+		platform := ctx.Param("platform")
+		if !isPublicUserBindingPlatform(platform) {
+			ApiUnprocessable(ctx, "普通用户只能解绑 QQ 或 Telegram")
 			return
 		}
-		if !isPublicUserBindingPlatform(payload.Platform) {
-			ApiFail(ctx, "普通用户只能解绑 QQ 或 Telegram")
-			return
-		}
-		bindings, err := updateNormalUserBinding(user.Username, payload.Platform, "")
+		bindings, err := updateNormalUserBinding(user.Username, platform, "")
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiUnprocessable(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, bindings)
 	})
 
-	GinApi(GET, "/api/user/smallcat/panels", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/user/smallcat-panels", RequireUserAuth, func(ctx *gin.Context) {
 		ApiOK(ctx, publicSmallcatPanels())
 	})
 
-	GinApi(POST, "/api/user/smallcat/qr/start", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/smallcat-login-sessions", RequireUserAuth, func(ctx *gin.Context) {
 		payload := struct {
 			Panel int         `json:"panel"`
 			Type  interface{} `json:"type"`
@@ -308,80 +303,83 @@ func init() {
 		}
 		panel, err := smallcatPanelByIndex(payload.Panel)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		body := map[string]interface{}{"type": payload.Type}
 		raw, err := requestSmallcatJSON(panel, http.MethodPost, "/api/qr/start", body, nil)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiBadGateway(ctx, err.Error())
 			return
 		}
 		data, message, ok := unwrapServiceData(decodeRawJSON(raw))
 		if !ok {
-			ApiFail(ctx, message)
+			ApiBadGateway(ctx, message)
 			return
 		}
-		ApiOK(ctx, data)
+		uuid := findStringInJSON(data, "uuid")
+		location := ""
+		if uuid != "" {
+			location = "/api/user/smallcat-login-sessions/" + strconv.Itoa(payload.Panel) + "/" + url.PathEscape(uuid)
+		}
+		ApiCreated(ctx, location, data)
 	})
 
-	GinApi(GET, "/api/user/smallcat/qr/status", RequireUserAuth, func(ctx *gin.Context) {
-		panelIndex, _ := strconv.Atoi(ctx.Query("panel"))
-		uuid := strings.TrimSpace(ctx.Query("uuid"))
+	GinApi(GET, "/api/user/smallcat-login-sessions/:panel/:uuid", RequireUserAuth, func(ctx *gin.Context) {
+		panelIndex, _ := strconv.Atoi(ctx.Param("panel"))
+		uuid := strings.TrimSpace(ctx.Param("uuid"))
 		if uuid == "" {
-			ApiFail(ctx, "缺少 uuid")
+			ApiUnprocessable(ctx, "缺少 uuid")
 			return
 		}
 		panel, err := smallcatPanelByIndex(panelIndex)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		raw, err := requestSmallcatJSON(panel, http.MethodGet, "/api/qr/status", nil, map[string]string{"uuid": uuid})
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiBadGateway(ctx, err.Error())
 			return
 		}
 		data, message, ok := unwrapServiceData(decodeRawJSON(raw))
 		if !ok {
-			ApiFail(ctx, message)
+			ApiBadGateway(ctx, message)
 			return
 		}
 		ApiOK(ctx, data)
 	})
 
-	GinApi(POST, "/api/user/smallcat/login/confirm", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/smallcat-login-sessions/:panel/:uuid/confirmations", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
 		payload := struct {
-			Panel int    `json:"panel"`
-			UUID  string `json:"uuid"`
+			Panel int
+			UUID  string
 		}{}
-		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
-			ApiFail(ctx, "请求体不是有效 JSON")
-			return
-		}
+		payload.Panel, _ = strconv.Atoi(ctx.Param("panel"))
+		payload.UUID = ctx.Param("uuid")
 		payload.UUID = strings.TrimSpace(payload.UUID)
 		if payload.UUID == "" {
-			ApiFail(ctx, "缺少 uuid")
+			ApiUnprocessable(ctx, "缺少 uuid")
 			return
 		}
 		panel, err := smallcatPanelByIndex(payload.Panel)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		raw, err := requestSmallcatJSON(panel, http.MethodGet, "/api/qr/status", nil, map[string]string{"uuid": payload.UUID})
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiBadGateway(ctx, err.Error())
 			return
 		}
 		result, message, ok := unwrapServiceData(decodeRawJSON(raw))
 		if !ok {
-			ApiFail(ctx, message)
+			ApiBadGateway(ctx, message)
 			return
 		}
 		state := findStringInJSON(result, "state")
@@ -390,7 +388,7 @@ func init() {
 			if state == "" {
 				state = "unknown"
 			}
-			ApiFail(ctx, "当前扫码状态："+state+"，请扫码确认后再点击确认登录")
+			ApiConflict(ctx, "当前扫码状态："+state+"，请扫码确认后再点击确认登录")
 			return
 		}
 		oauthState := findStringInJSON(result, "oauthState", "oauth_state", "state")
@@ -401,22 +399,22 @@ func init() {
 			"displayName": user.Nickname,
 		}, nil)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiBadGateway(ctx, err.Error())
 			return
 		}
 		addResult, message, ok := unwrapServiceData(decodeRawJSON(addRaw))
 		if !ok {
-			ApiFail(ctx, message)
+			ApiBadGateway(ctx, message)
 			return
 		}
 		openid := findStringInJSON(addResult, "openid", "openId", "open_id")
 		if openid == "" {
-			ApiFail(ctx, "smallcat 已确认扫码，但添加账号接口未返回 openid")
+			ApiBadGateway(ctx, "smallcat 已确认扫码，但添加账号接口未返回 openid")
 			return
 		}
 		bindings, err := updateNormalUserBinding(user.Username, "smallcat", openid)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
 		ApiOK(ctx, gin.H{
@@ -427,7 +425,7 @@ func init() {
 		})
 	})
 
-	GinApi(POST, "/api/user/smallcat/account/add", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/smallcat-accounts", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
@@ -446,12 +444,12 @@ func init() {
 		payload.Code = strings.TrimSpace(payload.Code)
 		payload.DisplayName = strings.TrimSpace(payload.DisplayName)
 		if payload.Code == "" {
-			ApiFail(ctx, "请输入授权码")
+			ApiUnprocessable(ctx, "请输入授权码")
 			return
 		}
 		panel, err := smallcatPanelByIndex(payload.Panel)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		raw, err := requestSmallcatJSON(panel, http.MethodPost, "/api/accounts/add", gin.H{
@@ -460,32 +458,32 @@ func init() {
 			"displayName": payload.DisplayName,
 		}, nil)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiBadGateway(ctx, err.Error())
 			return
 		}
 		data, message, ok := unwrapServiceData(decodeRawJSON(raw))
 		if !ok {
-			ApiFail(ctx, message)
+			ApiBadGateway(ctx, message)
 			return
 		}
 		openid := findStringInJSON(data, "openid", "openId", "open_id")
 		if openid == "" {
-			ApiFail(ctx, "smallcat 添加账号成功，但接口未返回 openid")
+			ApiBadGateway(ctx, "smallcat 添加账号成功，但接口未返回 openid")
 			return
 		}
 		bindings, err := updateNormalUserBinding(user.Username, "smallcat", openid)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiOK(ctx, gin.H{
+		ApiCreated(ctx, "/api/user/profile", gin.H{
 			"openid":   openid,
 			"bindings": bindings,
 			"raw":      data,
 		})
 	})
 
-	GinApi(POST, "/api/user/smallcat/code", RequireUserAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/smallcat-verification-codes", RequireUserAuth, func(ctx *gin.Context) {
 		user := currentNormalUser(ctx)
 		if user == nil {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
@@ -503,16 +501,16 @@ func init() {
 		payload.OpenID = strings.TrimSpace(payload.OpenID)
 		payload.AppID = strings.TrimSpace(payload.AppID)
 		if payload.OpenID == "" || payload.AppID == "" {
-			ApiFail(ctx, "openid 和 appid 不能为空")
+			ApiUnprocessable(ctx, "openid 和 appid 不能为空")
 			return
 		}
 		if !normalUserHasSmallcatOpenID(user.Username, payload.OpenID) {
-			ApiFail(ctx, "只能为当前用户已绑定的 smallcat openid 生成 code")
+			ApiForbidden(ctx, "只能为当前用户已绑定的 smallcat openid 生成 code")
 			return
 		}
 		panel, err := smallcatPanelByIndex(payload.Panel)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiNotFound(ctx, err.Error())
 			return
 		}
 		raw, err := requestSmallcatJSON(panel, http.MethodPost, "/wx/code", gin.H{
@@ -520,21 +518,21 @@ func init() {
 			"appid":  payload.AppID,
 		}, nil)
 		if err != nil {
-			ApiFail(ctx, err.Error())
+			ApiBadGateway(ctx, err.Error())
 			return
 		}
 		data, message, ok := unwrapServiceData(decodeRawJSON(raw))
 		if !ok {
-			ApiFail(ctx, message)
+			ApiBadGateway(ctx, message)
 			return
 		}
-		ApiOK(ctx, data)
+		ApiCreated(ctx, "", data)
 	})
 
-	GinApi(POST, "/api/user/outlogin", func(ctx *gin.Context) {
+	GinApi(POST, "/api/user/sessions/current/deletions", func(ctx *gin.Context) {
 		ctx.SetSameSite(http.SameSiteLaxMode)
 		ctx.SetCookie("user_token", "", -1, "/", "", adminCookieSecure(ctx), true)
-		ApiOK(ctx, nil)
+		ApiNoContent(ctx)
 	})
 }
 
