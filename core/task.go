@@ -19,6 +19,7 @@ import (
 
 var tasks = MakeBucket("tasks")
 var pluginCronStatus = MakeBucket("plugin_cron_status")
+var pluginCronSenders = MakeBucket("plugin_cron_senders")
 
 const pluginCronTaskPrefix = "plugin-cron:"
 
@@ -120,9 +121,32 @@ func pluginCronTask(f *common.Function, platform string) *Tasks {
 		Schedule: f.Cron[platform],
 		Command:  scriptCommandForFunction(f),
 		Scripts:  []string{f.UUID},
+		Senders:  pluginCronTaskSenders(pluginCronTaskID(f.UUID, platform)),
 		Remark:   "来自脚本注释 @cron",
 		Enable:   pluginCronTaskEnabled(f.UUID, platform),
 	}
+}
+
+func pluginCronTaskSenders(taskID string) []Sender {
+	raw := strings.TrimSpace(pluginCronSenders.GetString(taskID))
+	if raw == "" {
+		return nil
+	}
+	var senders []Sender
+	if err := json.Unmarshal([]byte(raw), &senders); err != nil {
+		console.Error("读取插件定时任务接收人失败：%s，%v", taskID, err)
+		return nil
+	}
+	return senders
+}
+
+func setPluginCronTaskSenders(taskID string, senders []Sender) error {
+	value := interface{}(nil)
+	if len(senders) != 0 {
+		value = utils.JsonMarshal(senders)
+	}
+	_, _, err := pluginCronSenders.Set(taskID, value)
+	return err
 }
 
 func pluginCronTaskEnabled(uuid, platform string) bool {
@@ -210,7 +234,7 @@ func runTaskNow(taskID string) error {
 		if !pluginExecutionEnabled(f) {
 			return fmt.Errorf("插件未启用")
 		}
-		f.Handle(&CustomSender{F: &Factory{botplt: platform, uuid: f.UUID}})
+		runPluginCronFunction(f, platform)
 		return nil
 	}
 	for _, task := range pts {
@@ -223,6 +247,35 @@ func runTaskNow(taskID string) error {
 		}
 	}
 	return fmt.Errorf("定时任务不存在")
+}
+
+func runPluginCronFunction(f *common.Function, cronPlatform string) {
+	if f == nil || f.Handle == nil {
+		return
+	}
+	taskID := pluginCronTaskID(f.UUID, cronPlatform)
+	targets := pluginCronTaskSenders(taskID)
+	if len(targets) == 0 {
+		f.Handle(&CustomSender{F: &Factory{botplt: cronPlatform, uuid: f.UUID}})
+		return
+	}
+	command := scriptCommandForFunction(f)
+	for _, target := range targets {
+		adapter, err := GetAdapter(target.Platfrom, target.BotID)
+		if err != nil || adapter == nil {
+			console.Error("定时任务接收平台不可用：%s(%s)", target.Platfrom, target.BotID)
+			continue
+		}
+		sender := adapter.Sender2(nil)
+		sender.SetFsps(&common.FakerSenderParams{
+			Content: command,
+			ChatID:  target.ChatID,
+			UserID:  target.UserID,
+		})
+		sender.SetMatch([]string{})
+		sender.SetParams([]string{})
+		f.Handle(sender)
+	}
 }
 
 func scriptTaskTitle(f *common.Function) string {
@@ -505,6 +558,12 @@ func init() {
 					return
 				}
 			}
+			if _, sendersProvided := updateData["senders"]; sendersProvided {
+				if err := setPluginCronTaskSenders(task_id, tp.Senders); err != nil {
+					ApiInternalError(ctx, err.Error())
+					return
+				}
+			}
 			if task_id != "" {
 				if _, _, err := tasks.Set(task_id, ""); err != nil {
 					ApiInternalError(ctx, err.Error())
@@ -552,6 +611,10 @@ func init() {
 				return
 			}
 			if _, _, err := pluginCronStatus.Set(pt.ID, ""); err != nil {
+				ApiInternalError(ctx, err.Error())
+				return
+			}
+			if err := setPluginCronTaskSenders(pt.ID, nil); err != nil {
 				ApiInternalError(ctx, err.Error())
 				return
 			}

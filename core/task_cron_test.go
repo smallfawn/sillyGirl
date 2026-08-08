@@ -319,6 +319,80 @@ func TestPluginCronTaskHydrationSupportsPartialUpdates(t *testing.T) {
 	}
 }
 
+func TestPluginCronTaskPersistsConfiguredRecipient(t *testing.T) {
+	uuid := "plugin-recipient-persistence-test-" + utils.GenUUID()
+	taskID := pluginCronTaskID(uuid, "task")
+	want := []Sender{{
+		Platfrom: "qqguild",
+		UserID:   "recipient-open-id",
+		BotID:    "bot-app-id",
+	}}
+	t.Cleanup(func() { _ = setPluginCronTaskSenders(taskID, nil) })
+
+	if err := setPluginCronTaskSenders(taskID, want); err != nil {
+		t.Fatal(err)
+	}
+	f := &common.Function{
+		UUID:  uuid,
+		Title: "Recipient Fixture",
+		Type:  NODE,
+		Cron:  map[string]string{"task": "0 * * * *"},
+	}
+	got := pluginCronTask(f, "task").Senders
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("plugin cron senders = %#v; want %#v", got, want)
+	}
+
+	if err := setPluginCronTaskSenders(taskID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginCronTaskSenders(taskID); len(got) != 0 {
+		t.Fatalf("cleared plugin cron senders = %#v; want empty", got)
+	}
+}
+
+func TestRunPluginCronFunctionUsesConfiguredRecipient(t *testing.T) {
+	uuid := "plugin-recipient-run-test-" + utils.GenUUID()
+	platform := "plugin-recipient-platform-" + utils.GenUUID()
+	taskID := pluginCronTaskID(uuid, "task")
+	const (
+		botID  = "recipient-bot"
+		userID = "recipient-user"
+		chatID = "recipient-chat"
+	)
+
+	adapter := &Factory{}
+	adapter.Init(platform, botID, nil)
+	t.Cleanup(func() {
+		adapter.Destroy()
+		_ = setPluginCronTaskSenders(taskID, nil)
+	})
+	if err := setPluginCronTaskSenders(taskID, []Sender{{
+		Platfrom: platform,
+		BotID:    botID,
+		UserID:   userID,
+		ChatID:   chatID,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	captured := make(chan common.Sender, 1)
+	f := &common.Function{
+		UUID: uuid,
+		Type: NODE,
+		Path: "author/recipient.js",
+		Handle: func(sender common.Sender) interface{} {
+			captured <- sender
+			return nil
+		},
+	}
+	runPluginCronFunction(f, "task")
+	sender := <-captured
+	if sender.GetImType() != platform || sender.GetBotID() != botID || sender.GetUserID() != userID || sender.GetChatID() != chatID {
+		t.Fatalf("recipient sender = platform:%q bot:%q user:%q chat:%q", sender.GetImType(), sender.GetBotID(), sender.GetUserID(), sender.GetChatID())
+	}
+}
+
 func TestRunTaskNowExecutesPluginCron(t *testing.T) {
 	uuid := "plugin-run-test-" + utils.GenUUID()
 	taskID := pluginCronTaskID(uuid, "task")

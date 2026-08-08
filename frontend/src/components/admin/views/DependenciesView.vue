@@ -108,21 +108,6 @@ const {
       <Table.Column title="#" :width="64">
         <template #default="{ index }">{{ index + 1 }}</template>
       </Table.Column>
-      <Table.Column title="插件" :width="180">
-        <template #default="{ record }"
-          ><Typography.Text>{{
-            record.plugin_title || record.plugin
-          }}</Typography.Text></template
-        >
-      </Table.Column>
-      <Table.Column title="文件名" :width="140">
-        <template #default="{ record }"
-          ><Typography.Text class="mono">{{
-            record.plugin_file ||
-            (nodeDeps.runtime === "python" ? "main.py" : "main.js")
-          }}</Typography.Text></template
-        >
-      </Table.Column>
       <Table.Column title="依赖名称" data-index="name" />
       <Table.Column title="版本" data-index="version" :width="180">
         <template #default="{ text }"
@@ -136,27 +121,6 @@ const {
           ><Tag :color="record.installed ? 'green' : 'orange'">{{
             record.installed ? "已安装" : "未安装"
           }}</Tag></template
-        >
-      </Table.Column>
-      <Table.Column title="来源" data-index="source" :width="150" />
-      <Table.Column title="类型" :width="100">
-        <template #default="{ record }"
-          ><Tag
-            :color="
-              nodeDeps.runtime === 'python'
-                ? 'purple'
-                : record.dev
-                  ? 'blue'
-                  : 'green'
-            "
-            >{{
-              nodeDeps.runtime === "python"
-                ? "pipx"
-                : record.dev
-                  ? "dev"
-                  : "prod"
-            }}</Tag
-          ></template
         >
       </Table.Column>
       <Table.Column title="操作" :width="130">

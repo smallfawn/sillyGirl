@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	appVersion          = "1.1.0"
+	appVersion          = "1.1.1"
 	appRepository       = "https://github.com/smallfawn/sillyGirl"
 	remoteVersionRawURL = "https://raw.githubusercontent.com/smallfawn/sillyGirl/refs/heads/main/VERSION"
 )

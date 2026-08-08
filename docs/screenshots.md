@@ -2,7 +2,7 @@
 
 [返回项目导航](../README.md) · [API 与存储](api-storage.md) · [插件编写](plugin-development.md) · [适配器](adapters.md)
 
-以下截图由 **Chrome DevTools MCP** 在 SillyGirl `v1.1.0` 的隔离本地 fixture 上生成，页面数据仅用于文档展示。
+以下截图由 **Chrome DevTools MCP** 在 SillyGirl `v1.1.1` 的隔离本地 fixture 上生成，页面数据仅用于文档展示。
 
 ## 页面总览
 
