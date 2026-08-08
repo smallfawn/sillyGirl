@@ -418,11 +418,7 @@ func AddCommand(cmds []*common.Function) {
 						if !pluginExecutionEnabled(cmds[j]) || !pluginCronTaskEnabled(cmds[j].UUID, plt) {
 							return
 						}
-						cmds[j].Handle(&CustomSender{
-							F: &Factory{
-								botplt: plt,
-							},
-						})
+						runPluginCronFunction(cmds[j], plt)
 					})
 					if err == nil {
 						cmds[j].CronIds = append(cmds[j].CronIds, int(cronId))

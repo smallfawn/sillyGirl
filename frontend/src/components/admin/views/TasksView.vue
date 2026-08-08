@@ -129,7 +129,6 @@ const {
           id="task-platform"
           v-model:value="tasks.form.platform"
           allow-clear
-          :disabled="isPluginCronTask(tasks.form)"
           :options="tasks.platforms"
           placeholder="选择 BOT 平台"
       /></Form.Item>
@@ -142,7 +141,6 @@ const {
           v-model:value="tasks.form.recipient"
           name="task-recipient"
           allow-clear
-          :disabled="isPluginCronTask(tasks.form)"
           placeholder="请输入用户 ID / OpenID"
       /></Form.Item>
     </Form>

@@ -133,11 +133,21 @@ export function useTasksAdmin() {
     loadTasks();
   }
   async function runTask(row: Task) {
-    await post(
-      `/api/admin/tasks/${encodeURIComponent(String(row.task_id || ""))}/executions`,
-      {},
-    );
-    message.success("已触发");
+    if (!row.enable) {
+      message.warning("定时任务未启用，请先打开启用开关");
+      return;
+    }
+    try {
+      await post(
+        `/api/admin/tasks/${encodeURIComponent(String(row.task_id || ""))}/executions`,
+        {},
+      );
+      message.success("已触发");
+    } catch (error) {
+      message.warning(
+        error instanceof Error ? error.message : "定时任务触发失败",
+      );
+    }
   }
   async function toggleTaskEnabled(row: Task, enabled = !row.enable) {
     const taskId = `${row.task_id || ""}`;
