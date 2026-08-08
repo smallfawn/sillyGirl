@@ -33,10 +33,51 @@ var (
 func initMarketPluginEditor() {
 	GinApi(GET, "/api/admin/local-plugins/:id", RequireAuth, getMarketPluginScript)
 	GinApi(GET, "/api/admin/local-plugins/:id/dependents", RequireAuth, getMarketPluginDependents)
+	GinApi(GET, "/api/admin/local-plugins/:id/dependency-plan", RequireAuth, getInstalledPluginDependencyPlan)
 	GinApi(POST, "/api/admin/local-plugins", RequireAuth, createMarketPluginScript)
 	GinApi(POST, "/api/admin/local-plugins/:id", RequireAuth, saveMarketPluginScript)
 	GinApi(POST, "/api/admin/local-plugins/:id/status", RequireAuth, setMarketPluginStatus)
 	GinApi(POST, "/api/admin/local-plugins/:id/deletions", RequireAuth, deleteMarketPluginScript)
+}
+
+func getInstalledPluginDependencyPlan(ctx *gin.Context) {
+	id := strings.TrimSpace(ctx.Param("id"))
+	plugin := installedPluginByUUID(id)
+	if plugin == nil || strings.TrimSpace(plugin.Path) == "" {
+		ApiNotFound(ctx, "已下载插件不存在")
+		return
+	}
+	runtime := normalizeDependencyRuntime(plugin.Type)
+	pluginName := nodePluginIdentityFromPath(plugin.Path)
+	dependencyPlugins := listDependencyPlugins(runtime)
+	dependencyPlugin, err := dependencyPluginByName(dependencyPlugins, pluginName, runtime)
+	if err != nil {
+		ApiNotFound(ctx, err.Error())
+		return
+	}
+	dependencies, err := readPluginDependencies(runtime, dependencyPlugin)
+	if err != nil {
+		ApiInternalError(ctx, err.Error())
+		return
+	}
+	missingPackages := make([]nodeDependencyRow, 0)
+	for _, dependency := range dependencies {
+		if !dependency.Installed {
+			missingPackages = append(missingPackages, dependency)
+		}
+	}
+	tool := pnpmDependencyStatus()
+	if runtime == PYTHON {
+		tool = pipxDependencyStatus()
+	}
+	ApiOK(ctx, map[string]interface{}{
+		"runtime":             runtime,
+		"plugin":              pluginName,
+		"plugin_title":        firstNonEmpty(plugin.Title, nodePluginNameFromPath(plugin.Path), pluginName),
+		"dependencies":        missingPackages,
+		"module_dependencies": missingPluginModuleDependencies(plugin, installedPluginSnapshot()),
+		"tool":                tool,
+	})
 }
 
 func setMarketPluginStatus(ctx *gin.Context) {

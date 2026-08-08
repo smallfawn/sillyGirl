@@ -52,7 +52,7 @@ const authMode = ref<'login' | 'register'>('login');
 const loading = ref(false);
 const currentUser = ref<PublicUser | null>(null);
 const openPlugins = ref<OpenPlugin[]>([]);
-localStorage.removeItem('sillygirl_user_token');
+const userAuthTokenKey = 'sillygirl_user_jwt';
 const loginForm = reactive({
   username: '',
   password: '',
@@ -90,8 +90,9 @@ async function requestJSON<T>(url: string, options: RequestInit = {}): Promise<T
   if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json');
   }
+  const token = localStorage.getItem(userAuthTokenKey)?.trim();
+  if (token && !headers.has('token')) headers.set('token', token);
   const res = await fetch(url, {
-    credentials: 'include',
     ...options,
     headers,
   });
@@ -109,12 +110,13 @@ async function requestJSON<T>(url: string, options: RequestInit = {}): Promise<T
 }
 
 function setAuth(data: AuthPayload) {
+  localStorage.setItem(userAuthTokenKey, data.token.trim());
   currentUser.value = data.user;
 }
 
 function clearAuth() {
   currentUser.value = null;
-  localStorage.removeItem('sillygirl_user_token');
+  localStorage.removeItem(userAuthTokenKey);
 }
 
 async function login() {

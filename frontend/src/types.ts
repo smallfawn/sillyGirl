@@ -96,6 +96,7 @@ export type PluginInfo = {
   messages?: unknown;
   dependencies?: string[];
   module_dependencies?: string[];
+  missing_module_dependencies?: string[];
 };
 
 export type Reply = {

@@ -31,15 +31,18 @@ import {
   ApiError,
   clearAuthToken,
   get,
+  getAuthToken,
   post,
   saveStorage,
   setAuthToken,
 } from "../../api";
 import type { AdminUserRow, CurrentUser, PluginInfo } from "../../types";
 import {
-  confirmPluginDependencyInstall,
+  confirmDownloadedPluginDependencyInstall,
   declaredPluginDependenciesFromContent,
   pluginDependencies,
+  resolveDownloadedPluginDependencyPlan,
+  type DownloadedPluginDependencyPlan,
 } from "./pluginInstallPrompt";
 import { apiData, type ApiEnvelope } from "./adminApi";
 import { useNormalUsersAdmin } from "./useNormalUsersAdmin";
@@ -316,8 +319,8 @@ export function useAdminController() {
   const overviewVersion = computed(() => {
     const info = user.value?.version || {};
     return {
-      local: info.local || "1.1.1",
-      remote: info.remote || info.local || "1.1.1",
+      local: info.local || "1.1.2",
+      remote: info.remote || info.local || "1.1.2",
       source: info.source || "reserved",
       repository: info.repository || "https://github.com/smallfawn/sillyGirl",
     };
@@ -1108,19 +1111,13 @@ export function useAdminController() {
     }
   }
   function installPlugin(row: PluginInfo) {
-    const packages = pluginDependencies(row);
-    if (
-      confirmPluginDependencyInstall(row, packages, () =>
-        performPluginInstall(row),
-      )
-    )
-      return;
-    void performPluginInstall(row);
+    void downloadPluginAndDetectDependencies(row);
   }
 
-  async function performPluginInstall(row: PluginInfo) {
+  async function downloadPluginAndDetectDependencies(row: PluginInfo) {
     const marketPage = plugins.current;
     const marketPageSize = plugins.pageSize;
+    let downloaded = false;
     plugins.installing[row.id] = true;
     try {
       const res = await post<
@@ -1129,23 +1126,31 @@ export function useAdminController() {
           messages?: Record<string, string>;
         }>
       >("/api/admin/storage/values", {
-        [`plugins.${row.id}`]: "install",
+        [`plugins.${row.id}`]: "download",
       });
       const data = apiData(res) || {};
       const firstError = Object.values(data.errors || {}).find(Boolean);
       if (firstError) {
         throw new ApiError(200, firstError);
       }
-      const firstMessage = Object.values(data.messages || {}).find(Boolean);
-      message.success(
-        firstMessage || (row.install_status === 1 ? "已更新" : "已安装"),
-      );
+      downloaded = true;
       await Promise.all([
         loadPlugins(marketPage, marketPageSize, false, true),
         loadUser(),
       ]);
+      const prompted = await offerDownloadedPluginDependencyInstall(
+        row,
+        marketPage,
+        marketPageSize,
+      );
+      if (!prompted) {
+        message.success(row.install_status === 1 ? "已更新" : "已安装");
+      }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "插件安装失败");
+      const reason = error instanceof Error ? error.message : "未知错误";
+      message.error(
+        downloaded ? `插件已下载，但依赖检测失败：${reason}` : reason,
+      );
     } finally {
       plugins.installing[row.id] = false;
     }
@@ -1819,6 +1824,50 @@ export function useAdminController() {
       loadUser(false),
       loadPlugins(marketPage, marketPageSize, false, true),
     ]);
+  }
+
+  async function installDownloadedPluginDependencies(
+    row: PluginInfo,
+    plan: DownloadedPluginDependencyPlan,
+    marketPage: number,
+    marketPageSize: number,
+  ) {
+    if (plan.moduleDependencies.length > 0) {
+      const res = await post<
+        ApiEnvelope<{
+          errors?: Record<string, string>;
+        }>
+      >("/api/admin/storage/values", {
+        [`plugins.${row.id}`]: "install-dependencies",
+      });
+      const firstError = Object.values(apiData(res)?.errors || {}).find(Boolean);
+      if (firstError) throw new ApiError(200, firstError);
+      message.success(`${plan.pluginTitle} 的依赖模块和运行依赖已处理`);
+      await Promise.all([
+        loadUser(false),
+        loadPlugins(marketPage, marketPageSize, false, true),
+      ]);
+      return;
+    }
+    await installMarketPluginDependencies(plan, marketPage, marketPageSize);
+  }
+
+  async function offerDownloadedPluginDependencyInstall(
+    row: PluginInfo,
+    marketPage: number,
+    marketPageSize: number,
+  ) {
+    const plan = await resolveDownloadedPluginDependencyPlan(row);
+    if (
+      plan.dependencies.length === 0 &&
+      plan.moduleDependencies.length === 0
+    ) {
+      return false;
+    }
+    confirmDownloadedPluginDependencyInstall(plan, () =>
+      installDownloadedPluginDependencies(row, plan, marketPage, marketPageSize),
+    );
+    return true;
   }
 
   async function offerPluginDependencyInstall(
@@ -2982,7 +3031,7 @@ export function useAdminController() {
     systemBackup.downloading = true;
     try {
       const response = await fetch("/api/admin/system-backups/current", {
-        credentials: "include",
+        headers: { token: getAuthToken() },
         cache: "no-store",
       });
       if (!response.ok) {

@@ -21,6 +21,31 @@ type pluginModuleDependent struct {
 }
 
 func installMarketPluginWithModuleDependencies(root *common.Function, market, installed []*common.Function, install func(string) error, dependencyInstallers ...func(string, string) error) error {
+	return installMarketPluginDependencyGraph(root, market, installed, install, true, dependencyInstallers...)
+}
+
+func installMarketPluginDependencies(root *common.Function, market, installed []*common.Function, install func(string) error, dependencyInstallers ...func(string, string) error) error {
+	return installMarketPluginDependencyGraph(root, market, installed, install, false, dependencyInstallers...)
+}
+
+func downloadedPluginDependencyRoot(marketPlugin *common.Function, installed []*common.Function) *common.Function {
+	if marketPlugin == nil {
+		return nil
+	}
+	for _, current := range installed {
+		if current == nil || current.UUID != marketPlugin.UUID {
+			continue
+		}
+		// 依赖以刚下载并解析后的源码注释为准；市场记录只补充下载所需的来源字段。
+		actual := *current
+		actual.Address = marketPlugin.Address
+		actual.PluginPublisher = marketPlugin.PluginPublisher
+		return &actual
+	}
+	return marketPlugin
+}
+
+func installMarketPluginDependencyGraph(root *common.Function, market, installed []*common.Function, install func(string) error, installRoot bool, dependencyInstallers ...func(string, string) error) error {
 	if root == nil {
 		return fmt.Errorf("待安装插件不存在")
 	}
@@ -36,13 +61,13 @@ func installMarketPluginWithModuleDependencies(root *common.Function, market, in
 	if len(dependencyInstallers) != 0 {
 		installDependency = dependencyInstallers[0]
 	}
-	var walk func(*common.Function, bool) error
-	walk = func(plugin *common.Function, force bool) error {
+	var walk func(*common.Function, bool, bool) error
+	walk = func(plugin *common.Function, forceInstall bool, inspectInstalled bool) error {
 		key := firstNonEmpty(plugin.UUID, strings.ToLower(plugin.Type+":"+marketPluginFileName(plugin)))
 		if visiting[key] {
 			return fmt.Errorf("插件模块依赖存在循环：%s", firstNonEmpty(plugin.Title, marketPluginFileName(plugin), key))
 		}
-		if visited[key] || (!force && installedIDs[plugin.UUID]) {
+		if visited[key] || (!inspectInstalled && installedIDs[plugin.UUID]) {
 			return nil
 		}
 		visiting[key] = true
@@ -59,7 +84,7 @@ func installMarketPluginWithModuleDependencies(root *common.Function, market, in
 				delete(visiting, key)
 				return fmt.Errorf("%s：%w", firstNonEmpty(plugin.Title, plugin.UUID), err)
 			}
-			if err := walk(module, false); err != nil {
+			if err := walk(module, false, false); err != nil {
 				delete(visiting, key)
 				return err
 			}
@@ -73,6 +98,9 @@ func installMarketPluginWithModuleDependencies(root *common.Function, market, in
 				}
 			}
 		}
+		if !forceInstall && installedIDs[plugin.UUID] {
+			return nil
+		}
 		if strings.TrimSpace(plugin.Address) == "" {
 			return fmt.Errorf("插件 %s 缺少下载地址", firstNonEmpty(plugin.Title, plugin.UUID))
 		}
@@ -82,7 +110,28 @@ func installMarketPluginWithModuleDependencies(root *common.Function, market, in
 		installedIDs[plugin.UUID] = true
 		return nil
 	}
-	return walk(root, true)
+	return walk(root, installRoot, true)
+}
+
+func missingPluginModuleDependencies(plugin *common.Function, installed []*common.Function) []string {
+	if plugin == nil {
+		return nil
+	}
+	publisher := pluginDependencyPublisher(plugin)
+	missing := make([]string, 0)
+	seen := map[string]bool{}
+	for _, dependency := range plugin.ModuleDependencies {
+		normalized, ok := normalizePluginModuleDependency(dependency, plugin.Type)
+		if !ok || seen[strings.ToLower(normalized)] {
+			continue
+		}
+		seen[strings.ToLower(normalized)] = true
+		if module, found, err := lookupModuleDependency(normalized, plugin.Type, publisher, installed); err == nil && found && module != nil {
+			continue
+		}
+		missing = append(missing, normalized)
+	}
+	return missing
 }
 
 func installMarketPluginRuntimeDependency(runtime, dependency string) error {

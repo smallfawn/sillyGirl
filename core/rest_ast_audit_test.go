@@ -221,10 +221,9 @@ func expressionContainsIdentifier(expression ast.Expr, name string) bool {
 
 func TestAdminAPIRoutesRequireAuthentication(t *testing.T) {
 	public := map[string]bool{
-		"GET /api/admin/setup":                       true,
-		"POST /api/admin/setup":                      true,
-		"POST /api/admin/sessions":                   true,
-		"POST /api/admin/sessions/current/deletions": true,
+		"GET /api/admin/setup":     true,
+		"POST /api/admin/setup":    true,
+		"POST /api/admin/sessions": true,
 	}
 	files, err := goSourceFiles("..")
 	if err != nil {
@@ -272,6 +271,59 @@ func TestAdminAPIRoutesRequireAuthentication(t *testing.T) {
 	}
 	if checked < 80 {
 		t.Fatalf("admin auth audit covered only %d routes", checked)
+	}
+}
+
+func TestUserAPIRoutesRequireAuthentication(t *testing.T) {
+	public := map[string]bool{
+		"POST /api/user/accounts": true,
+		"POST /api/user/sessions": true,
+	}
+	files, err := goSourceFiles("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	checked := 0
+	for _, path := range files {
+		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			method, route, ok := routeFromCall(call)
+			if !ok || !strings.HasPrefix(route, "/api/user/") {
+				return true
+			}
+			checked++
+			key := method + " " + route
+			if public[key] {
+				return true
+			}
+			position := fileSet.Position(call.Pos())
+			if callName(call) != "GinApi" {
+				t.Errorf("%s:%d protected user route bypasses GinApi middleware: %s", position.Filename, position.Line, key)
+				return true
+			}
+			hasAuth := false
+			for _, argument := range call.Args[2:] {
+				if expressionContainsIdentifier(argument, "RequireUserAuth") {
+					hasAuth = true
+					break
+				}
+			}
+			if !hasAuth {
+				t.Errorf("%s:%d user route lacks RequireUserAuth: %s", position.Filename, position.Line, key)
+			}
+			return true
+		})
+	}
+	if checked < 18 {
+		t.Fatalf("user auth audit covered only %d routes", checked)
 	}
 }
 

@@ -110,7 +110,7 @@ type UserProfile = {
   announcement?: UserAnnouncement;
 };
 
-localStorage.removeItem("sillygirl_user_token");
+const userAuthTokenKey = "sillygirl_user_jwt";
 const loading = ref(true);
 const user = ref<PublicUser | null>(null);
 const bindings = reactive<Bindings>({});
@@ -379,8 +379,9 @@ async function requestJSON<T>(
   if (!headers.has("Content-Type") && options.body) {
     headers.set("Content-Type", "application/json");
   }
+  const token = localStorage.getItem(userAuthTokenKey)?.trim();
+  if (token && !headers.has("token")) headers.set("token", token);
   const res = await fetch(url, {
-    credentials: "include",
     ...options,
     headers,
   });
@@ -425,7 +426,7 @@ async function loadProfile() {
     const data = await requestJSON<UserProfile>("/api/user/profile");
     fillProfile(data);
   } catch (error) {
-    localStorage.removeItem("sillygirl_user_token");
+    localStorage.removeItem(userAuthTokenKey);
     user.value = null;
     message.error(error instanceof Error ? error.message : "请先登录");
   } finally {
@@ -637,7 +638,7 @@ async function logout() {
     });
   } catch (_) {
   } finally {
-    localStorage.removeItem("sillygirl_user_token");
+    localStorage.removeItem(userAuthTokenKey);
     window.location.href = "/";
   }
 }

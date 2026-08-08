@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +20,7 @@ import (
 
 var authBucket = MakeBucket("auths")
 var auths = []*Auth{}
+var authsLock sync.RWMutex
 var password = ""
 var setupLock sync.Mutex
 var loginAttemptLock sync.Mutex
@@ -59,8 +58,8 @@ func init() {
 	authBucket.Foreach(func(b1, b2 []byte) error {
 		auth := &Auth{}
 		if json.Unmarshal(b2, auth) == nil {
-			if math.Abs(float64(int(time.Now().Unix())-auth.CreatedAt)) < 86400 {
-				auths = append(auths, auth)
+			if adminSessionValidAt(auth, time.Now().Unix()) {
+				cacheAdminSession(auth)
 			}
 		}
 		return nil
@@ -169,7 +168,7 @@ func init() {
 				ApiInternalError(ctx, err.Error())
 				return
 			}
-			console.Log("登录成功，当前有效令牌数%d，总数%d", len(ValidAuths()), len(auths))
+			console.Log("登录成功，当前有效令牌数%d，总数%d", len(ValidAuths()), adminSessionCount())
 			ApiCreated(ctx, "/api/admin/sessions/current", map[string]interface{}{
 				"status":           "ok",
 				"type":             "account",
@@ -183,7 +182,7 @@ func init() {
 		}
 	}
 	GinApi(POST, "/api/admin/sessions", adminLoginHandler)
-	GinApi(POST, "/api/admin/sessions/current/deletions", DestroyAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/sessions/current/deletions", RequireAuth, DestroyAuth, func(ctx *gin.Context) {
 		sillyGirl.Set("web_token", "")
 		ApiNoContent(ctx)
 	})
@@ -366,56 +365,43 @@ func DestroyAuth(c *gin.Context) {
 	if auth != nil {
 		auth.ExpiredAt = int(time.Now().Unix())
 		authBucket.Create(auth)
+		cacheAdminSession(auth)
 	}
-	c.SetCookie("token", "", -1, "/", "", false, true)
 }
 
 func RequireAuth(c *gin.Context) {
 	if strings.TrimSpace(password) == "" {
 		ApiError(c, http.StatusUnauthorized, "后台未初始化，请先设置账号密码")
-		panic(errors.New("后台未初始化，请先设置账号密码"))
+		c.Abort()
+		return
 	}
 	token := authTokenFromRequest(c)
 	_, err := CheckAuth(token)
 	if err != nil {
 		ApiError(c, http.StatusUnauthorized, err.Error())
-		panic(err)
+		c.Abort()
 	}
 }
 
 func CheckAuth(token string) (*Auth, error) {
-	var errorMessage = "请先登录！"
-	if token != "" {
-		sessionToken := token
-		if strings.Count(token, ".") == 2 {
-			claims, err := parseAdminJWT(token)
-			if err != nil {
-				return nil, err
-			}
-			sessionToken = claims.JTI
-		}
-		if auth, err := checkSessionToken(sessionToken); err == nil {
-			return auth, nil
-		} else {
-			errorMessage = err.Error()
-		}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, errors.New("请先登录！")
 	}
-	return nil, errors.New(errorMessage)
+	claims, err := parseAdminJWT(token)
+	if err != nil {
+		return nil, err
+	}
+	return checkSessionToken(claims.JTI)
 }
 
 func authTokenFromRequest(c *gin.Context) string {
-	header := strings.TrimSpace(c.GetHeader("Authorization"))
-	if len(header) > 7 && strings.EqualFold(header[:7], "Bearer ") {
-		return strings.TrimSpace(header[7:])
-	}
-	token, _ := c.Cookie("token")
-	return strings.TrimSpace(token)
+	return strings.TrimSpace(c.GetHeader("token"))
 }
 
-// CheckAuthRequest validates an administrator session from either the Bearer
-// header or the legacy token cookie. Adapters with optional public endpoints
-// use it to distinguish an authenticated administrator without forcing a
-// RequireAuth middleware response.
+// CheckAuthRequest validates an administrator JWT from the token request
+// header. Adapters with optional public endpoints use it to distinguish an
+// authenticated administrator without forcing a RequireAuth response.
 func CheckAuthRequest(c *gin.Context) (*Auth, error) {
 	return CheckAuth(authTokenFromRequest(c))
 }
@@ -430,7 +416,7 @@ func createAdminJWTSession(ctx *gin.Context, username string) (string, error) {
 		CreatedAt: int(now),
 	}
 	authBucket.Create(auth)
-	auths = append(auths, auth)
+	cacheAdminSession(auth)
 	token, err := signAdminJWT(adminJWTClaims{
 		Sub: username,
 		JTI: sessionToken,
@@ -440,29 +426,84 @@ func createAdminJWTSession(ctx *gin.Context, username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ctx.SetSameSite(http.SameSiteLaxMode)
-	ctx.SetCookie("token", token, adminJWTExpireSeconds, "/", "", adminCookieSecure(ctx), true)
 	return token, nil
 }
 
 func checkSessionToken(token string) (*Auth, error) {
-	errorMessage := "请先登录！"
-	for i := range auths {
-		if auths[i].Token != token {
-			errorMessage = "非法访问！"
-			continue
-		}
-		if auths[i].ExpiredAt != 0 {
-			return nil, errors.New("授权已失效！")
-		}
-		if math.Abs(float64(int(time.Now().Unix())-auths[i].CreatedAt)) > adminJWTExpireSeconds {
-			auths[i].ExpiredAt = int(time.Now().Unix())
-			authBucket.Create(auths[i])
-			return nil, errors.New("授权已过期！")
-		}
-		return auths[i], nil
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, errors.New("请先登录！")
 	}
-	return nil, errors.New(errorMessage)
+	auth := cachedAdminSession(token)
+	if auth == nil {
+		auth = storedAdminSession(token)
+		if auth != nil {
+			cacheAdminSession(auth)
+		}
+	}
+	if auth == nil {
+		return nil, errors.New("登录会话不存在或已失效！")
+	}
+	if auth.ExpiredAt != 0 {
+		return nil, errors.New("授权已失效！")
+	}
+	if !adminSessionValidAt(auth, time.Now().Unix()) {
+		auth.ExpiredAt = int(time.Now().Unix())
+		authBucket.Create(auth)
+		cacheAdminSession(auth)
+		return nil, errors.New("授权已过期！")
+	}
+	return auth, nil
+}
+
+func adminSessionValidAt(auth *Auth, now int64) bool {
+	if auth == nil || auth.ExpiredAt != 0 || auth.CreatedAt <= 0 || int64(auth.CreatedAt) > now {
+		return false
+	}
+	return now-int64(auth.CreatedAt) <= adminJWTExpireSeconds
+}
+
+func cachedAdminSession(token string) *Auth {
+	authsLock.RLock()
+	defer authsLock.RUnlock()
+	for _, auth := range auths {
+		if auth != nil && auth.Token == token {
+			copyAuth := *auth
+			return &copyAuth
+		}
+	}
+	return nil
+}
+
+func storedAdminSession(token string) *Auth {
+	var found *Auth
+	authBucket.Foreach(func(_, value []byte) error {
+		if found != nil {
+			return nil
+		}
+		auth := &Auth{}
+		if json.Unmarshal(value, auth) == nil && auth.Token == token {
+			found = auth
+		}
+		return nil
+	})
+	return found
+}
+
+func cacheAdminSession(auth *Auth) {
+	if auth == nil || strings.TrimSpace(auth.Token) == "" {
+		return
+	}
+	copyAuth := *auth
+	authsLock.Lock()
+	defer authsLock.Unlock()
+	for i, current := range auths {
+		if current != nil && current.Token == copyAuth.Token {
+			auths[i] = &copyAuth
+			return
+		}
+	}
+	auths = append(auths, &copyAuth)
 }
 
 func signAdminJWT(claims adminJWTClaims) (string, error) {
@@ -522,7 +563,7 @@ func jwtClaimsExpired(now, issuedAt, expiresAt, maxAgeSeconds int64) bool {
 	if expiresAt <= now {
 		return true
 	}
-	return issuedAt <= 0 || maxAgeSeconds <= 0 || issuedAt+maxAgeSeconds <= now
+	return issuedAt <= 0 || issuedAt > now || maxAgeSeconds <= 0 || issuedAt+maxAgeSeconds <= now
 }
 
 func signAdminJWTPart(unsigned string) string {
@@ -565,14 +606,6 @@ func verifyAdminPassword(raw string) bool {
 		return true
 	}
 	return false
-}
-
-func adminCookieSecure(ctx *gin.Context) bool {
-	if strings.EqualFold(strings.TrimSpace(sillyGirl.GetString("secure_cookie")), "true") ||
-		strings.EqualFold(strings.TrimSpace(os.Getenv("SILLYGIRL_SECURE_COOKIE")), "true") {
-		return true
-	}
-	return ctx.Request.TLS != nil || strings.EqualFold(ctx.GetHeader("X-Forwarded-Proto"), "https")
 }
 
 func loginAttemptKeys(ctx *gin.Context, account string) []string {
@@ -651,11 +684,20 @@ func pruneLoginAttemptsLocked(now time.Time) {
 
 func ValidAuths() []*Auth {
 	tmp := []*Auth{}
+	authsLock.RLock()
+	defer authsLock.RUnlock()
 	for _, auth := range auths {
-		if auth.ExpiredAt == 0 {
-			tmp = append(tmp, auth)
+		if auth != nil && auth.ExpiredAt == 0 {
+			copyAuth := *auth
+			tmp = append(tmp, &copyAuth)
 		}
 
 	}
 	return tmp
+}
+
+func adminSessionCount() int {
+	authsLock.RLock()
+	defer authsLock.RUnlock()
+	return len(auths)
 }

@@ -1,7 +1,77 @@
-import { Modal } from "ant-design-vue";
 import { h } from "vue";
-
+import Modal from "ant-design-vue/es/modal";
+import { get } from "../../api";
 import type { PluginInfo } from "../../types";
+import { apiData, type ApiEnvelope } from "./adminApi";
+
+export type DownloadedPluginDependencyPlan = {
+  runtime: "node" | "python";
+  plugin: string;
+  pluginTitle: string;
+  dependencies: Array<{
+    name: string;
+    version: string;
+    dev: boolean;
+    installed: boolean;
+    source?: string;
+    plugin: string;
+    plugin_title?: string;
+    plugin_file?: string;
+    type?: string;
+  }>;
+  moduleDependencies: string[];
+  tool: { available: boolean; message?: string };
+};
+
+export async function resolveDownloadedPluginDependencyPlan(
+  row: PluginInfo,
+): Promise<DownloadedPluginDependencyPlan> {
+  const res = await get<
+    ApiEnvelope<{
+      runtime: "node" | "python";
+      plugin: string;
+      plugin_title: string;
+      dependencies: DownloadedPluginDependencyPlan["dependencies"];
+      module_dependencies: string[];
+      tool: DownloadedPluginDependencyPlan["tool"];
+    }>
+  >(`/api/admin/local-plugins/${encodeURIComponent(row.id)}/dependency-plan`);
+  const data = apiData(res);
+  return {
+    runtime: data.runtime,
+    plugin: data.plugin,
+    pluginTitle: data.plugin_title || row.title || data.plugin,
+    dependencies: data.dependencies || [],
+    moduleDependencies: data.module_dependencies || [],
+    tool: data.tool || { available: false },
+  };
+}
+
+export function confirmDownloadedPluginDependencyInstall(
+  plan: DownloadedPluginDependencyPlan,
+  install: () => Promise<void>,
+) {
+  const packageNames = plan.dependencies.map((item) => item.name).join("、");
+  const toolWarning =
+    plan.dependencies.length > 0 && plan.tool?.available === false
+      ? `安装工具当前不可用：${plan.tool.message || (plan.runtime === "python" ? "pipx/Python 未就绪" : "pnpm 未就绪")}`
+      : "";
+  Modal.confirm({
+    title: `${plan.pluginTitle} 下载完成，检测到未安装依赖`,
+    content: h("div", { class: "plugin-dependency-confirm" }, [
+      plan.moduleDependencies.length
+        ? h("p", `依赖模块：${plan.moduleDependencies.join("、")}`)
+        : null,
+      plan.dependencies.length ? h("p", `运行依赖：${packageNames}`) : null,
+      toolWarning ? h("p", { style: "color: #d46b08" }, toolWarning) : null,
+      h("p", "插件源码已下载，是否现在自动安装以上缺失依赖？"),
+    ]),
+    okText: "自动安装",
+    cancelText: "暂不安装",
+    centered: true,
+    onOk: install,
+  });
+}
 
 export function pluginDependencies(row: PluginInfo) {
   return [
@@ -49,36 +119,4 @@ export function declaredPluginDependenciesFromContent(content: string) {
   while ((match = pattern.exec(content || ""))) addRaw(match[1]);
   while ((match = atPattern.exec(content || ""))) addRaw(match[1]);
   return [...dependencies].filter((item) => !item.startsWith("./"));
-}
-
-export function confirmPluginDependencyInstall(
-  row: PluginInfo,
-  packages: string[],
-  onConfirm: () => Promise<void>,
-) {
-  const modules = [
-    ...new Set(
-      (row.module_dependencies || [])
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  ];
-  if (packages.length === 0 && modules.length === 0) return false;
-  Modal.confirm({
-    title: `${row.title || row.id} 需要安装依赖`,
-    content: h("div", { class: "plugin-dependency-confirm" }, [
-      modules.length
-        ? h("p", `依赖模块（优先自动安装）：${modules.join("、")}`)
-        : null,
-      packages.length
-        ? h("p", `运行依赖（随后自动安装）：${packages.join("、")}`)
-        : null,
-      h("p", "继续后将自动处理以上依赖并安装插件。"),
-    ]),
-    okText: "自动安装",
-    cancelText: "取消安装",
-    centered: true,
-    onOk: onConfirm,
-  });
-  return true;
 }

@@ -83,6 +83,7 @@ func clonePluginFunctions(items []*common.Function) []*common.Function {
 		copyItem.Classes = append([]string(nil), item.Classes...)
 		copyItem.Dependencies = append([]string(nil), item.Dependencies...)
 		copyItem.ModuleDependencies = append([]string(nil), item.ModuleDependencies...)
+		copyItem.MissingModuleDependencies = append([]string(nil), item.MissingModuleDependencies...)
 		if item.Cron != nil {
 			copyItem.Cron = make(map[string]string, len(item.Cron))
 			for key, value := range item.Cron {
@@ -516,6 +517,9 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 			rr.Data[i].Running = false
 			for j := range fc {
 				if rr.Data[i].UUID == fc[j].UUID {
+					rr.Data[i].Dependencies = append([]string(nil), fc[j].Dependencies...)
+					rr.Data[i].ModuleDependencies = append([]string(nil), fc[j].ModuleDependencies...)
+					rr.Data[i].MissingModuleDependencies = missingPluginModuleDependencies(fc[j], fc)
 					rr.Data[i].Admin = fc[j].Admin
 					rr.Data[i].Cron = fc[j].Cron
 					rr.Data[i].Messages = GetPluginMessage(rr.Data[i].UUID)

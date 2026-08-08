@@ -270,6 +270,87 @@ func TestInstallMarketPluginInstallsDeclaredModulesFirst(t *testing.T) {
 	}
 }
 
+func TestMissingPluginModuleDependenciesSkipsInstalledPublisherModule(t *testing.T) {
+	t.Setenv("SILLYGIRL_DATA_PATH", t.TempDir())
+	consumer := &common.Function{
+		UUID:               "consumer",
+		Type:               NODE,
+		Path:               filepath.Join(nodePluginsRoot(), "mrconli", "consumer.js"),
+		ModuleDependencies: []string{"./mrconliAccountRuntime.js"},
+	}
+	module := &common.Function{
+		UUID:   "account-runtime",
+		Type:   NODE,
+		Module: true,
+		Path:   filepath.Join(nodePluginsRoot(), "mrconli", "mrconliAccountRuntime.js"),
+	}
+	if missing := missingPluginModuleDependencies(consumer, []*common.Function{consumer, module}); len(missing) != 0 {
+		t.Fatalf("installed module was reported missing: %#v", missing)
+	}
+
+	module.Path = filepath.Join(nodePluginsRoot(), "another-author", "mrconliAccountRuntime.js")
+	missing := missingPluginModuleDependencies(consumer, []*common.Function{consumer, module})
+	if len(missing) != 1 || missing[0] != "./mrconliAccountRuntime.js" {
+		t.Fatalf("cross-publisher module lookup = %#v", missing)
+	}
+}
+
+func TestInstallMarketPluginDependenciesUsesDownloadedSourceAndSkipsInstalledFiles(t *testing.T) {
+	t.Setenv("SILLYGIRL_DATA_PATH", t.TempDir())
+	root := &common.Function{
+		UUID:         "consumer",
+		Title:        "Consumer",
+		Type:         NODE,
+		Path:         filepath.Join(nodePluginsRoot(), "mrconli", "consumer.js"),
+		Dependencies: []string{"source-package"},
+		ModuleDependencies: []string{
+			"./mrconliAccountRuntime.js",
+		},
+	}
+	installedModule := &common.Function{
+		UUID:   "account-runtime",
+		Title:  "Account Runtime",
+		Type:   NODE,
+		Module: true,
+		Path:   filepath.Join(nodePluginsRoot(), "mrconli", "mrconliAccountRuntime.js"),
+	}
+	marketRoot := &common.Function{
+		UUID:         root.UUID,
+		Title:        root.Title,
+		Type:         NODE,
+		Address:      "plugin-address",
+		Dependencies: []string{"stale-market-package"},
+	}
+	fileInstalls := []string{}
+	packageInstalls := []string{}
+	dependencyRoot := downloadedPluginDependencyRoot(marketRoot, []*common.Function{root, installedModule})
+	if strings.Join(dependencyRoot.Dependencies, ",") != "source-package" || dependencyRoot.Address != "plugin-address" {
+		t.Fatalf("dependency root = %#v; want downloaded annotations plus market address", dependencyRoot)
+	}
+	err := installMarketPluginDependencies(
+		dependencyRoot,
+		[]*common.Function{marketRoot},
+		[]*common.Function{root, installedModule},
+		func(address string) error {
+			fileInstalls = append(fileInstalls, address)
+			return nil
+		},
+		func(runtime, dependency string) error {
+			packageInstalls = append(packageInstalls, runtime+":"+dependency)
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fileInstalls) != 0 {
+		t.Fatalf("installed root/module were downloaded again: %#v", fileInstalls)
+	}
+	if strings.Join(packageInstalls, ",") != "node:source-package" {
+		t.Fatalf("runtime dependencies = %#v; want downloaded source only", packageInstalls)
+	}
+}
+
 func TestInstallMarketPluginStopsBeforeFileWhenRuntimeDependencyFails(t *testing.T) {
 	plugin := &common.Function{UUID: "consumer", Title: "Consumer", Type: NODE, Address: "plugin-address", Dependencies: []string{"broken-package"}}
 	fileInstalled := false
