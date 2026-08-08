@@ -177,7 +177,7 @@ func init() {
 			}
 			return
 		}
-		token, err := createUserJWTCookie(ctx, user)
+		token, err := createUserJWT(user)
 		if err != nil {
 			ApiInternalError(ctx, err.Error())
 			return
@@ -210,7 +210,7 @@ func init() {
 			return
 		}
 		clearLoginAttempts(ctx, attemptKey)
-		token, err := createUserJWTCookie(ctx, user)
+		token, err := createUserJWT(user)
 		if err != nil {
 			ApiInternalError(ctx, err.Error())
 			return
@@ -529,9 +529,7 @@ func init() {
 		ApiCreated(ctx, "", data)
 	})
 
-	GinApi(POST, "/api/user/sessions/current/deletions", func(ctx *gin.Context) {
-		ctx.SetSameSite(http.SameSiteLaxMode)
-		ctx.SetCookie("user_token", "", -1, "/", "", adminCookieSecure(ctx), true)
+	GinApi(POST, "/api/user/sessions/current/deletions", RequireUserAuth, func(ctx *gin.Context) {
 		ApiNoContent(ctx)
 	})
 }
@@ -748,7 +746,7 @@ func RequireUserAuth(ctx *gin.Context) {
 	ctx.Set("normal_user", user)
 }
 
-func createUserJWTCookie(ctx *gin.Context, user *normalUser) (string, error) {
+func createUserJWT(user *normalUser) (string, error) {
 	now := time.Now().Unix()
 	token, err := signUserJWT(userJWTClaims{
 		Sub: user.Username,
@@ -759,8 +757,6 @@ func createUserJWTCookie(ctx *gin.Context, user *normalUser) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ctx.SetSameSite(http.SameSiteLaxMode)
-	ctx.SetCookie("user_token", token, userJWTExpireSeconds, "/", "", adminCookieSecure(ctx), true)
 	return token, nil
 }
 
@@ -830,12 +826,7 @@ func userJWTSecret() []byte {
 }
 
 func userAuthTokenFromRequest(ctx *gin.Context) string {
-	header := strings.TrimSpace(ctx.GetHeader("Authorization"))
-	if len(header) > 7 && strings.EqualFold(header[:7], "Bearer ") {
-		return strings.TrimSpace(header[7:])
-	}
-	token, _ := ctx.Cookie("user_token")
-	return strings.TrimSpace(token)
+	return strings.TrimSpace(ctx.GetHeader("token"))
 }
 
 func validateNormalUsername(username string) error {

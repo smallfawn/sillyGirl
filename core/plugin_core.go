@@ -79,7 +79,7 @@ func initPlugins() {
 				Error: errors.New("旧内嵌 JS 插件数据已不支持，请使用 /data/plugins/<发布者>/*.js 的 NodeJS 插件"),
 			}
 		}
-		if new == "install" {
+		if new == "install" || new == "download" || new == "install-dependencies" {
 			var marketPlugin *common.Function
 			marketItems := pluginMarketItemsSnapshot()
 			for _, p := range marketItems {
@@ -99,14 +99,25 @@ func initPlugins() {
 					Error: errors.New("旧插件源已不支持，请导入 GitHub NodeJS 插件源"),
 				}
 			}
-			if err := installMarketPluginWithModuleDependencies(marketPlugin, marketItems, installedPluginSnapshot(), installGithubNodePlugin, installMarketPluginRuntimeDependency); err != nil {
+			var err error
+			switch new {
+			case "download":
+				err = installGithubNodePlugin(marketPlugin.Address)
+			case "install-dependencies":
+				installed := installedPluginSnapshot()
+				dependencyRoot := downloadedPluginDependencyRoot(marketPlugin, installed)
+				err = installMarketPluginDependencies(dependencyRoot, marketItems, installed, installGithubNodePlugin, installMarketPluginRuntimeDependency)
+			default:
+				err = installMarketPluginWithModuleDependencies(marketPlugin, marketItems, installedPluginSnapshot(), installGithubNodePlugin, installMarketPluginRuntimeDependency)
+			}
+			if err != nil {
 				return &storage.Final{
 					Error: errors.New("安装异常！" + err.Error()),
 				}
 			}
 			return &storage.Final{
 				Now:     storage.EMPTY,
-				Message: fmt.Sprintf("已安装 %s", marketPlugin.Title),
+				Message: fmt.Sprintf("已处理 %s", marketPlugin.Title),
 			}
 		}
 		pluginLock.Lock()

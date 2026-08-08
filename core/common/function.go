@@ -37,20 +37,21 @@ type Function struct {
 	OnStart        bool                     `json:"on_start"`
 	Web            bool                     `json:"web"`
 	PluginPublisher
-	Running            bool        `json:"running"`
-	Downloads          int         `json:"downloads"`
-	HasForm            bool        `json:"has_form"`
-	HasUserForm        bool        `json:"has_user_form"`
-	ConfigRegistered   bool        `json:"config_registered"`
-	UsesSmallCat       bool        `json:"uses_smallcat"`
-	Carry              bool        `json:"carry"`
-	Messages           interface{} `json:"messages"`
-	Classes            []string    `json:"-"`
-	Dependencies       []string    `json:"dependencies,omitempty"`
-	ModuleDependencies []string    `json:"module_dependencies,omitempty"`
-	Debug              bool        `json:"debug"`
-	Path               string      `json:"-"`
-	Reload             func()      `json:"-"`
+	Running                   bool        `json:"running"`
+	Downloads                 int         `json:"downloads"`
+	HasForm                   bool        `json:"has_form"`
+	HasUserForm               bool        `json:"has_user_form"`
+	ConfigRegistered          bool        `json:"config_registered"`
+	UsesSmallCat              bool        `json:"uses_smallcat"`
+	Carry                     bool        `json:"carry"`
+	Messages                  interface{} `json:"messages"`
+	Classes                   []string    `json:"-"`
+	Dependencies              []string    `json:"dependencies,omitempty"`
+	ModuleDependencies        []string    `json:"module_dependencies,omitempty"`
+	MissingModuleDependencies []string    `json:"missing_module_dependencies,omitempty"`
+	Debug                     bool        `json:"debug"`
+	Path                      string      `json:"-"`
+	Reload                    func()      `json:"-"`
 }
 
 type PluginPublisher struct {

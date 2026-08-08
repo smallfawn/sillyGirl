@@ -16,19 +16,20 @@ const adminAuthExpiredEvent = "sillygirl:admin-auth-expired";
 const adminAuthPublicPaths = new Set([
   "/api/admin/sessions",
   "/api/admin/setup",
-  "/api/admin/sessions/current",
 ]);
 
 let authExpiredNotifiedAt = 0;
 
-export function setAuthToken(_token: string, _expiresIn?: number) {
-  // Authentication is carried by the HttpOnly cookie set by the backend.
-  // Remove tokens persisted by older frontend versions.
-  localStorage.removeItem(authTokenKey);
+export function setAuthToken(token: string, _expiresIn?: number) {
+  localStorage.setItem(authTokenKey, token.trim());
 }
 
 export function clearAuthToken() {
   localStorage.removeItem(authTokenKey);
+}
+
+export function getAuthToken() {
+  return localStorage.getItem(authTokenKey)?.trim() || "";
 }
 
 function apiPath(url: string) {
@@ -69,9 +70,12 @@ export async function request<T>(
   if (body && !(body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  const token = getAuthToken();
+  if (token && !headers.has("token")) {
+    headers.set("token", token);
+  }
   const adminProtected = isAdminProtectedRequest(url);
   const res = await fetch(url, {
-    credentials: "include",
     ...options,
     headers,
   });

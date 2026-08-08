@@ -48,7 +48,7 @@ Base URL: `http://host:port/api`
 }
 ```
 
-需要登录的 Admin 和 User 资源通过 `Authorization: Bearer <token>` 认证。
+需要登录的 Admin 和 User 资源通过请求头 `token: <JWT>` 认证。登录和注册接口响应体返回 JWT，前端保存后在后续请求中写入该请求头。
 
 ### Admin 认证与系统资源
 
@@ -251,10 +251,10 @@ Bucket 对外返回原始类型，底层字符串使用前缀保存类型：
 
 ```bash
 curl 'http://HOST:8080/api/admin/storage/entries?bucket=demo&page=1&page_size=20' \
-  -H 'Authorization: Bearer TOKEN'
+  -H 'token: JWT_TOKEN'
 
 curl -X POST 'http://HOST:8080/api/admin/storage/values' \
-  -H 'Authorization: Bearer TOKEN' \
+  -H 'token: JWT_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"bucket":"demo","key":"version","value":"1.0.8"}'
 ```
