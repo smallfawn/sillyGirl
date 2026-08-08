@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test": "node sender_message_aliases.spec.js"
+  },
   "dependencies": {
     "@grpc/grpc-js": "^1.8.18",
     "google-protobuf": "^3.21.2",

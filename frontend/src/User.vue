@@ -1191,6 +1191,7 @@ onMounted(() => {
 <style scoped>
 .user-page {
   min-height: 100vh;
+  min-height: 100dvh;
   background: #f5f7fb;
 }
 
@@ -1201,8 +1202,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 56px;
-  padding: 0 20px;
+  min-height: calc(56px + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
   background: #ffffff;
   border-bottom: 1px solid #edf0f5;
 }
@@ -1221,9 +1224,11 @@ onMounted(() => {
 }
 
 .user-content {
-  width: min(1180px, calc(100% - 32px));
+  width: min(1180px, 100%);
   margin: 0 auto;
-  padding: 18px 0 36px;
+  padding: 18px max(16px, env(safe-area-inset-right, 0px))
+    max(36px, env(safe-area-inset-bottom, 0px))
+    max(16px, env(safe-area-inset-left, 0px));
 }
 
 .user-announcement {
@@ -1523,17 +1528,62 @@ onMounted(() => {
     align-items: flex-start;
     flex-direction: column;
     gap: 10px;
-    padding: 12px 16px;
+    min-height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: max(12px, env(safe-area-inset-top, 0px))
+      max(16px, env(safe-area-inset-right, 0px)) 12px
+      max(16px, env(safe-area-inset-left, 0px));
   }
 
   .user-content {
-    width: min(100% - 24px, 1180px);
-    padding-top: 12px;
+    width: 100%;
+    padding: 12px max(12px, env(safe-area-inset-right, 0px))
+      max(24px, env(safe-area-inset-bottom, 0px))
+      max(12px, env(safe-area-inset-left, 0px));
   }
 
   .user-plugin-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .user-panel :deep(.ant-card-body),
+  .user-summary :deep(.ant-card-body),
+  .user-login-card :deep(.ant-card-body) {
+    padding: 16px;
+  }
+
+  .user-topbar :deep(.ant-space) {
+    width: 100%;
+  }
+
+  .user-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-plugin-card {
+    padding: 12px;
+  }
+
+  .user-plugin-authorization,
+  .plugin-user-record {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .plugin-user-record :deep(.ant-space),
+  .plugin-user-record :deep(.ant-btn),
+  .user-topbar :deep(.ant-btn),
+  .user-content :deep(.ant-btn) {
+    min-height: 44px;
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .user-topbar {
+    position: relative;
   }
 }
 </style>

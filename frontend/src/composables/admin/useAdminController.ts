@@ -319,8 +319,8 @@ export function useAdminController() {
   const overviewVersion = computed(() => {
     const info = user.value?.version || {};
     return {
-      local: info.local || "1.1.2",
-      remote: info.remote || info.local || "1.1.2",
+      local: info.local || "1.1.3",
+      remote: info.remote || info.local || "1.1.3",
       source: info.source || "reserved",
       repository: info.repository || "https://github.com/smallfawn/sillyGirl",
     };
@@ -1262,8 +1262,10 @@ export function useAdminController() {
     return pluginInstalled(row) && row.status !== false;
   }
 
-  async function togglePluginStatus(row: PluginInfo) {
-    const status = !pluginRuntimeEnabled(row);
+  async function togglePluginStatus(
+    row: PluginInfo,
+    status = !pluginRuntimeEnabled(row),
+  ) {
     plugins.toggling[row.id] = true;
     try {
       const res = await post<ApiEnvelope<{ id?: string; status?: boolean }>>(

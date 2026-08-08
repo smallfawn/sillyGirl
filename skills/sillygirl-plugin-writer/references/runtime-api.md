@@ -47,8 +47,8 @@ Import only the symbols in use.
 Common methods:
 
 ```js
-await s.getContent();
-await s.getMessageId();
+await s.getMsg();
+await s.getMsgId();
 await s.getUserId();
 await s.getChatId();
 await s.getPlatform();
@@ -61,6 +61,8 @@ await s.listen({ timeout: 30000 });
 await s.recallMessage(messageId);
 await s.resume();
 ```
+
+Use `getMsg()` to read the current message and `setMsg(content)` to replace it.
 
 Do not assume a return shape that the target code has not established. Inspect `core/grpc_plugins.go` and existing plugins when using less common methods.
 
@@ -126,7 +128,7 @@ from sillygirl import Bucket, plugin
 from sillygirl import sender as s
 
 async def main():
-    content = await s.getContent()
+    content = await s.getMsg()
     await s.reply(content)
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ class Sender {
             });
         });
     }
-    async getMessageId() {
+    async getMsgId() {
         return new Promise((resolve, reject) => {
             client.SenderGetMessageId(new srpc_1.srpc.SenderRequest({
                 uuid: this.uuid,
@@ -160,7 +160,7 @@ class Sender {
             });
         });
     }
-    async getContent() {
+    async getMsg() {
         return new Promise((resolve, reject) => {
             client.SenderGetContent(new srpc_1.srpc.SenderRequest({
                 uuid: this.uuid,
@@ -203,7 +203,7 @@ class Sender {
             });
         });
     }
-    async setContent(content) {
+    async setMsg(content) {
         return new Promise((resolve, reject) => {
             client.SenderSetContent(new srpc_1.srpc.SenderContentRequest({
                 uuid: this.uuid,

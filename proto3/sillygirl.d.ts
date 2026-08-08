@@ -7,13 +7,13 @@ declare class Sender {
     getUserName(): Promise<string>;
     getChatId(): Promise<string>;
     getChatName(): Promise<string>;
-    getMessageId(): Promise<string>;
+    getMsgId(): Promise<string>;
     getPlatform(): Promise<string>;
     getBotId(): Promise<string>;
-    getContent(): Promise<string>;
+    getMsg(): Promise<string>;
     isAdmin(): Promise<boolean>;
     param(key: number | string): Promise<string>;
-    setContent(content: string): Promise<undefined>;
+    setMsg(content: string): Promise<undefined>;
     resume(): Promise<undefined>;
     getAdapter(): Promise<Adapter>;
     listen(options?: {

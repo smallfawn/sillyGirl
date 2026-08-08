@@ -34,7 +34,7 @@ import{n as e}from"./rolldown-runtime-QTnfLwEv.js";var t=1024,n=0,r=class{constr
 	\${}
 except \${error}:
 	\${}`,{label:`try`,detail:`/ except block`,type:`keyword`}),Q(`if \${}:
-\t
+	
 `,{label:`if`,detail:`block`,type:`keyword`}),Q(`if \${}:
 	\${}
 else:

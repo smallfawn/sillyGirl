@@ -20,6 +20,7 @@ import (
 var tasks = MakeBucket("tasks")
 var pluginCronStatus = MakeBucket("plugin_cron_status")
 var pluginCronSenders = MakeBucket("plugin_cron_senders")
+var pluginCronTriggers = MakeBucket("plugin_cron_triggers")
 
 const pluginCronTaskPrefix = "plugin-cron:"
 
@@ -44,6 +45,7 @@ type Tasks struct {
 	Schedule  string        `json:"schedule"` //计划时间
 	Senders   []Sender      `json:"senders"`  //发送人
 	Command   string        `json:"command"`  //消息指令
+	Trigger   string        `json:"trigger"`  //定时执行时注入的触发口令
 	Scripts   []string      `json:"scripts"`  //兼容旧任务的脚本列表
 	CronID    int           `json:"cron_id"`
 	CreatedAt int           `json:"created_at"` //创建时间戳(秒)转换成日期
@@ -120,6 +122,7 @@ func pluginCronTask(f *common.Function, platform string) *Tasks {
 		Title:    title,
 		Schedule: f.Cron[platform],
 		Command:  scriptCommandForFunction(f),
+		Trigger:  pluginCronTaskTrigger(pluginCronTaskID(f.UUID, platform)),
 		Scripts:  []string{f.UUID},
 		Senders:  pluginCronTaskSenders(pluginCronTaskID(f.UUID, platform)),
 		Remark:   "来自脚本注释 @cron",
@@ -146,6 +149,20 @@ func setPluginCronTaskSenders(taskID string, senders []Sender) error {
 		value = utils.JsonMarshal(senders)
 	}
 	_, _, err := pluginCronSenders.Set(taskID, value)
+	return err
+}
+
+func pluginCronTaskTrigger(taskID string) string {
+	return strings.TrimSpace(pluginCronTriggers.GetString(taskID))
+}
+
+func setPluginCronTaskTrigger(taskID, trigger string) error {
+	trigger = strings.TrimSpace(trigger)
+	value := interface{}(nil)
+	if trigger != "" {
+		value = trigger
+	}
+	_, _, err := pluginCronTriggers.Set(taskID, value)
 	return err
 }
 
@@ -255,11 +272,16 @@ func runPluginCronFunction(f *common.Function, cronPlatform string) {
 	}
 	taskID := pluginCronTaskID(f.UUID, cronPlatform)
 	targets := pluginCronTaskSenders(taskID)
+	trigger := pluginCronTaskTrigger(taskID)
 	if len(targets) == 0 {
-		f.Handle(&CustomSender{F: &Factory{botplt: cronPlatform, uuid: f.UUID}})
+		sender := &CustomSender{F: &Factory{botplt: cronPlatform, uuid: f.UUID}}
+		sender.SetFsps(&common.FakerSenderParams{Content: trigger})
+		applyTaskTrigger(sender, f, trigger)
+		f.Handle(sender)
 		return
 	}
 	command := scriptCommandForFunction(f)
+	content := taskTriggerContent(trigger, command)
 	for _, target := range targets {
 		adapter, err := GetAdapter(target.Platfrom, target.BotID)
 		if err != nil || adapter == nil {
@@ -268,12 +290,11 @@ func runPluginCronFunction(f *common.Function, cronPlatform string) {
 		}
 		sender := adapter.Sender2(nil)
 		sender.SetFsps(&common.FakerSenderParams{
-			Content: command,
+			Content: content,
 			ChatID:  target.ChatID,
 			UserID:  target.UserID,
 		})
-		sender.SetMatch([]string{})
-		sender.SetParams([]string{})
+		applyTaskTrigger(sender, f, trigger)
 		f.Handle(sender)
 	}
 }
@@ -308,8 +329,8 @@ func findScriptFunctionByTask(taskID, command string) (*common.Function, string)
 
 func RegistTasks(pt *Tasks) {
 	pt.Handle = func() {
-		content := pt.Command
-		if runScriptTaskCommand(content, pt.Senders) {
+		content := taskTriggerContent(pt.Trigger, pt.Command)
+		if runScriptTaskCommand(pt.Command, pt.Trigger, pt.Senders) {
 			return
 		}
 		for _, meta := range pt.Senders {
@@ -516,6 +537,10 @@ func init() {
 						tp.Remark = ""
 					}
 				}
+			case "trigger":
+				if v, ok := value.(string); ok {
+					tp.Trigger = strings.TrimSpace(v)
+				}
 			case "scripts":
 				if v, ok := value.([]interface{}); ok {
 					tp.Scripts = toStringSlice(v)
@@ -546,6 +571,10 @@ func init() {
 				ApiNotFound(ctx, "定时任务脚本不存在")
 				return
 			}
+			if err := validateTaskTrigger(f, tp.Trigger); err != nil {
+				ApiUnprocessable(ctx, err.Error())
+				return
+			}
 			if _, scheduleProvided := updateData["schedule"]; scheduleProvided {
 				if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
 					ApiInternalError(ctx, err.Error())
@@ -564,6 +593,12 @@ func init() {
 					return
 				}
 			}
+			if _, triggerProvided := updateData["trigger"]; triggerProvided {
+				if err := setPluginCronTaskTrigger(task_id, tp.Trigger); err != nil {
+					ApiInternalError(ctx, err.Error())
+					return
+				}
+			}
 			if task_id != "" {
 				if _, _, err := tasks.Set(task_id, ""); err != nil {
 					ApiInternalError(ctx, err.Error())
@@ -576,6 +611,12 @@ func init() {
 			}
 			ApiOK(ctx, tp)
 			return
+		}
+		if f, _ := findScriptFunctionByTask(task_id, tp.Command); f != nil {
+			if err := validateTaskTrigger(f, tp.Trigger); err != nil {
+				ApiUnprocessable(ctx, err.Error())
+				return
+			}
 		}
 		_, _, err = tasks.Set(task_id, utils.JsonMarshal(tp))
 		if err != nil {
@@ -615,6 +656,10 @@ func init() {
 				return
 			}
 			if err := setPluginCronTaskSenders(pt.ID, nil); err != nil {
+				ApiInternalError(ctx, err.Error())
+				return
+			}
+			if err := setPluginCronTaskTrigger(pt.ID, ""); err != nil {
 				ApiInternalError(ctx, err.Error())
 				return
 			}
@@ -733,7 +778,7 @@ func validateTaskSchedule(schedule string) error {
 	return nil
 }
 
-func runScriptTaskCommand(command string, targets []Sender) bool {
+func runScriptTaskCommand(command, trigger string, targets []Sender) bool {
 	target, class := scriptTaskTarget(command)
 	if target == "" {
 		return false
@@ -747,6 +792,7 @@ func runScriptTaskCommand(command string, targets []Sender) bool {
 		console.Log("定时任务已跳过，插件未启用：%s", f.Title)
 		return true
 	}
+	content := taskTriggerContent(trigger, command)
 	if len(targets) == 0 {
 		sender := &CustomSender{
 			F: &Factory{
@@ -754,9 +800,8 @@ func runScriptTaskCommand(command string, targets []Sender) bool {
 				uuid:   f.UUID,
 			},
 		}
-		sender.SetFsps(&common.FakerSenderParams{Content: command})
-		sender.SetMatch([]string{})
-		sender.SetParams([]string{})
+		sender.SetFsps(&common.FakerSenderParams{Content: content})
+		applyTaskTrigger(sender, f, trigger)
 		f.Handle(sender)
 		return true
 	}
@@ -768,15 +813,56 @@ func runScriptTaskCommand(command string, targets []Sender) bool {
 		}
 		sender := adapter.Sender2(nil)
 		sender.SetFsps(&common.FakerSenderParams{
-			Content: command,
+			Content: content,
 			ChatID:  target.ChatID,
 			UserID:  target.UserID,
 		})
-		sender.SetMatch([]string{})
-		sender.SetParams([]string{})
+		applyTaskTrigger(sender, f, trigger)
 		f.Handle(sender)
 	}
 	return true
+}
+
+func taskTriggerContent(trigger, fallback string) string {
+	if trigger = strings.TrimSpace(trigger); trigger != "" {
+		return trigger
+	}
+	return fallback
+}
+
+func applyTaskTrigger(sender common.Sender, f *common.Function, trigger string) bool {
+	sender.SetMatch([]string{})
+	sender.SetParams([]string{})
+	trigger = strings.TrimSpace(trigger)
+	if trigger == "" || f == nil {
+		return false
+	}
+	for i := range f.Rules {
+		reg, err := functionRulePattern(f, i)
+		if err != nil {
+			continue
+		}
+		if match := reg.FindStringSubmatch(trigger); len(match) > 0 {
+			sender.SetMatch(match[1:])
+			if i < len(f.Params) {
+				sender.SetParams(f.Params[i])
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func validateTaskTrigger(f *common.Function, trigger string) error {
+	trigger = strings.TrimSpace(trigger)
+	if trigger == "" || f == nil || len(f.Rules) == 0 {
+		return nil
+	}
+	sender := &CustomSender{}
+	if applyTaskTrigger(sender, f, trigger) {
+		return nil
+	}
+	return fmt.Errorf("触发口令未匹配该插件的任何规则")
 }
 
 func isScriptTaskCommand(command string) bool {
