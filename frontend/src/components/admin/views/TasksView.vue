@@ -45,6 +45,14 @@ const {
       <Table.Column title="标题" data-index="title" :width="180" />
       <Table.Column title="Cron" data-index="schedule" :width="180" />
       <Table.Column title="命令" data-index="command" ellipsis />
+      <Table.Column
+        title="触发口令"
+        data-index="trigger"
+        :width="180"
+        ellipsis
+      >
+        <template #default="{ text }">{{ text || "—" }}</template>
+      </Table.Column>
       <Table.Column title="状态" data-index="enable" :width="80" align="center">
         <template #default="{ record }">
           <Switch
@@ -123,6 +131,17 @@ const {
           :disabled="isPluginCronTask(tasks.form)"
           :options="tasks.scripts"
           placeholder="node xxx.js 或 python xxx.py"
+      /></Form.Item>
+      <Form.Item
+        label="触发口令"
+        html-for="task-trigger"
+        help="可选。定时运行时把该内容传给插件，并按插件规则提取参数；多口令插件可借此只执行对应业务"
+        ><Input
+          id="task-trigger"
+          v-model:value="tasks.form.trigger"
+          name="task-trigger"
+          allow-clear
+          placeholder="例如：查询 account-a"
       /></Form.Item>
       <Form.Item label="接收平台" html-for="task-platform"
         ><Select

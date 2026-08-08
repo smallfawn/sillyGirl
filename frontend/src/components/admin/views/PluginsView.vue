@@ -35,7 +35,6 @@ import message from "ant-design-vue/es/message";
 import { python } from "@codemirror/lang-python";
 import { ref } from "vue";
 import { useAdminViewContext } from "../adminViewContext";
-import PluginStatusButton from "../PluginStatusButton.vue";
 import PluginUninstallModal from "../PluginUninstallModal.vue";
 
 const {
@@ -200,18 +199,22 @@ const {
             </div>
           </div>
           <div class="plugin-card-actions">
-            <PluginStatusButton
+            <Switch
               v-if="pluginInstalled(record) && !record.module"
-              :record="record"
-              :enabled="pluginRuntimeEnabled(record)"
+              class="plugin-card-status-switch"
+              :checked="pluginRuntimeEnabled(record)"
               :loading="plugins.toggling[record.id]"
-              :blocked="
+              :disabled="
                 Boolean(
                   plugins.installing[record.id] ||
                   plugins.uninstalling[record.id],
                 )
               "
-              @toggle="togglePluginStatus(record)"
+              :title="`${record.title || record.id}启用状态`"
+              :aria-label="`${record.title || record.id}启用状态`"
+              @change="
+                (checked: boolean) => togglePluginStatus(record, checked)
+              "
             />
             <Button
               v-if="pluginCanManage(record)"

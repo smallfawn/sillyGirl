@@ -110,6 +110,7 @@ export function useTasksAdmin() {
       title: `${tasks.form.title || ""}`.trim(),
       schedule: `${tasks.form.schedule || ""}`.trim(),
       command: tasks.form.command,
+      trigger: `${tasks.form.trigger || ""}`.trim(),
       enable: tasks.form.enable,
       senders: platform && recipient ? [{ platform, user_id: recipient }] : [],
     };

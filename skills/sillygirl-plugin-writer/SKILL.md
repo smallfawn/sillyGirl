@@ -58,6 +58,7 @@ For complete metadata and method signatures, read [references/runtime-api.md](re
 ## JavaScript Pattern
 
 Use CommonJS and await Promise-returning runtime APIs.
+Use `s.getMsg()` to read the current message and `s.setMsg(content)` to replace it.
 
 ```js
 const {
@@ -70,7 +71,7 @@ const {
 } = require("sillygirl");
 
 async function main() {
-  const content = await s.getContent();
+  const content = await s.getMsg();
   await s.reply(`收到：${content}`);
 }
 
@@ -92,7 +93,7 @@ from sillygirl import sender as s, Bucket, container, plugin, user, utils
 
 
 async def main():
-    content = await s.getContent()
+    content = await s.getMsg()
     await s.reply(f"收到：{content}")
 
 

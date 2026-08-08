@@ -124,7 +124,7 @@ $env:SILLYGIRL_PIPX = "pipx"
 Python SDK 方法都是异步方法，必须在 `async def main()` 中 `await`：
 
 ```python
-content = await s.getContent()
+content = await s.getMsg()
 user_id = await s.getUserId()
 await s.reply("收到：" + content)
 ```
@@ -132,7 +132,7 @@ await s.reply("收到：" + content)
 不要写成：
 
 ```python
-content = s.getContent()
+content = s.getMsg()
 s.reply("收到")
 ```
 
@@ -143,7 +143,7 @@ s.reply("收到")
 ```python
 from sillygirl import sender as s, Bucket, container, utils
 
-content = await s.getContent()
+content = await s.getMsg()
 user_id = await s.getUserId()
 chat_id = await s.getChatId()
 platform = await s.getPlatform()
@@ -349,7 +349,7 @@ items = await dd.getEnvs({"keyword": "JD_COOKIE"})
  * @rule 天气 [城市]
  */
 
-const content = s.getContent();
+const content = s.getMsg();
 if (content === "你好") {
   s.reply("Hello!");
 } else if (content === "再见") {
@@ -491,7 +491,7 @@ Admin 面板「搬运」只负责按平台、群号和工作机器人匹配消�
 
 const { sender: s } = require("sillygirl");
 
-const content = s.getContent();
+const content = s.getMsg();
 if (content.includes("关键词")) {
   s.reply("处理后的内容");
 }
@@ -520,7 +520,7 @@ console.log("当前触发平台：" + s.getPlatform());
 
 当前消息的 Sender 对象，是插件中最核心的交互入口。
 
-NodeJS 插件里可以直接调用同步方法；Python 插件里 SDK 方法是异步方法，需要在 `async def main()` 中 `await s.reply(...)`、`await s.getContent()`。
+NodeJS 插件里可以直接调用同步方法；Python 插件里 SDK 方法是异步方法，需要在 `async def main()` 中 `await s.reply(...)`、`await s.getMsg()`。
 
 #### 用户信息
 
@@ -529,7 +529,7 @@ s.getUserId()       // 获取用户ID（string）
 s.getUserName()     // 获取用户昵称（string）
 s.getChatId()       // 获取群聊ID，私聊时为空字符串（string）
 s.getChatName()     // 获取群聊名称（string）
-s.getMessageId()    // 获取消息ID（string）
+s.getMsgId()        // 获取消息ID（string）
 s.getPlatform()     // 获取平台类型，如 "qq"、"web"（string）
 s.getBotId()        // 获取当前机器人ID（string）
 s.isAdmin()         // 判断用户是否为管理员（boolean）
@@ -538,9 +538,9 @@ s.isAdmin()         // 判断用户是否为管理员（boolean）
 #### 内容操作
 
 ```js
-s.getContent()      // 获取消息原始内容（string）
-s.setContent(text)  // 修改当前消息内容（影响后续插件匹配）
-s.resume()        // 继续匹配后续规则（默认匹配成功即停止）
+s.getMsg()          // 获取消息原始内容（推荐）
+s.setMsg(text)      // 修改当前消息内容（影响后续插件匹配）
+s.resume()          // 继续匹配后续规则（默认匹配成功即停止）
 ```
 
 #### 回复消息
@@ -1180,7 +1180,7 @@ time.Parse(str, layout, locale)  // 解析时间字符串
  * @priority 999
  */
 
-console.log("收到消息:", s.getContent());
+console.log("收到消息:", s.getMsg());
 s.resume();  // 继续让其他插件处理
 ```
 
@@ -1244,7 +1244,7 @@ s.listen({
   rules: ["raw ^(.+)$"],
   timeout: 0,           // 0 表示永不超时
   handle: (s2) => {
-    console.log("监控到消息:", s2.getContent());
+    console.log("监控到消息:", s2.getMsg());
     // 返回空字符串或 undefined 会继续监听
   },
 }, "persistent");

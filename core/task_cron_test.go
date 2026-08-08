@@ -351,6 +351,62 @@ func TestPluginCronTaskPersistsConfiguredRecipient(t *testing.T) {
 	}
 }
 
+func TestPluginCronTaskPersistsTriggerPhrase(t *testing.T) {
+	uuid := "plugin-trigger-persistence-test-" + utils.GenUUID()
+	taskID := pluginCronTaskID(uuid, "task")
+	t.Cleanup(func() { _ = setPluginCronTaskTrigger(taskID, "") })
+
+	if err := setPluginCronTaskTrigger(taskID, "  查询 account-a  "); err != nil {
+		t.Fatal(err)
+	}
+	f := &common.Function{
+		UUID:  uuid,
+		Title: "Trigger Fixture",
+		Type:  NODE,
+		Cron:  map[string]string{"task": "0 * * * *"},
+	}
+	if got := pluginCronTask(f, "task").Trigger; got != "查询 account-a" {
+		t.Fatalf("plugin cron trigger = %q; want trimmed phrase", got)
+	}
+
+	if err := setPluginCronTaskTrigger(taskID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginCronTaskTrigger(taskID); got != "" {
+		t.Fatalf("cleared plugin cron trigger = %q; want empty", got)
+	}
+}
+
+func TestRunPluginCronFunctionUsesTriggerPhraseAndRuleParams(t *testing.T) {
+	uuid := "plugin-trigger-run-test-" + utils.GenUUID()
+	taskID := pluginCronTaskID(uuid, "task")
+	t.Cleanup(func() { _ = setPluginCronTaskTrigger(taskID, "") })
+	if err := setPluginCronTaskTrigger(taskID, "查询 account-b"); err != nil {
+		t.Fatal(err)
+	}
+
+	captured := make(chan common.Sender, 1)
+	f := &common.Function{
+		UUID:   uuid,
+		Type:   NODE,
+		Path:   "author/trigger.js",
+		Rules:  []string{`^查询 (\S+)$`, `^刷新$`},
+		Params: [][]string{{"account"}, {}},
+		Handle: func(sender common.Sender) interface{} {
+			captured <- sender
+			return nil
+		},
+	}
+	runPluginCronFunction(f, "task")
+	sender := <-captured
+	if got := sender.GetContent(); got != "查询 account-b" {
+		t.Fatalf("content = %q, want trigger phrase", got)
+	}
+	if got := sender.GetMatch(); len(got) != 1 || got[0] != "account-b" {
+		t.Fatalf("match = %#v, want account-b", got)
+	}
+}
+
 func TestRunPluginCronFunctionUsesConfiguredRecipient(t *testing.T) {
 	uuid := "plugin-recipient-run-test-" + utils.GenUUID()
 	platform := "plugin-recipient-platform-" + utils.GenUUID()

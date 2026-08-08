@@ -141,6 +141,7 @@ export type Task = {
     bot_id?: string;
   }>;
   command?: string;
+  trigger?: string;
   scripts?: string[];
   created_at?: number;
   remark?: string;

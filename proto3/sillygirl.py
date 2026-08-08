@@ -1064,7 +1064,7 @@ class Sender:
         response = await get_async_stub().SenderGetChatName(srpc_pb2.SenderRequest(uuid=self.__uuid), metadata=metadata)
         return response.value
 
-    async def getMessageId(self):
+    async def getMsgId(self):
         response = await get_async_stub().SenderGetMessageId(srpc_pb2.SenderRequest(uuid=self.__uuid), metadata=metadata)
         return response.value
 
@@ -1076,7 +1076,7 @@ class Sender:
         response = await get_async_stub().SenderGetBotId(srpc_pb2.SenderRequest(uuid=self.__uuid), metadata=metadata)
         return response.value
 
-    async def getContent(self):
+    async def getMsg(self):
         response = await get_async_stub().SenderGetContent(srpc_pb2.SenderRequest(uuid=self.__uuid), metadata=metadata)
         return response.value
 
@@ -1091,7 +1091,7 @@ class Sender:
         )
         return response.value
 
-    async def setContent(self, content):
+    async def setMsg(self, content):
         await get_async_stub().SenderSetContent(
             srpc_pb2.SenderContentRequest(uuid=self.__uuid, content=str(content)),
             metadata=metadata,
