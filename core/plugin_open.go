@@ -11,7 +11,7 @@ import (
 type openPluginRecord struct {
 	ID           string   `json:"id"`
 	Title        string   `json:"title"`
-	Description  string   `json:"desc"`
+	Desc         string   `json:"desc"`
 	Icon         string   `json:"icon"`
 	Version      string   `json:"version"`
 	Author       string   `json:"author"`
@@ -43,13 +43,18 @@ func init() {
 			ApiUnprocessable(ctx, "插件没有用户表单，也未使用 smallcat")
 			return
 		}
-		previous := plugin.Open
-		plugin.Open = payload.Open
 		if _, _, err := plugin_open.Set(payload.UUID, payload.Open); err != nil {
-			plugin.Open = previous
 			ApiInternalError(ctx, "保存插件开放状态失败："+err.Error())
 			return
 		}
+		pluginLock.Lock()
+		for _, installed := range Functions {
+			if installed != nil && installed.UUID == payload.UUID {
+				installed.Open = payload.Open
+				break
+			}
+		}
+		pluginLock.Unlock()
 		ApiOK(ctx, gin.H{
 			"uuid": payload.UUID,
 			"open": payload.Open,
@@ -57,7 +62,7 @@ func init() {
 	})
 
 	GinApi(GET, "/api/public/plugins", func(ctx *gin.Context) {
-		ApiOK(ctx, openPluginRecords(Functions))
+		ApiOK(ctx, openPluginRecords(installedPluginSnapshot()))
 	})
 }
 
@@ -65,7 +70,7 @@ func installedPluginByUUID(uuid string) *common.Function {
 	if uuid == "" {
 		return nil
 	}
-	for _, plugin := range Functions {
+	for _, plugin := range installedPluginSnapshot() {
 		if plugin != nil && plugin.UUID == uuid && (plugin.Type == NODE || plugin.Type == PYTHON) {
 			return plugin
 		}
@@ -76,13 +81,13 @@ func installedPluginByUUID(uuid string) *common.Function {
 func openPluginRecords(plugins []*common.Function) []openPluginRecord {
 	rows := []openPluginRecord{}
 	for _, plugin := range plugins {
-		if plugin == nil || plugin.UUID == "" || !plugin.Open || (!plugin.UsesSmallCat && !plugin.HasUserForm) || plugin.Disable || (plugin.Type != NODE && plugin.Type != PYTHON) {
+		if plugin == nil || plugin.UUID == "" || !plugin.Open || (!plugin.UsesSmallCat && !plugin.HasUserForm) || !pluginExecutionEnabled(plugin) || (plugin.Type != NODE && plugin.Type != PYTHON) {
 			continue
 		}
 		rows = append(rows, openPluginRecord{
 			ID:           plugin.UUID,
 			Title:        firstNonEmpty(plugin.Title, plugin.UUID),
-			Description:  parseReply2(plugin.Description),
+			Desc:         parseReply2(plugin.Desc),
 			Icon:         pluginIconOrDefault(plugin.Icon),
 			Version:      plugin.Version,
 			Author:       plugin.Author,

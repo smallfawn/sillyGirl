@@ -93,7 +93,7 @@ func init() {
 		payload.UUID = ctx.Param("uuid")
 		payload.UUID = strings.TrimSpace(payload.UUID)
 		plugin := installedPluginByUUID(payload.UUID)
-		if plugin == nil || !plugin.Open || plugin.Disable || !plugin.UsesSmallCat {
+		if plugin == nil || !plugin.Open || !pluginExecutionEnabled(plugin) || !plugin.UsesSmallCat {
 			ApiNotFound(ctx, "插件未开放")
 			return
 		}
@@ -120,7 +120,7 @@ func init() {
 		}
 		uuid := strings.TrimSpace(ctx.Param("uuid"))
 		plugin := installedPluginByUUID(uuid)
-		if plugin == nil || !plugin.Open || plugin.Disable || !plugin.UsesSmallCat {
+		if plugin == nil || !plugin.Open || !pluginExecutionEnabled(plugin) || !plugin.UsesSmallCat {
 			ApiNotFound(ctx, "插件未开放")
 			return
 		}
@@ -190,14 +190,14 @@ func pluginAuthorizedSmallcatRecords(pluginID string) pluginSmallcatRuntimeRecor
 	// Plugins that have never been published keep the legacy unrestricted
 	// userList behavior. Once a plugin enters the Home authorization model, the
 	// policy remains enforced even after the administrator closes it; a closed
-	// or disabled plugin then sees an empty account list instead of falling back
+	// or status=false plugin then sees an empty account list instead of falling back
 	// to the complete smallcat panel list.
 	managed := plugin.Open || strings.TrimSpace(plugin_open.GetString(plugin.UUID)) != ""
 	if !managed {
 		return records
 	}
 	records.Enforced = true
-	if !plugin.Open || plugin.Disable {
+	if !plugin.Open || !pluginExecutionEnabled(plugin) {
 		return records
 	}
 	seenOpenIDs := map[string]bool{}
@@ -242,7 +242,7 @@ func pluginRuntimeUsers(pluginID string) []pluginRuntimeUser {
 	if pluginID == "" || plugin == nil {
 		return []pluginRuntimeUser{}
 	}
-	grantEnabled := plugin.Open && !plugin.Disable && plugin.UsesSmallCat
+	grantEnabled := plugin.Open && pluginExecutionEnabled(plugin) && plugin.UsesSmallCat
 	rows, err := listNormalUsers()
 	if err != nil {
 		return []pluginRuntimeUser{}

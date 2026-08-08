@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 type recordingAPI struct {
 	channelID string
 	dmGuildID string
+	groupID   string
+	c2cUserID string
 	payload   *dto.MessageToCreate
 }
 
@@ -33,6 +36,18 @@ func (api *recordingAPI) PostDirectMessage(_ context.Context, dm *dto.DirectMess
 	api.dmGuildID = dm.GuildID
 	api.payload = msg
 	return &dto.Message{ID: "reply-direct"}, nil
+}
+
+func (api *recordingAPI) PostGroupMessage(_ context.Context, groupID string, msg dto.APIMessage, _ ...options.Option) (*dto.Message, error) {
+	api.groupID = groupID
+	api.payload = msg.(*dto.MessageToCreate)
+	return &dto.Message{ID: "reply-group"}, nil
+}
+
+func (api *recordingAPI) PostC2CMessage(_ context.Context, userID string, msg dto.APIMessage, _ ...options.Option) (*dto.Message, error) {
+	api.c2cUserID = userID
+	api.payload = msg.(*dto.MessageToCreate)
+	return &dto.Message{ID: "reply-c2c"}, nil
 }
 
 func TestChannelReplyUsesChannelAndSourceMessage(t *testing.T) {
@@ -64,6 +79,78 @@ func TestDirectReplyUsesRememberedDMGuild(t *testing.T) {
 	})
 	if got != "reply-direct" || api.dmGuildID != "dm-guild-1" {
 		t.Fatalf("direct reply id=%q guild=%q", got, api.dmGuildID)
+	}
+}
+
+func TestGroupReplyUsesOfficialGroupAPI(t *testing.T) {
+	api := &recordingAPI{}
+	b := &bot{api: api}
+	got := b.reply(context.Background(), map[string]interface{}{
+		"content":          "pong",
+		"message_id":       "source-group",
+		"chat_id":          "group-fallback",
+		"qqguild_group_id": "group-1",
+		"qqguild_scene":    sceneGroup,
+	})
+	if got != "reply-group" || api.groupID != "group-1" || api.payload.MsgID != "source-group" {
+		t.Fatalf("group reply id=%q group=%q payload=%+v", got, api.groupID, api.payload)
+	}
+}
+
+func TestC2CReplyUsesOfficialUserAPI(t *testing.T) {
+	api := &recordingAPI{}
+	b := &bot{api: api}
+	got := b.reply(context.Background(), map[string]interface{}{
+		"content":       "pong",
+		"message_id":    "source-c2c",
+		"user_id":       "openid-1",
+		"qqguild_scene": sceneC2C,
+	})
+	if got != "reply-c2c" || api.c2cUserID != "openid-1" || api.payload.MsgID != "source-c2c" {
+		t.Fatalf("c2c reply id=%q user=%q payload=%+v", got, api.c2cUserID, api.payload)
+	}
+}
+
+func TestWebsocketIntentsIncludeOfficialQQMessages(t *testing.T) {
+	t.Logf("websocket intents=%d group_messages_bit=%d", websocketIntents, dto.IntentGroupMessages)
+	if websocketIntents&dto.IntentGroupMessages == 0 {
+		t.Fatalf("websocket intents %d omit GROUP_AT/C2C messages", websocketIntents)
+	}
+}
+
+func TestConfigRestartIsDebouncedUntilAfterWrites(t *testing.T) {
+	called := make(chan struct{}, 2)
+	debouncer := &restartDebouncer{
+		delay: 10 * time.Millisecond,
+		action: func() {
+			called <- struct{}{}
+		},
+	}
+	for range 6 {
+		debouncer.schedule()
+	}
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("debounced restart did not run")
+	}
+	select {
+	case <-called:
+		t.Fatal("multiple config writes caused multiple restarts")
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestBotGoLogsRedactCredentialsAndTokens(t *testing.T) {
+	const input = `req:{"clientSecret":"secret-value"} access:{"access_token":"access-value"} Authorization: QQBot token-value`
+	got := sanitizeBotGoLog(input)
+	for _, leaked := range []string{"secret-value", "access-value", "token-value"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("sensitive value %q leaked in %q", leaked, got)
+		}
+	}
+	if count := strings.Count(got, "<redacted>"); count != 3 {
+		t.Fatalf("redaction count=%d log=%q", count, got)
 	}
 }
 

@@ -9,7 +9,7 @@ One metadata item per comment line:
 ```text
 // [title: Display title]
 // [name: filesystemSafeName]
-// [description: What the plugin does]
+// [desc: What the plugin does]
 // [author: Author]
 // [version: v1.0.0]
 // [rule: raw ^command$]
@@ -17,12 +17,15 @@ One metadata item per comment line:
 // [on_start: true]
 // [web: true]
 // [admin: true]
+// [status: true]
 // [public: false]
 // [class: Utilities]
 // [depe: ["axios"]]
 ```
 
-Python changes the prefix to `#`. Repeat `rule` for multiple triggers. `title`, `name`, `description`, and `version` are required. A normal installable plugin also needs at least one of `rule`, `cron`, `on_start`, or `web`.
+Python changes the prefix to `#`. Repeat `rule` for multiple triggers. `title`, `name`, `desc`, and `version` are required. An installable file also needs at least one of `rule`, `cron`, `on_start`, `web`, or `module=true`.
+
+`status` is the plugin-wide runtime switch. Missing `status` defaults to `true`.
 
 ## JavaScript Imports
 
@@ -82,7 +85,7 @@ const Config = new plugin.Form({
   endpoint: plugin.Form.string().title("接口地址").default(""),
   token: plugin.Form.string().title("Token").format("password").default(""),
   retries: plugin.Form.number().title("重试次数").default(2),
-  enabled: plugin.Form.boolean().title("启用").default(true),
+  featureEnabled: plugin.Form.boolean().title("启用功能").default(true),
 });
 
 const config = await Config.get();
@@ -106,6 +109,10 @@ Await client methods and verify method names against `core/grpc_plugins.go` or a
 
 - Use `utils` only for methods verified in the current checkout.
 - Declare npm or PyPI packages in JSON-array metadata such as `[depe: ["axios"]]`.
+- Declare marketplace module plugins in the same array as `./name.js` for NodeJS or `./name.py` for Python. Module resolution uses only `depe`, never `require` or `import` scanning.
+- Marketplace scripts are installed under `/data/plugins/<publisher>/`; locally created scripts use `/data/plugins/local/`. A `./name.js` or `./name.py` module dependency resolves only inside that same publisher directory.
+- Marketplace installation recursively installs modules first and installs each script's package dependencies before loading that script. Shared package runtimes remain at `/data/plugins/node_modules` and `/data/plugins/python_packages`.
+- The same publisher cannot contain both `name.js` and `name.py`; the runtime-independent identity is `<publisher>/name`.
 - Do not declare Node built-ins or Python standard-library modules.
 - Add explicit network timeouts and handle non-success responses.
 

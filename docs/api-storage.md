@@ -100,10 +100,13 @@ Base URL: `http://host:port/api`
 | `GET` | `/api/admin/plugin-settings` |
 | `POST` | `/api/admin/local-plugins` |
 | `GET`, `POST` | `/api/admin/local-plugins/:id` |
+| `GET` | `/api/admin/local-plugins/:id/dependents` |
+| `POST` | `/api/admin/local-plugins/:id/status` |
 | `POST` | `/api/admin/local-plugins/:id/deletions` |
 | `POST` | `/api/admin/plugins/:uuid/access` |
 | `GET` | `/api/admin/dependencies?runtime=:runtime&plugin=:plugin` |
 | `POST` | `/api/admin/dependencies` |
+| `POST` | `/api/admin/dependency-deletions` |
 | `POST` | `/api/admin/dependency-deletions/:runtime/:plugin/*package` |
 | `GET`, `POST` | `/api/admin/dependency-registries/:runtime` |
 | `POST` | `/api/admin/dependency-registries/:runtime/options` |
@@ -128,6 +131,12 @@ Base URL: `http://host:port/api`
 | `GET` | `/api/admin/bots` |
 
 面板集合使用请求体字段 `type: "qinglong" | "daidai" | "smallcat"` 区分具体类型。`GET /api/admin/panels` 一次返回三类面板，不再并发请求 provider 专用接口。
+
+本地插件接口使用文件插件 UUID 作为 `:id`：
+
+- `POST /api/admin/local-plugins/:id/status` 请求体为 `{ "status": true|false }`，只修改源码顶部 `status` 注释并重载插件；`module=true` 的依赖模块没有独立运行开关。
+- `GET /api/admin/local-plugins/:id/dependents` 返回同发布者目录内通过 `depe` 引用该模块的插件列表，删除或卸载被引用模块会返回冲突。
+- `POST /api/admin/dependency-deletions` 请求体为 `{ "runtime": "node|python", "plugin": "发布者/插件名|__shared__", "package": "包名" }`。保留带路径参数的旧接口用于兼容；包名或作者路径可能含 `/` 时应使用 JSON 接口。
 
 ### User 资源
 
@@ -161,7 +170,6 @@ Base URL: `http://host:port/api`
 | `GET` | `/api/public/plugins` | 已开放插件 |
 | `GET` | `/api/plugin-market/plugins` | 联邦插件市场数据 |
 | `GET` | `/api/plugin-downloads/:uuid` | JavaScript 或 ZIP |
-| `GET` | `/api/files/*filename` | 插件静态文件 |
 | `GET` | `/api/binary-content/:token` | 临时二进制内容 |
 | `GET` | `/api/web-chat/messages?rid=...` | 长轮询接收消息 |
 | `POST` | `/api/web-chat/messages` | 创建聊天消息 |

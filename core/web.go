@@ -106,6 +106,8 @@ func configureTrustedHTTPProxies(engine *gin.Engine) error {
 
 var Server *gin.Engine
 
+const maxAPIRequestBodyBytes int64 = 16 << 20
+
 func httpServer(addr string) *http.Server {
 	return &http.Server{
 		Addr:              addr,
@@ -141,7 +143,6 @@ func initWeb() {
 	Server.Use(SecurityHeaders())
 	Server.Use(gzip.Gzip(gzip.DefaultCompression))
 	registerAPIRequests(Server, apiRouteSnapshot())
-	Server.GET("/api/files/*filename", FindFile)
 	Server.GET("/api/binary-content/:random", Base642Binary)
 
 	Server.GET("/api/plugin-downloads/:uuid", func(c *gin.Context) {
@@ -500,6 +501,9 @@ func GinApi(method string, path string, fs ...func(c *gin.Context)) {
 		Method: method,
 		Path:   path,
 		Handle: func(c *gin.Context) {
+			if c.Request.Body != nil {
+				c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAPIRequestBodyBytes)
+			}
 			defer func() {
 				if err := recover(); err != nil {
 					logs.Error("API handler panic %s %s: %v", c.Request.Method, c.Request.URL.Path, err)

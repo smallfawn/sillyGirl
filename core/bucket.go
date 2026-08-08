@@ -20,31 +20,13 @@ var bkt storage.Bucket
 var HttpPort string
 var sillyGirl = MakeBucket("sillyGirl")
 
-// var Get = func(key string) string {
-// 	return ""
-// }
-// var Set = func(key, value string, expiration time.Duration) error {
-// 	return nil
-// }
-
 var MakeBucketlocker sync.Mutex
 
 func MakeBucket(name string) storage.Bucket {
 	MakeBucketlocker.Lock()
 	defer MakeBucketlocker.Unlock()
 	if bkt == nil {
-		// utils.ReadYaml(utils.ExecPath+"/conf/", &Config, "https://raw.githubusercontent.com/smallfawn/sillyGirl/main/conf/demo_config.yaml")
-		// if !Config.EnableRedis {
 		bkt = boltdb.InitsillyGirl()
-		// Get = boltdb.Get
-		// Set = boltdb.Set
-		// logs.Info("默认使用boltdb进行数据存储")
-		// } else {
-		// 	bkt = redis.InitsillyGirl(Config.RedisAddr, Config.RedisPassword)
-		// 	Get = redis.Get
-		// 	Set = redis.Set
-		// 	logs.Info("已使用redis进行数据存储")
-		// }
 		var app = bkt
 		isredis := false
 		if def := bkt.GetString("storage"); def == "redis" {
@@ -52,7 +34,7 @@ func MakeBucket(name string) storage.Bucket {
 				defer func() {
 					err := recover()
 					if err != nil {
-						// console.Warn("redis异常，已默认启用boltdb进行数据存储")
+						logs.Warn("Redis 初始化失败，已回退到 BoltDB：%v", err)
 						bkt = app
 					} else {
 						isredis = true

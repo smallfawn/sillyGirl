@@ -1,18 +1,17 @@
-import asyncio
 import ast
-import base64
+import asyncio
 import hashlib
 import inspect
-import textwrap
 import json
 import os
-import pickle
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
+import textwrap
 import time
 import urllib.error
 import urllib.parse
@@ -20,10 +19,12 @@ import urllib.request
 import zipfile
 
 import grpc
-
 import srpc_pb2
 import srpc_pb2_grpc
 
+_MAX_HTTP_JSON_BYTES = 4 * 1024 * 1024
+_MAX_RELEASE_ARCHIVE_ENTRIES = 4096
+_MAX_RELEASE_UNPACKED_BYTES = 512 * 1024 * 1024
 
 plugin_id = os.environ.get("PLUGIN_ID", "")
 runtime_id = os.environ.get("RUNTIME_ID", "")
@@ -58,14 +59,15 @@ def _transform_bucket_value(value):
         return None
     if value.startswith("f:"):
         return float(value[2:])
-    if value.startswith("d:") or value.startswith("i:"):
+    if value.startswith(("d:", "i:")):
         return int(value[2:])
     if value.startswith("b:"):
         return value[2:] == "true"
     if value.startswith("o:"):
         return json.loads(value[2:])
     if value.startswith("p:"):
-        return pickle.loads(base64.b64decode(value[2:]))
+        # 旧版 pickle 值可能在反序列化时执行任意代码；不再加载。
+        raise ValueError("legacy pickle bucket values are not supported")
     return value
 
 
@@ -82,8 +84,8 @@ def _serialize_bucket_value(value):
         if value is None:
             return ""
         return "o:" + json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        return "p:%s" % base64.b64encode(pickle.dumps(value)).decode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise TypeError("bucket values must be JSON serializable") from exc
 
 
 class Bucket:
@@ -400,8 +402,8 @@ class _PluginConfigFormInstance:
                 value = json.loads(os.environ["PLUGIN_CONFIG_JSON"])
                 if isinstance(value, dict):
                     self.userConfig = value
-            except Exception:
-                pass
+            except (TypeError, json.JSONDecodeError):
+                self.userConfig = {}
         if os.environ.get("SILLYGIRL_CONFIG_REGISTER_ONLY") == "true":
             target = os.environ.get("SILLYGIRL_CONFIG_SCHEMA_FILE", "")
             if target:
@@ -507,7 +509,7 @@ async def _read_runtime_panels(key):
     if isinstance(raw, list):
         return raw
     if isinstance(raw, str) and raw.strip():
-        text = raw[2:] if raw.startswith("o:") else raw
+        text = raw.removeprefix("o:")
         try:
             value = json.loads(text)
             return value if isinstance(value, list) else []
@@ -628,7 +630,17 @@ def _normalize_ids(ids):
     return [ids]
 
 
+def _read_limited(stream, limit):
+    data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise RuntimeError(f"HTTP 响应超过 {limit} 字节限制")
+    return data
+
+
 def _http_json_sync(method, url, headers=None, body=None):
+    parsed_url = urllib.parse.urlparse(str(url or ""))
+    if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
+        raise ValueError("HTTP 地址只支持 http 或 https")
     headers = dict(headers or {})
     data = None
     if body is not None:
@@ -636,11 +648,12 @@ def _http_json_sync(method, url, headers=None, body=None):
         headers.setdefault("Content-Type", "application/json")
     request = urllib.request.Request(url, data=data, headers=headers, method=str(method or "GET").upper())
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            raw = response.read().decode("utf-8", "replace")
+        # Scheme and network location are validated immediately above.
+        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
+            raw = _read_limited(response, _MAX_HTTP_JSON_BYTES).decode("utf-8", "replace")
             status = getattr(response, "status", 200)
     except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", "replace")
+        raw = _read_limited(exc, _MAX_HTTP_JSON_BYTES).decode("utf-8", "replace")
         status = exc.code
     payload = json.loads(raw) if raw.strip() else {}
     if status < 200 or status >= 300:
@@ -1292,7 +1305,7 @@ class Utils:
     def parseCQText(self, text, prefix="CQ"):
         result = []
         last = 0
-        pattern = re.compile(rf"\[{re.escape(prefix)}:(\w+)(.*?)\]", re.S)
+        pattern = re.compile(rf"\[{re.escape(prefix)}:(\w+)(.*?)\]", re.DOTALL)
         for match in pattern.finditer(str(text or "")):
             if match.start() > last:
                 result.append(text[last : match.start()])
@@ -1334,15 +1347,15 @@ async def _pushAdmin(content, options=None):
     bot_id = str(options.get("botId") or options.get("bot_id") or "")
     explicit_users = _normalize_list(options.get("userIds")) + _normalize_list(options.get("users"))
     explicit_users = list(dict.fromkeys(explicit_users))
-    for platform in platforms:
-        users = explicit_users or _normalize_list(await Bucket(platform).get("masters", ""))
-        adapter = Adapter(platform, bot_id)
+    for platform_name in platforms:
+        users = explicit_users or _normalize_list(await Bucket(platform_name).get("masters", ""))
+        adapter = Adapter(platform_name, bot_id)
         for user_id in users:
             try:
                 message_id = await adapter.push({"user_id": user_id, "content": content})
-                result.append({"platform": platform, "bot_id": bot_id, "user_id": user_id, "message_id": message_id})
+                result.append({"platform": platform_name, "bot_id": bot_id, "user_id": user_id, "message_id": message_id})
             except Exception as exc:
-                result.append({"platform": platform, "bot_id": bot_id, "user_id": user_id, "error": str(exc)})
+                result.append({"platform": platform_name, "bot_id": bot_id, "user_id": user_id, "error": str(exc)})
     return result
 
 
@@ -1352,6 +1365,13 @@ async def _sleep(ms=1000):
 
 async def _restart():
     return await Bucket("sillyGirl").set("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def _compact_runtime_output(value, limit=2000):
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return "..." + text[-max(0, limit - 3):]
 
 
 def _run_process(cwd, args, timeout=120):
@@ -1520,21 +1540,60 @@ def _verify_release_checksum(release, asset, archive, timeout):
 def _safe_extract_tar(archive, target):
     target_abs = os.path.abspath(target)
     with tarfile.open(archive) as package:
-        for member in package.getmembers():
+        members = package.getmembers()
+        if len(members) > _MAX_RELEASE_ARCHIVE_ENTRIES:
+            raise RuntimeError("Release 包文件数量超过限制")
+        total_size = 0
+        for member in members:
             member_path = os.path.abspath(os.path.join(target, member.name))
             if member_path != target_abs and not member_path.startswith(target_abs + os.sep):
                 raise RuntimeError("Release 包包含非法路径，已拒绝解压")
-        package.extractall(target)
+            if not member.isfile() and not member.isdir():
+                raise RuntimeError("Release 包包含链接或特殊文件，已拒绝解压")
+            total_size += max(0, member.size)
+            if total_size > _MAX_RELEASE_UNPACKED_BYTES:
+                raise RuntimeError("Release 包解压后大小超过限制")
+        for member in members:
+            destination = os.path.join(target, member.name)
+            if member.isdir():
+                os.makedirs(destination, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            source = package.extractfile(member)
+            if source is None:
+                raise RuntimeError("Release 包文件读取失败")
+            with source, open(destination, "wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+            os.chmod(destination, member.mode & 0o777)
 
 
 def _safe_extract_zip(archive, target):
     target_abs = os.path.abspath(target)
     with zipfile.ZipFile(archive) as package:
-        for member in package.namelist():
-            member_path = os.path.abspath(os.path.join(target, member))
+        members = package.infolist()
+        if len(members) > _MAX_RELEASE_ARCHIVE_ENTRIES:
+            raise RuntimeError("Release 包文件数量超过限制")
+        total_size = 0
+        for member in members:
+            member_path = os.path.abspath(os.path.join(target, member.filename))
             if member_path != target_abs and not member_path.startswith(target_abs + os.sep):
                 raise RuntimeError("Release 包包含非法路径，已拒绝解压")
-        package.extractall(target)
+            mode = (member.external_attr >> 16) & 0xFFFF
+            if stat.S_ISLNK(mode) or member.flag_bits & 0x1:
+                raise RuntimeError("Release 包包含链接或加密文件，已拒绝解压")
+            total_size += max(0, member.file_size)
+            if total_size > _MAX_RELEASE_UNPACKED_BYTES:
+                raise RuntimeError("Release 包解压后大小超过限制")
+        for member in members:
+            destination = os.path.join(target, member.filename)
+            if member.is_dir():
+                os.makedirs(destination, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            with package.open(member) as source, open(destination, "wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+            if mode := (member.external_attr >> 16) & 0o777:
+                os.chmod(destination, mode)
 
 
 def _extract_release_archive(archive, target):
@@ -1584,13 +1643,14 @@ def _install_release_payload(tmp_dir, executable_path):
     target_dir = os.path.dirname(executable_path)
     os.makedirs(target_dir, exist_ok=True)
     if os.name == "nt":
-        ready_path = re.sub(r"\.exe$", ".ready.exe", executable_path, flags=re.I)
+        ready_path = re.sub(r"\.exe$", ".ready.exe", executable_path, flags=re.IGNORECASE)
         shutil.copyfile(binary, ready_path)
         return
     tmp_target = f"{executable_path}.new-{int(time.time())}"
     backup = f"{executable_path}.bak-{int(time.time())}"
     shutil.copyfile(binary, tmp_target)
-    os.chmod(tmp_target, 0o755)
+    # The installed release binary must be executable.
+    os.chmod(tmp_target, 0o755)  # nosec B103
     backed_up = False
     try:
         if os.path.exists(executable_path):

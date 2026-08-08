@@ -401,7 +401,7 @@ func (b *bot) do(req *http.Request, out interface{}) error {
 		return err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := utils.ReadAllLimit(resp.Body, 4<<20)
 	if err != nil {
 		return err
 	}

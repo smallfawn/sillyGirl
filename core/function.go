@@ -15,7 +15,6 @@ import (
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
-// var replyRe = regexp.MustCompile(`\$\{\s*([^\s{}]+)\s*\}`)
 var total uint64 = 0
 var finished uint64 = 0
 var contents sync.Map
@@ -45,27 +44,25 @@ type GroupInfo struct {
 	Enable   bool   `json:"enable"`
 }
 
-var AddNoReplyGroups = func(code string, desc string, plt string) {
+var AddNoReplyGroups = func(code string, _ string, plt string) {
 	NoReplyGroups.LoadOrStore(code, plt)
 }
 
-var AddListenOnGroup = func(code string, desc string, plt string) {
+var AddListenOnGroup = func(code string, _ string, plt string) {
 	ListenOnGroups.LoadOrStore(code, plt)
 }
 
-var RemNoReplyGroups = func(code string, desc string) {
+var RemNoReplyGroups = func(code string, _ string) {
 	_, loaded := NoReplyGroups.Load(code)
 	if loaded {
 		NoReplyGroups.Delete(code)
-		// logs.Info(desc)
 	}
 }
 
-var RemListenOnGroup = func(code string, desc string) {
+var RemListenOnGroup = func(code string, _ string) {
 	_, loaded := ListenOnGroups.Load(code)
 	if loaded {
 		ListenOnGroups.Delete(code)
-		// logs.Info(desc)
 	}
 }
 
@@ -155,7 +152,6 @@ func initListenReply() {
 		} else {
 			info := &GroupInfo{}
 			json.Unmarshal(data, info)
-			// fmt.Println(string(b1), string(utils.JsonMarshal(info)))
 			if info.Enable {
 				NoListenUsers.Store(string(b1), info.Platform)
 			}
@@ -240,13 +236,7 @@ func initToHandleMessage() {
 						}
 						s.Reply("ok")
 					case "reply":
-						// if data := noReplyGroups.GetBytes(cid); len(data) != 0 {
-						info := &GroupInfo{}
-						// if info.Enable {
-						// 	info.Enable = !info.Enable
-						noReplyGroups.Set(cid, utils.JsonMarshal(info))
-						// }
-						// }
+						noReplyGroups.Set(cid, utils.JsonMarshal(&GroupInfo{}))
 						s.Reply("ok")
 					case "noreply", "unreply":
 						if data := noReplyGroups.GetBytes(cid); len(data) == 0 {
@@ -405,7 +395,6 @@ func AddCommand(cmds []*common.Function) {
 		if cmds[j].OnStart && pluginExecutionEnabled(cmds[j]) {
 			go func(f *common.Function) {
 				time.Sleep(time.Second)
-				// console.Log("初始化%v服务", f.Title)
 				f.Handle(&CustomSender{
 					F: &Factory{
 						botplt: "*",
@@ -415,15 +404,18 @@ func AddCommand(cmds []*common.Function) {
 		}
 		fmtRule(cmds[j])
 		{
-			if !cmds[j].Disable && !cmds[j].Module {
+			if pluginExecutionEnabled(cmds[j]) && !cmds[j].Module {
 				for plt, Cron := range cmds[j].Cron {
+					if !pluginCronTaskEnabled(cmds[j].UUID, plt) {
+						continue
+					}
 					plt := plt
 					cron := strings.TrimSpace(Cron)
 					if len(cronFieldPattern.FindAllString(cron, -1)) == 5 {
 						Cron = "0 " + Cron
 					}
 					cronId, err := CRON.AddFunc(Cron, func() {
-						if !pluginExecutionEnabled(cmds[j]) {
+						if !pluginExecutionEnabled(cmds[j]) || !pluginCronTaskEnabled(cmds[j].UUID, plt) {
 							return
 						}
 						cmds[j].Handle(&CustomSender{
@@ -434,15 +426,11 @@ func AddCommand(cmds []*common.Function) {
 					})
 					if err == nil {
 						cmds[j].CronIds = append(cmds[j].CronIds, int(cronId))
-						// console["log"]("脚本%s添加定时器", cmds[j].Title)
 					} else {
 						console.Error("脚本%s定时器错误，%v", cmds[j].Title, err)
 					}
 				}
 			}
-			// if cmds[j].Cron != "" && !cmds[j].Disable && !cmds[j].Module && !cmds[j].OnStart {
-
-			// }
 		}
 		{
 			lf := len(Functions)
@@ -505,28 +493,13 @@ func HandleMessage(sender common.Sender) {
 	mtd := false
 	for _, wait := range waits {
 		wait.Foreach(func(k int64, c *Carry) bool {
-
-			// userID := vs.Get("u")
-			// chatID := vs.Get("c")
-			// imType := vs.Get("i")
-			// forGroup := vs.Get("f")
-			// if chatID != g && (forGroup != "me" || g != "0") {
-			// 	return true
-			// }
-			// if userID != u && (forGroup == "" || forGroup == "me") {
-			// 	return true
-			// }
-
 			if c.RequireAdmin && !a {
 				return true
 			}
-			// fmt.Println(c.Function.Rules, "==", c.AllowPlatforms, len(c.AllowPlatforms))
 
 			if len(c.AllowPlatforms) != 0 && !Contains(c.AllowPlatforms, i) {
 				return true
 			}
-
-			// fmt.Println(c.Function.Rules)
 
 			if len(c.ProhibitPlatforms) != 0 && Contains(c.ProhibitPlatforms, i) {
 				return true
@@ -545,13 +518,6 @@ func HandleMessage(sender common.Sender) {
 			if len(c.ProhibitGroups) != 0 && Contains(c.ProhibitGroups, g) {
 				return true
 			}
-
-			// if c.ChatID != g && (!c.AllowPrivate || g != "") {
-			// 	return true
-			// }
-			// if c.UserID != u && (c.AllowGroupUsers || c.AllowPrivate) {
-			// 	return true
-			// }
 
 			if c.ChatID != "" { //群聊监听
 				if g == "" { //私聊时
@@ -576,7 +542,6 @@ func HandleMessage(sender common.Sender) {
 					console.Error("监听器正则错误，%v", err)
 					continue
 				}
-				// logs.Info("%s规则：%s", c.Function.Title, c.Function.Rules[i])
 				if res := reg.FindStringSubmatch(content); len(res) > 0 {
 					logs.Info("匹配到%s规则：%s", c.Function.Title, c.Function.Rules[i])
 					sender.SetMatch(res[1:])
@@ -609,11 +574,6 @@ func HandleMessage(sender common.Sender) {
 		if len(reply.Platforms) != 0 && !Contains(reply.Platforms, i) {
 			continue
 		}
-		// if reply.Class == 1 && g != "" {
-		// 	continue
-		// } else if reply.Class == 2 && g == "" {
-		// 	continue
-		// }
 		reg, err := regexp.Compile(reply.Keyword)
 		if err == nil {
 			if reg.FindString(content) != "" {
@@ -624,7 +584,7 @@ func HandleMessage(sender common.Sender) {
 		}
 	}
 	for _, function := range Functions {
-		if function.Disable || function.Module {
+		if !pluginExecutionEnabled(function) || function.Module {
 			continue
 		}
 		for i := range function.Rules {
@@ -689,12 +649,13 @@ func HandleMessage(sender common.Sender) {
 }
 
 // pluginExecutionEnabled is the single runtime gate shared by message, cron
-// and startup triggers. A boolean plugin.Form field named "enable" is reserved
-// as the plugin-wide switch; plugins without it remain enabled for compatibility.
+// and startup triggers. Status comes only from the plugin's status metadata;
+// plugin.Form values do not participate in this decision. Missing status keeps
+// compatibility with programmatically registered plugins and defaults to true.
 func pluginExecutionEnabled(function *common.Function) bool {
-	if function == nil || function.Disable {
-		return false
-	}
-	enabled, declared := pluginConfigBool(function.UUID, "enable")
-	return !declared || enabled
+	return function != nil && (function.Status == nil || *function.Status)
+}
+
+func pluginStatusValue(enabled bool) *bool {
+	return &enabled
 }

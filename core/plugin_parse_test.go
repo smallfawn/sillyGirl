@@ -26,7 +26,7 @@ func TestPluginParseKeepsDeclaredIcon(t *testing.T) {
 
 func TestPluginParseLegacyCommentMetadata(t *testing.T) {
 	fn, _ := pluginParse(`//[title: 老式Node]
-//[description: 老式说明]
+//[desc: 老式说明]
 // [rule: ^老式$]
 // [version: v1.2.3]
 // [author: tester]
@@ -36,7 +36,7 @@ func TestPluginParseLegacyCommentMetadata(t *testing.T) {
 // [priority: 18]
 // [param: {"key":"legacy.token","name":"Token"}]
 `, "legacy-node")
-	if fn.Title != "老式Node" || fn.Description != "老式说明" || fn.Version != "v1.2.3" || fn.Author != "tester" {
+	if fn.Title != "老式Node" || fn.Desc != "老式说明" || fn.Version != "v1.2.3" || fn.Author != "tester" {
 		t.Fatalf("legacy node metadata parse failed: %#v", fn)
 	}
 	if len(fn.Rules) != 1 || fn.Rules[0] != "^老式$" {
@@ -50,11 +50,11 @@ func TestPluginParseLegacyCommentMetadata(t *testing.T) {
 	}
 
 	py, _ := pluginParse(`##[title: 老式Python]
-##[description: Python说明]
+##[desc: Python说明]
 # [rule: ^py老式$]
 # [cron: 12 8 * * *]
 `, "legacy-python")
-	if py.Title != "老式Python" || py.Description != "Python说明" {
+	if py.Title != "老式Python" || py.Desc != "Python说明" {
 		t.Fatalf("legacy python metadata parse failed: %#v", py)
 	}
 	if len(py.Rules) != 1 || py.Rules[0] != "^py老式$" {
@@ -67,12 +67,12 @@ func TestPluginParseLegacyCommentMetadata(t *testing.T) {
 
 func TestPluginParseLegacyCommentMetadataWithTrailingHelp(t *testing.T) {
 	fn, _ := pluginParse(`//[title: 尾注Node] 这里是给旧市场看的字段说明
-//[description: 尾注说明] 使用方法尽量写具体
+//[desc: 尾注说明] 使用方法尽量写具体
 //[version: v1.0.0] 版本格式说明
 //[rule: ^尾注$] 指令说明
 //[public: YES] 是否公开
 `, "legacy-trailing-node")
-	if fn.Title != "尾注Node" || fn.Description != "尾注说明" || fn.Version != "v1.0.0" {
+	if fn.Title != "尾注Node" || fn.Desc != "尾注说明" || fn.Version != "v1.0.0" {
 		t.Fatalf("legacy trailing metadata parse failed: %#v", fn)
 	}
 	if len(fn.Rules) != 1 || fn.Rules[0] != "^尾注$" {
@@ -86,14 +86,14 @@ func TestPluginParseLegacyCommentMetadataWithTrailingHelp(t *testing.T) {
 func TestPluginParsePythonDocstringAtMetadata(t *testing.T) {
 	fn, _ := pluginParse(`"""
 @title Python旧式
-@description 三引号说明
+@desc 三引号说明
 @rule ^pynew$
 @version v1.2.4
 @public true
 @depe ["requests"]
 """
 `, "python-docstring-meta")
-	if fn.Title != "Python旧式" || fn.Description != "三引号说明" || fn.Version != "v1.2.4" {
+	if fn.Title != "Python旧式" || fn.Desc != "三引号说明" || fn.Version != "v1.2.4" {
 		t.Fatalf("python docstring metadata parse failed: %#v", fn)
 	}
 	if len(fn.Rules) != 1 || fn.Rules[0] != "^pynew$" || !fn.Public {
@@ -109,13 +109,12 @@ func TestPluginParseAtMetadataEOFAndBoolVariants(t *testing.T) {
  * @admin 1
  * @module on
  * @carry
- * @smallcat TRUE
  */`, "eof-meta")
 	if fn.Title != "EOFMeta" || len(fn.Rules) != 1 || fn.Rules[0] != "^eof$" {
 		t.Fatalf("metadata at EOF parse failed: %#v", fn)
 	}
-	if !fn.Public || !fn.Admin || !fn.Module || !fn.Carry || !fn.UsesSmallCat {
-		t.Fatalf("bool variants parse failed: public=%v admin=%v module=%v carry=%v smallcat=%v", fn.Public, fn.Admin, fn.Module, fn.Carry, fn.UsesSmallCat)
+	if !fn.Public || !fn.Admin || !fn.Module || !fn.Carry {
+		t.Fatalf("bool variants parse failed: public=%v admin=%v module=%v carry=%v", fn.Public, fn.Admin, fn.Module, fn.Carry)
 	}
 }
 
@@ -129,7 +128,6 @@ func TestPluginParseDetectsSmallCatUsage(t *testing.T) {
 		{name: "python constructor", script: `client = SmallCat({"id": 1})`, want: true},
 		{name: "static call", script: `SmallCat.userList()`, want: true},
 		{name: "description only", script: `/** SmallCat account helper */`, want: false},
-		{name: "metadata override", script: "/**\n * @smallcat true\n */", want: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

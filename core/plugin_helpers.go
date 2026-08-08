@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -153,10 +152,4 @@ FR:
 		}
 	}
 	return _rs
-}
-
-func isFlatNodePluginPath(path string) bool {
-	root := filepath.Clean(nodePluginsRoot())
-	clean := filepath.Clean(path)
-	return strings.EqualFold(filepath.Dir(clean), root) && strings.EqualFold(filepath.Ext(clean), ".js")
 }

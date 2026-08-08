@@ -18,6 +18,7 @@ import (
 )
 
 var tasks = MakeBucket("tasks")
+var pluginCronStatus = MakeBucket("plugin_cron_status")
 
 const pluginCronTaskPrefix = "plugin-cron:"
 
@@ -73,8 +74,8 @@ func scriptCommandForFunction(f *common.Function) string {
 	if f == nil {
 		return ""
 	}
-	name := nodePluginNameFromPath(f.Path)
-	if name == "" {
+	name := nodePluginIdentityFromPath(f.Path)
+	if strings.TrimSpace(name) == "" {
 		name = strings.TrimSuffix(strings.TrimSuffix(f.Title, ".js"), ".py")
 	}
 	if name == "" {
@@ -120,13 +121,17 @@ func pluginCronTask(f *common.Function, platform string) *Tasks {
 		Command:  scriptCommandForFunction(f),
 		Scripts:  []string{f.UUID},
 		Remark:   "来自脚本注释 @cron",
-		Enable:   pluginExecutionEnabled(f),
+		Enable:   pluginCronTaskEnabled(f.UUID, platform),
 	}
 }
 
-// setTaskEnabled keeps the task list switch as the single place for changing
-// scheduled execution state. Plugin @cron rows reuse the plugin's enable field;
-// ordinary tasks keep their own persisted enable flag.
+func pluginCronTaskEnabled(uuid, platform string) bool {
+	return pluginCronStatus.GetBool(pluginCronTaskID(uuid, platform), true)
+}
+
+// setTaskEnabled keeps task state independent from the plugin status metadata.
+// Plugin @cron rows use their own persisted flag; ordinary tasks keep their
+// existing persisted enable field.
 func setTaskEnabled(taskID string, enabled bool) error {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
@@ -137,13 +142,14 @@ func setTaskEnabled(taskID string, enabled bool) error {
 		if f == nil {
 			return fmt.Errorf("定时任务脚本不存在")
 		}
-		config := getPluginUserConfig(f.UUID)
-		if config == nil {
-			config = map[string]interface{}{}
-		}
-		config["enable"] = enabled
-		if _, _, err := SetBucketKeyValue(pluginConfigValues, f.UUID, config); err != nil {
+		mutex := GetMutex("plugin-cron-status:" + taskID)
+		mutex.Lock()
+		defer mutex.Unlock()
+		if _, _, err := pluginCronStatus.Set(taskID, enabled); err != nil {
 			return err
+		}
+		if f.Reload != nil {
+			f.Reload()
 		}
 		return nil
 	}
@@ -197,6 +203,9 @@ func runTaskNow(taskID string) error {
 		f, _ := findScriptFunctionByTask(taskID, "")
 		if f == nil || f.Handle == nil {
 			return fmt.Errorf("定时任务脚本不存在")
+		}
+		if !pluginCronTaskEnabled(f.UUID, platform) {
+			return fmt.Errorf("定时任务未启用")
 		}
 		if !pluginExecutionEnabled(f) {
 			return fmt.Errorf("插件未启用")
@@ -542,6 +551,10 @@ func init() {
 				ApiInternalError(ctx, err.Error())
 				return
 			}
+			if _, _, err := pluginCronStatus.Set(pt.ID, ""); err != nil {
+				ApiInternalError(ctx, err.Error())
+				return
+			}
 			ApiNoContent(ctx)
 			return
 		}
@@ -729,18 +742,30 @@ func scriptTaskTarget(command string) (string, string) {
 }
 
 func scriptFunctionByCommandTarget(target string, class string) *common.Function {
-	cleanTarget := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(filepath.ToSlash(target)), ".js"), ".py")
+	cleanTarget := strings.Trim(strings.TrimSpace(filepath.ToSlash(target)), `"'./`)
+	cleanTarget = strings.TrimSuffix(strings.TrimSuffix(cleanTarget, ".js"), ".py")
+	if cleanTarget == "" {
+		return nil
+	}
+	var fallback *common.Function
 	for _, f := range Functions {
 		if f == nil || f.Type != class {
 			continue
 		}
-		pluginName := nodePluginNameFromPath(f.Path)
-		title := strings.TrimSuffix(strings.TrimSuffix(f.Title, ".js"), ".py")
-		if pluginName == cleanTarget || title == cleanTarget {
+		identity := nodePluginIdentityFromPath(f.Path)
+		if strings.EqualFold(identity, cleanTarget) {
 			return f
 		}
+		pluginName := nodePluginNameFromPath(f.Path)
+		title := strings.TrimSuffix(strings.TrimSuffix(f.Title, ".js"), ".py")
+		if strings.EqualFold(pluginName, cleanTarget) || strings.EqualFold(title, cleanTarget) {
+			if fallback != nil && fallback != f {
+				return nil
+			}
+			fallback = f
+		}
 	}
-	return nil
+	return fallback
 }
 
 func updatePluginCronAnnotation(f *common.Function, _ string, schedule string) error {
@@ -760,6 +785,131 @@ func updatePluginCronAnnotation(f *common.Function, _ string, schedule string) e
 		f.Reload()
 	}
 	return nil
+}
+
+func updatePluginStatusAnnotation(f *common.Function, enabled bool) error {
+	if f == nil || f.Path == "" {
+		return fmt.Errorf("脚本不存在")
+	}
+	path, err := checkedNodeScriptPath(f.Path)
+	if err != nil {
+		return err
+	}
+	mutex := GetMutex("plugin-status:" + f.UUID)
+	mutex.Lock()
+	defer mutex.Unlock()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	next := upsertPluginStatusAnnotation(string(data), enabled, f.Type)
+	if next != string(data) {
+		if err := os.WriteFile(path, []byte(next), 0644); err != nil {
+			return err
+		}
+	}
+	f.Status = pluginStatusValue(enabled)
+	if f.Reload != nil && next != string(data) {
+		f.Reload()
+	}
+	pluginLock.Lock()
+	for _, installed := range Functions {
+		if installed != nil && installed.UUID == f.UUID {
+			installed.Status = pluginStatusValue(enabled)
+			break
+		}
+	}
+	pluginLock.Unlock()
+	return nil
+}
+
+func upsertPluginStatusAnnotation(script string, enabled bool, scriptType ...string) string {
+	newline := "\n"
+	if strings.Contains(script, "\r\n") {
+		newline = "\r\n"
+	}
+	kind := ""
+	if len(scriptType) > 0 {
+		kind = scriptType[0]
+	}
+	value := fmt.Sprintf("%t", enabled)
+	lines := strings.Split(strings.ReplaceAll(script, "\r\n", "\n"), "\n")
+	legacyStatusLine := regexp.MustCompile(`(?i)^(\s*(?://|#+)\s*\[\s*status\s*:\s*)(.*?)(\s*\](?:[^\r\n]*)?)$`)
+	atStatusLine := regexp.MustCompile(`(?i)^(\s*(?:\*\s*)?@status)(?:\s+.*?)?\s*$`)
+	updated := false
+	out := make([]string, 0, len(lines)+1)
+	for _, line := range lines {
+		if match := legacyStatusLine.FindStringSubmatch(line); len(match) != 0 {
+			if !updated {
+				out = append(out, match[1]+value+match[3])
+			}
+			updated = true
+			continue
+		}
+		if match := atStatusLine.FindStringSubmatch(line); len(match) != 0 {
+			if !updated {
+				out = append(out, match[1]+" "+value)
+			}
+			updated = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if updated {
+		return strings.Join(out, newline)
+	}
+
+	lastMeta := -1
+	metaStyle := ""
+	for i, line := range out {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" && lastMeta < 0 {
+			continue
+		}
+		if i == 0 && strings.HasPrefix(strings.TrimPrefix(line, "\ufeff"), "#!") {
+			continue
+		}
+		if pluginLegacyMetaLinePattern.MatchString(line) {
+			lastMeta = i
+			metaStyle = "legacy"
+			continue
+		}
+		if pluginMetaPattern.MatchString(line) {
+			lastMeta = i
+			metaStyle = "at"
+			continue
+		}
+		if lastMeta < 0 && (trimmed == "/**" || trimmed == "/*" || trimmed == `"""` || trimmed == "'''") {
+			continue
+		}
+		break
+	}
+	insert := ""
+	if metaStyle == "at" {
+		prefix := regexp.MustCompile(`^(\s*(?:\*\s*)?)@`).FindStringSubmatch(out[lastMeta])
+		if len(prefix) != 0 {
+			insert = prefix[1] + "@status " + value
+		}
+	} else if metaStyle == "legacy" {
+		prefix := regexp.MustCompile(`^(\s*(?://|#+)\s*)\[`).FindStringSubmatch(out[lastMeta])
+		if len(prefix) != 0 {
+			insert = prefix[1] + "[status: " + value + "]"
+		}
+	}
+	if insert != "" {
+		out = append(out[:lastMeta+1], append([]string{insert}, out[lastMeta+1:]...)...)
+		return strings.Join(out, newline)
+	}
+	prefix := "//"
+	if kind == PYTHON {
+		prefix = "#"
+	}
+	insertAt := 0
+	if len(out) != 0 && strings.HasPrefix(strings.TrimPrefix(out[0], "\ufeff"), "#!") {
+		insertAt = 1
+	}
+	out = append(out[:insertAt], append([]string{prefix + " [status: " + value + "]", ""}, out[insertAt:]...)...)
+	return strings.Join(out, newline)
 }
 
 func upsertPluginCronAnnotation(script, schedule string, scriptType ...string) string {

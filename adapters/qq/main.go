@@ -59,7 +59,7 @@ type sender struct {
 
 type Message struct {
 	GroupID     interface{} `json:"group_id"`
-	Message     string      `json:"message"`
+	Message     interface{} `json:"message"`
 	MessageID   interface{} `json:"message_id"`
 	MessageType string      `json:"message_type"`
 	PostType    string      `json:"post_type"`
@@ -69,6 +69,32 @@ type Message struct {
 	// SubType     string      `json:"sub_type"`
 	Time   int         `json:"time"`
 	UserID interface{} `json:"user_id"`
+}
+
+func parseOneBotMessage(data []byte) (*Message, string, bool) {
+	msg := &Message{}
+	if err := json.Unmarshal(data, msg); err != nil || msg.PostType != "message" || msg.UserID == nil {
+		return nil, "", false
+	}
+	if msg.SelfID != nil && fmt.Sprint(msg.SelfID) == fmt.Sprint(msg.UserID) {
+		return nil, "", false
+	}
+	content := msg.RawMessage
+	if strings.TrimSpace(content) == "" {
+		if text, ok := msg.Message.(string); ok {
+			content = text
+		}
+	}
+	content = strings.ReplaceAll(content, "\\r", "\n")
+	content = qqNewlinePattern.ReplaceAllString(content, "\n")
+	content = strings.ReplaceAll(content, "amp;", "")
+	content = strings.ReplaceAll(content, "&#91;", "[")
+	content = strings.ReplaceAll(content, "&#93;", "]")
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, "", false
+	}
+	return msg, content, true
 }
 
 type GroupInfo struct {
@@ -223,39 +249,6 @@ func init() {
 			adapter := &core.Factory{}
 			adapter.Init("qq", botID, nil)
 			defer adapter.Destroy()
-			// adapter.SetGroupKick(func(uid string, gid string, reject_add_request bool) bool {
-			// 	qqcon.WriteJSON(CallApi{
-			// 		Action: "set_group_kick",
-			// 		Params: map[string]interface{}{
-			// 			"group_id":           utils.Int(gid),
-			// 			"user_id":            utils.Int(uid),
-			// 			"reject_add_request": reject_add_request,
-			// 		},
-			// 	})
-			// 	return true
-			// })
-			// adapter.SetGroupBan(func(uid string, gid string, duration int) bool {
-			// 	qqcon.WriteJSON(CallApi{
-			// 		Action: "set_group_ban",
-			// 		Params: map[string]interface{}{
-			// 			"group_id": utils.Int(gid),
-			// 			"user_id":  utils.Int(uid),
-			// 			"duration": duration,
-			// 		},
-			// 	})
-			// 	return true
-			// })
-			// adapter.SetGroupUnban(func(uid string, gid string) bool {
-			// 	qqcon.WriteJSON(CallApi{
-			// 		Action: "set_group_ban",
-			// 		Params: map[string]interface{}{
-			// 			"group_id": utils.Int(gid),
-			// 			"user_id":  utils.Int(uid),
-			// 			"duration": 1,
-			// 		},
-			// 	})
-			// 	return true
-			// })
 			adapter.SetReplyHandler(func(msg map[string]interface{}) string {
 				if debug {
 					logs.Debug("QQ发送消息：", string(utils.JsonMarshal(msg)))
@@ -349,22 +342,10 @@ func init() {
 					}
 				}
 
-				msg := &Message{}
-				json.Unmarshal(data, msg)
-				// if msg.MessageType != "private"} //&& adapter.IsAdapter(botID) {
-				// 	continue
-				// }
-				if msg.SelfID == msg.UserID {
+				msg, content, ok := parseOneBotMessage(data)
+				if !ok {
 					continue
 				}
-
-				msg.RawMessage = strings.ReplaceAll(msg.RawMessage, "\\r", "\n")
-				msg.RawMessage = qqNewlinePattern.ReplaceAllString(msg.RawMessage, "\n")
-				content := msg.RawMessage
-				content = strings.Replace(content, "amp;", "", -1)
-				content = strings.Replace(content, "&#91;", "[", -1)
-				content = strings.Replace(content, "&#93;", "]", -1)
-				content = strings.Trim(content, " ")
 				_msg := map[string]interface{}{
 					"user_id":    utils.Itoa(msg.UserID),
 					"chat_id":    core.ChatID(msg.GroupID),

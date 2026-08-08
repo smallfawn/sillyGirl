@@ -24,11 +24,11 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var cbs = []func(){}
 	var rules []string
 	var admin bool
-	var disable bool = plugin_disable.GetString(uuid) == "b:true"
+	var statusEnabled = true
 	var priority int
 	var title string
 	var public bool
-	var description string
+	var desc string
 	var icon string
 	var version string = "v1.0.0"
 	var author string
@@ -40,7 +40,6 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var hasForm bool
 	var hasUserForm bool
 	var usesSmallCat = smallCatCallPattern.MatchString(script)
-	var usesSmallCatDeclared *bool
 	var carry bool
 	var classes = []string{}
 	ks := map[string]bool{}
@@ -109,6 +108,8 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 
 		case "admin":
 			admin = parsePluginBool(res[2])
+		case "status":
+			statusEnabled = parsePluginBoolDefault(res[2], true)
 		case "priority":
 			priority = utils.Int(strings.TrimSpace(res[2]))
 		case "title":
@@ -116,7 +117,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		case "public":
 			public = parsePluginBool(res[2])
 		case "desc":
-			description = strings.TrimSpace(res[2])
+			desc = strings.TrimSpace(res[2])
 		case "icon":
 			icon = strings.TrimSpace(res[2])
 		case "version":
@@ -138,13 +139,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 			onStart = parsePluginBool(res[2])
 		case "web":
 			web = parsePluginBool(res[2])
-		case "smallcat":
-			declared := parsePluginBool(res[2])
-			usesSmallCatDeclared = &declared
 		}
-	}
-	if usesSmallCatDeclared != nil {
-		usesSmallCat = *usesSmallCatDeclared
 	}
 	hasForm = pluginFormCallPattern.MatchString(script)
 	hasUserForm = userFormCallPattern.MatchString(script)
@@ -152,12 +147,12 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		Rules:        rules,
 		Admin:        admin,
 		Priority:     priority,
-		Disable:      disable,
+		Status:       pluginStatusValue(statusEnabled),
 		UUID:         uuid,
 		Title:        title,
 		Public:       public,
 		Open:         plugin_open.GetBool(uuid),
-		Description:  description,
+		Desc:         desc,
 		Icon:         pluginIconOrDefault(icon),
 		Version:      version,
 		Author:       author,
@@ -167,7 +162,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		Web:          web,
 		Origin:       origin,
 		Cron:         crons,
-		Running:      onStart || web,
+		Running:      statusEnabled && (onStart || web),
 		HasForm:      hasForm,
 		HasUserForm:  hasUserForm,
 		UsesSmallCat: usesSmallCat,
@@ -204,8 +199,6 @@ func normalizePluginMetaKey(key string) string {
 	switch key {
 	case "", "param":
 		return ""
-	case "description":
-		return "desc"
 	default:
 		return key
 	}

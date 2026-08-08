@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"crypto/sha1"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -27,30 +28,12 @@ var processes sync.Map
 var nodePluginSourceHashCache sync.Map
 
 func initNodePlugins() {
-	root := strings.ReplaceAll(nodePluginsRoot(), "\\", "/")
-	plugins := []string{root}
-	os.Mkdir(root, 0755)
+	root := nodePluginsRoot()
+	os.MkdirAll(root, 0755)
 	_ = ensureNodeSillygirlModule(root)
 	_, _ = ensurePythonSillygirlModule()
-	// fmt.Println("root", root)
-	files, _ := os.ReadDir(root)
-	for _, file := range files {
-		if shouldIgnoreNodePluginEntry(file.Name()) {
-			continue
-		}
-		path := root + "/" + file.Name()
-		if !file.IsDir() {
-			if class, ok := CheckMainIndex(file.Name()); ok {
-				AddNodePlugin(path, nodePluginNameFromPath(path), class)
-			}
-			continue
-		}
-		plugins = append(plugins, path)
-		index, class := FindMainIndex(path)
-
-		if index != "" {
-			AddNodePlugin(index, nodePluginNameFromPath(index), class)
-		}
+	for _, plugin := range discoverNodePluginScripts(root) {
+		_ = AddNodePlugin(plugin.Path, plugin.Identity, plugin.Class)
 	}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -58,12 +41,15 @@ func initNodePlugins() {
 		return
 	}
 	defer watcher.Close()
-	// 要监控的文件夹路径
-	for _, dir := range plugins {
-		err = watcher.Add(dir)
-		if err != nil {
-			fmt.Println("添加监视目录失败：", err)
-			return
+	if err := watcher.Add(root); err != nil {
+		fmt.Println("添加监视目录失败：", err)
+		return
+	}
+	if files, readErr := os.ReadDir(root); readErr == nil {
+		for _, file := range files {
+			if file.IsDir() && !shouldIgnoreNodePluginEntry(file.Name()) {
+				_ = watcher.Add(filepath.Join(root, file.Name()))
+			}
 		}
 	}
 
@@ -74,69 +60,58 @@ func initNodePlugins() {
 				return
 			}
 			// fmt.Println(event.Name, "op", event.Op.String())
-			event.Name = strings.ReplaceAll(event.Name, "\\", "/")
-			files := strings.Split(strings.Replace(event.Name, root+"/", "", 1), "/")
-			var plugin_dir = false
-			var plugin_index = false
-			var plugin_name = ""
-			var class = ""
-			switch len(files) {
-			case 1:
-				if shouldIgnoreNodePluginEntry(files[0]) {
-					continue
-				}
-				if class, plugin_index = CheckMainIndex(files[0]); plugin_index {
-					plugin_name = strings.TrimSuffix(files[0], filepath.Ext(files[0]))
-				} else {
-					plugin_dir = true
-					// fmt.Println("目录事件")
-					plugin_name = files[0]
-				}
-			case 2:
-				class, plugin_index = CheckMainIndex(files[1])
-				plugin_name = files[0]
-			}
-			if plugin_name == "." {
+			clean := filepath.Clean(event.Name)
+			rel, relErr := filepath.Rel(root, clean)
+			if relErr != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				continue
 			}
-			switch event.Op.String() {
-			case "CREATE":
-				if plugin_dir {
-					info, err := os.Stat(event.Name)
-					// fmt.Println(err)
-					if err == nil && info.IsDir() {
-						if shouldIgnoreNodePluginEntry(filepath.Base(event.Name)) {
-							continue
+			parts := strings.Split(filepath.ToSlash(rel), "/")
+			if len(parts) == 0 || len(parts) > 2 || shouldIgnoreNodePluginEntry(parts[0]) {
+				continue
+			}
+			if event.Op&fsnotify.Create != 0 {
+				if info, statErr := os.Stat(clean); statErr == nil && info.IsDir() && len(parts) == 1 {
+					_ = watcher.Add(clean)
+					for _, plugin := range discoverNodePluginScripts(root) {
+						if strings.EqualFold(filepath.Dir(plugin.Path), clean) {
+							_ = AddNodePlugin(plugin.Path, plugin.Identity, plugin.Class)
 						}
-						index, class := FindMainIndex(event.Name)
-						if class != "" {
-							AddNodePlugin(index, nodePluginNameFromPath(index), class)
-						}
-						watcher.Add(event.Name)
-						// fmt.Println("增加插件目录", event.Name)
-					} else {
-						// fmt.Println("非插件目录", event.Name)
 					}
-				} else if plugin_index {
-					// fmt.Println("增加插件", event.Name)
-					// RemNodePlugin(plugin_name)
-					AddNodePlugin(event.Name, plugin_name, class)
+					continue
 				}
-			case "REMOVE", "RENAME", "REMOVE|RENAME", "REMOVE|WRITE":
-				if plugin_dir {
-					watcher.Remove(event.Name)
-					// fmt.Println("移除插件目录", event.Name)
-					// fmt.Println("移除插件", plugin_name)
-					AddNodePlugin(event.Name, plugin_name, UNKNOWN)
-				} else if plugin_index {
-					// fmt.Println("移除插件", plugin_name)
-					AddNodePlugin(event.Name, plugin_name, class)
+			}
+			if len(parts) == 1 && event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+				_ = watcher.Remove(clean)
+				removed := []struct {
+					path     string
+					identity string
+				}{}
+				for _, plugin := range installedPluginSnapshot() {
+					if plugin != nil && plugin.Path != "" && samePath(filepath.Dir(plugin.Path), clean) {
+						removed = append(removed, struct {
+							path     string
+							identity string
+						}{plugin.Path, nodePluginIdentityFromPath(plugin.Path)})
+					}
 				}
-			case "WRITE": //, "CHMOD"
-				if plugin_index {
-					AddNodePlugin(event.Name, plugin_name, class)
-					// fmt.Println("变更插件", event.Name, plugin_name)
+				for _, plugin := range removed {
+					_ = AddNodePlugin(plugin.path, plugin.identity, UNKNOWN)
 				}
+				continue
+			}
+			class, script := CheckMainIndex(filepath.Base(clean))
+			if !script {
+				continue
+			}
+			identity := nodePluginIdentityFromPath(clean)
+			if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+				_ = AddNodePlugin(clean, identity, UNKNOWN)
+			} else if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+				if _, pathErr := checkedNodeScriptPath(clean); pathErr != nil {
+					console.Error("忽略插件目录外的脚本事件 %s：%v", clean, pathErr)
+					continue
+				}
+				_ = AddNodePlugin(clean, identity, class)
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -184,7 +159,7 @@ func addNodePluginLocked(path, name, class string) error {
 		return err
 	}
 	script := string(data)
-	hash := fmt.Sprintf("%x", sha1.Sum(data))
+	hash := fmt.Sprintf("%x", sha256.Sum256(data))
 	if loaded := loadedNodePluginLocked(uuid); loaded != nil && samePath(loaded.Path, cleanPath) {
 		if cached, ok := nodePluginSourceHashCache.Load(cleanPath); ok && cached == hash {
 			return nil
@@ -211,6 +186,8 @@ func addNodePluginLocked(path, name, class string) error {
 	case PYTHON:
 		f.Suffix = ".py"
 	}
+	f.Dependencies = parseDeclaredDependencies(script, class)
+	f.ModuleDependencies = parseDeclaredModuleDependencies(script, class)
 	f.Path = path
 	if f.HasForm || f.HasUserForm {
 		var err error
@@ -413,7 +390,7 @@ func addNodePluginLocked(path, name, class string) error {
 	for _, cb := range cbs {
 		cb()
 	}
-	if !f.Disable { //!f.OnStart &&
+	if pluginExecutionEnabled(f) { //!f.OnStart &&
 		if rf == nil {
 			// console.Log("已加载 %s%s", f.Title, f.Suffix)
 		} else {
@@ -448,10 +425,7 @@ func unloadNodePluginLocked(uuid string) *common.Function {
 			}
 		}
 		Functions = append(Functions[:i], Functions[i+1:]...)
-		CancelPluginCrons(uuid)
-		CancelPluginWebs(uuid)
 		CancelPluginlistening(uuid)
-		remStatic(uuid)
 		storage.DisableHandle(uuid)
 		return rf
 	}
@@ -901,13 +875,14 @@ declare let console: {
 declare const container: ContainerApi;
 export { Adapter, Bucket, container, plugin, user, sender, utils, console, };`
 
-func defaultScript(title string) string {
-	name := safePluginDirName(title)
+func defaultScript(title, name string) string {
+	name = safePluginDirName(firstNonEmpty(name, title))
 	return `// [title: ` + title + `]
 // [name: ` + name + `]
-// [description: 🐒这个人很懒什么都没有留下]
+// [desc: 🐒这个人很懒什么都没有留下]
 // [author: ` + sillyGirl.GetString("author", "佚名") + `]
 // [version: v1.0.1]
+// [status: true]
 // [public: false]
 
 const {
@@ -921,13 +896,14 @@ const {
 `
 }
 
-func defaultPythonScript(title string) string {
-	name := safePluginDirName(title)
+func defaultPythonScript(title, name string) string {
+	name = safePluginDirName(firstNonEmpty(name, title))
 	return `# [title: ` + title + `]
 # [name: ` + name + `]
-# [description: 这个人很懒什么都没有留下]
+# [desc: 这个人很懒什么都没有留下]
 # [author: ` + sillyGirl.GetString("author", "佚名") + `]
 # [version: v1.0.1]
+# [status: true]
 # [public: false]
 
 import asyncio

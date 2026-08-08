@@ -15,7 +15,7 @@ from pathlib import Path
 META_RE = re.compile(
     r"^\s*(?://|#+)\s*\[\s*([\w+-]+)\s*:\s*(.*?)\s*\]\s*$", re.MULTILINE
 )
-REQUIRED = ("title", "name", "description", "version")
+REQUIRED = ("title", "name", "desc", "version")
 ACTIVATORS = ("rule", "cron", "on_start", "web")
 FORBIDDEN = ("[param:", "BncrDB", "BncrCreateSchema", "BncrPluginConfig", "SillyGirlPluginConfig")
 SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -26,8 +26,6 @@ def metadata(source: str) -> dict[str, list[str]]:
     result: dict[str, list[str]] = {}
     for key, value in META_RE.findall(source):
         result.setdefault(key.lower(), []).append(value.strip())
-    if "desc" in result and "description" not in result:
-        result["description"] = result["desc"]
     return result
 
 
@@ -82,13 +80,26 @@ def validate(path: Path, allow_inactive: bool) -> dict[str, object]:
             parsed = json.loads(value)
             if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
                 raise ValueError("not a string array")
+            expected_module_suffix = ".py" if path.suffix.lower() == ".py" else ".js"
+            for item in parsed:
+                if not item.startswith("./"):
+                    continue
+                if (
+                    ".." in item
+                    or "/" in item[2:]
+                    or "\\" in item
+                    or not item.lower().endswith(expected_module_suffix)
+                ):
+                    errors.append(
+                        f"invalid module dependency {item!r}; expected ./name{expected_module_suffix}"
+                    )
         except (json.JSONDecodeError, ValueError) as exc:
             errors.append(f"depe must be a JSON string array: {exc}")
 
     for token in FORBIDDEN:
         if token in source:
             errors.append(f"obsolete API or metadata: {token}")
-    if re.search(r"(?m)^\s*(?://|#)\s*@(?:title|name|description|desc|version|rule|cron)\b", source):
+    if re.search(r"(?m)^\s*(?://|#)\s*@(?:title|name|desc|version|rule|cron)\b", source):
         warnings.append("legacy @ metadata detected; use [key: value] for new plugins")
     if re.search(r"\bTODO\b", source, re.IGNORECASE):
         warnings.append("TODO placeholder remains")
@@ -99,7 +110,7 @@ def validate(path: Path, allow_inactive: bool) -> dict[str, object]:
             warnings.append("JavaScript plugin does not import sillygirl")
         node = shutil.which("node")
         if node:
-            proc = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+            proc = subprocess.run([node, "--check", str(path)], capture_output=True, text=True, check=False)
             if proc.returncode:
                 errors.append("node --check: " + (proc.stderr.strip() or proc.stdout.strip()))
         else:

@@ -31,23 +31,16 @@ import {
   ApiError,
   clearAuthToken,
   get,
-  getAuthToken,
   post,
   saveStorage,
   setAuthToken,
 } from "../../api";
-import type {
-  AdminUserRow,
-  CarryGroup,
-  CurrentUser,
-  DaidaiPanel,
-  Master,
-  PluginInfo,
-  QinglongPanel,
-  Reply,
-  SmallcatPanel,
-  Task,
-} from "../../types";
+import type { AdminUserRow, CurrentUser, PluginInfo } from "../../types";
+import {
+  confirmPluginDependencyInstall,
+  declaredPluginDependenciesFromContent,
+  pluginDependencies,
+} from "./pluginInstallPrompt";
 import { apiData, type ApiEnvelope } from "./adminApi";
 import { useNormalUsersAdmin } from "./useNormalUsersAdmin";
 import { useCarryAdmin } from "./useCarryAdmin";
@@ -69,17 +62,6 @@ export function useAdminController() {
     id: number;
     own?: boolean;
   };
-
-  function apiData<T>(res: ApiEnvelope<T> | T): T {
-    if (
-      res &&
-      typeof res === "object" &&
-      "data" in (res as Record<string, unknown>)
-    ) {
-      return (res as ApiEnvelope<T>).data;
-    }
-    return res as T;
-  }
 
   type PageKey =
     | "welcome"
@@ -334,8 +316,8 @@ export function useAdminController() {
   const overviewVersion = computed(() => {
     const info = user.value?.version || {};
     return {
-      local: info.local || "1.0.9",
-      remote: info.remote || info.local || "1.0.9",
+      local: info.local || "1.1.0",
+      remote: info.remote || info.local || "1.1.0",
       source: info.source || "reserved",
       repository: info.repository || "https://github.com/smallfawn/sillyGirl",
     };
@@ -577,13 +559,6 @@ export function useAdminController() {
       : "carry";
   }
 
-  function maskSecret(value?: string) {
-    const text = `${value || ""}`.trim();
-    if (!text) return "-";
-    if (text.length <= 10) return "***";
-    return `${text.slice(0, 4)}...${text.slice(-4)}`;
-  }
-
   function navigate(next: PageKey, path?: string) {
     const url =
       path ||
@@ -750,7 +725,6 @@ export function useAdminController() {
     storageState,
     selectedStorageBucket,
     canRemoveStorageBucket,
-    loadStorageBuckets,
     loadStorage,
     changeStoragePage,
     saveStorageRow,
@@ -776,12 +750,9 @@ export function useAdminController() {
 
   const {
     isPluginCronTask,
-    taskPlatformLabels,
     tasks,
     loadTasks,
-    loadTaskSelects,
     openTask,
-    validateTaskCron,
     saveTask,
     removeTask,
     runTask,
@@ -791,7 +762,6 @@ export function useAdminController() {
   const {
     carry,
     loadCarry,
-    loadCarrySelects,
     changeCarryPlatform,
     openCarry,
     saveCarry,
@@ -800,13 +770,11 @@ export function useAdminController() {
 
   const {
     qinglong,
-    loadQinglongPanels,
     openQinglongPanel,
     testQinglongPanel,
     saveQinglongPanel,
     removeQinglongPanel,
     smallcat,
-    loadSmallcatPanels,
     smallcatQuotaText,
     openSmallcatPanel,
     testSmallcatPanel,
@@ -814,9 +782,7 @@ export function useAdminController() {
     removeSmallcatPanel,
     showSmallcatOpenids,
     daidai,
-    loadDaidaiPanels,
     applyAdminPanels,
-    loadAdminPanels,
     openDaidaiPanel,
     testDaidaiPanel,
     saveDaidaiPanel,
@@ -846,10 +812,13 @@ export function useAdminController() {
     sourceRemoving: {} as Record<string, boolean>,
     installing: {} as Record<string, boolean>,
     uninstalling: {} as Record<string, boolean>,
+    dependencyChecking: {} as Record<string, boolean>,
+    toggling: {} as Record<string, boolean>,
     uninstallModal: {
       open: false,
       row: null as PluginInfo | null,
       deleteConfig: false,
+      dependents: [] as Array<{ id: string; title: string; type: string }>,
     },
     requestId: 0,
     detailOpen: false,
@@ -953,9 +922,10 @@ export function useAdminController() {
 
   const pluginEditorStarter = `// [title: 本地插件]
   // [name: localPlugin]
-  // [description: 本地手动新增插件]
+  // [desc: 本地手动新增插件]
   // [author: admin]
   // [version: v1.0.0]
+  // [status: true]
   // [rule: ^测试插件$]
   // [public: false]
   // [class: 工具]
@@ -1002,52 +972,8 @@ export function useAdminController() {
       .map((item) => item.trim())
       .filter(Boolean);
   }
-  function pluginDependencies(row: PluginInfo) {
-    return [
-      ...new Set(
-        (row.dependencies || [])
-          .map((item) => String(item).trim())
-          .filter(Boolean),
-      ),
-    ];
-  }
-  function declaredPluginDependenciesFromContent(content: string) {
-    const dependencies = new Set<string>();
-    const addRaw = (rawValue: string) => {
-      const raw = String(rawValue || "").trim();
-      if (!raw) return;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((item) => {
-            const value = String(item || "").trim();
-            if (value) dependencies.add(value);
-          });
-          return;
-        }
-        if (parsed && typeof parsed === "object") {
-          Object.keys(parsed).forEach((key) => {
-            const value = String(key || "").trim();
-            if (value) dependencies.add(value);
-          });
-          return;
-        }
-      } catch {
-        // 兼容 [depe: axios, ipp] 手写格式；规范格式仍然是 JSON array。
-      }
-      raw.split(/[,，\s]+/).forEach((item) => {
-        const value = item.trim().replace(/^['"]|['"]$/g, "");
-        if (value && value !== "[" && value !== "]") dependencies.add(value);
-      });
-    };
-    const legacyPattern =
-      /^[ \t]*(?:\/\/|#+)[ \t]*\[[ \t]*depe[ \t]*:[ \t]*(.*?)[ \t]*\][ \t]*$/gim;
-    let match: RegExpExecArray | null;
-    while ((match = legacyPattern.exec(content || ""))) addRaw(match[1]);
-    return [...dependencies];
-  }
-
   function pluginTriggerText(row: PluginInfo) {
+    if (row.module) return "共享模块";
     const rule = String(row.rule || "").trim();
     if (!rule) return "";
     return (
@@ -1181,7 +1107,18 @@ export function useAdminController() {
       plugins.sourceRemoving[address] = false;
     }
   }
-  async function installPlugin(row: PluginInfo) {
+  function installPlugin(row: PluginInfo) {
+    const packages = pluginDependencies(row);
+    if (
+      confirmPluginDependencyInstall(row, packages, () =>
+        performPluginInstall(row),
+      )
+    )
+      return;
+    void performPluginInstall(row);
+  }
+
+  async function performPluginInstall(row: PluginInfo) {
     const marketPage = plugins.current;
     const marketPageSize = plugins.pageSize;
     plugins.installing[row.id] = true;
@@ -1200,29 +1137,37 @@ export function useAdminController() {
         throw new ApiError(200, firstError);
       }
       const firstMessage = Object.values(data.messages || {}).find(Boolean);
-      message.success(firstMessage || (row.status === 1 ? "已更新" : "已安装"));
+      message.success(
+        firstMessage || (row.install_status === 1 ? "已更新" : "已安装"),
+      );
       await Promise.all([
         loadPlugins(marketPage, marketPageSize, false, true),
         loadUser(),
       ]);
-      try {
-        await offerPluginDependencyInstall(
-          row,
-          plugins.current,
-          plugins.pageSize,
-        );
-      } catch (error) {
-        message.warning(
-          `插件已安装，但依赖检测失败：${error instanceof Error ? error.message : "未知错误"}`,
-        );
-      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : "插件安装失败");
     } finally {
       plugins.installing[row.id] = false;
     }
   }
-  function openUninstallPluginModal(row: PluginInfo) {
+  async function openUninstallPluginModal(row: PluginInfo) {
+    plugins.uninstallModal.dependents = [];
+    if (row.module) {
+      plugins.dependencyChecking[row.id] = true;
+      try {
+        const res = await get<
+          ApiEnvelope<Array<{ id: string; title: string; type: string }>>
+        >(`/api/admin/local-plugins/${encodeURIComponent(row.id)}/dependents`);
+        plugins.uninstallModal.dependents = apiData(res) || [];
+      } catch (error) {
+        message.error(
+          error instanceof Error ? error.message : "依赖关系检查失败",
+        );
+        return;
+      } finally {
+        plugins.dependencyChecking[row.id] = false;
+      }
+    }
     plugins.uninstallModal.row = row;
     plugins.uninstallModal.deleteConfig = false;
     plugins.uninstallModal.open = true;
@@ -1236,6 +1181,7 @@ export function useAdminController() {
     plugins.uninstallModal.open = false;
     plugins.uninstallModal.row = null;
     plugins.uninstallModal.deleteConfig = false;
+    plugins.uninstallModal.dependents = [];
   }
   async function confirmUninstallPlugin() {
     const row = plugins.uninstallModal.row;
@@ -1273,6 +1219,7 @@ export function useAdminController() {
       plugins.uninstallModal.open = false;
       plugins.uninstallModal.row = null;
       plugins.uninstallModal.deleteConfig = false;
+      plugins.uninstallModal.dependents = [];
       message.success(
         deleteConfig
           ? "插件已卸载，配置已同步删除"
@@ -1289,21 +1236,53 @@ export function useAdminController() {
     }
   }
   function pluginStatusLabel(row: PluginInfo) {
-    if (row.status === 1) return "可更新";
-    if (row.status === 2 || row.status === 6) return "已安装";
+    if (row.install_status === 1) return "可更新";
+    if (row.install_status === 2 || row.install_status === 6) return "已安装";
     return "未安装";
   }
   function pluginStatusColor(row: PluginInfo) {
-    if (row.status === 1) return "green";
-    if (row.status === 2 || row.status === 6) return "green";
+    if (row.install_status === 1) return "green";
+    if (row.install_status === 2 || row.install_status === 6) return "green";
     return "default";
   }
   function pluginInstalled(row: PluginInfo) {
-    return row.status === 1 || row.status === 2 || row.status === 6;
+    return (
+      row.install_status === 1 ||
+      row.install_status === 2 ||
+      row.install_status === 6
+    );
+  }
+
+  function pluginRuntimeEnabled(row: PluginInfo) {
+    return pluginInstalled(row) && row.status !== false;
+  }
+
+  async function togglePluginStatus(row: PluginInfo) {
+    const status = !pluginRuntimeEnabled(row);
+    plugins.toggling[row.id] = true;
+    try {
+      const res = await post<ApiEnvelope<{ id?: string; status?: boolean }>>(
+        `/api/admin/local-plugins/${encodeURIComponent(row.id)}/status`,
+        { status },
+      );
+      const data = apiData(res);
+      const currentStatus = data?.status ?? status;
+      row.status = currentStatus;
+      if (plugins.detail?.id === row.id) plugins.detail.status = currentStatus;
+      message.success(
+        `${row.title || row.id} 已${currentStatus ? "开启" : "关闭"}`,
+      );
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : "插件状态更新失败",
+      );
+    } finally {
+      plugins.toggling[row.id] = false;
+    }
   }
 
   function pluginUpgradable(row: PluginInfo) {
-    return row.status === 1;
+    return row.install_status === 1;
   }
 
   function pluginCanOpen(row: PluginInfo) {
@@ -1318,7 +1297,7 @@ export function useAdminController() {
   }
 
   function pluginCanManage(row: PluginInfo) {
-    return pluginCanConfigure(row) || pluginCanOpen(row);
+    return !row.module && (pluginCanConfigure(row) || pluginCanOpen(row));
   }
 
   function pluginEditorLanguageExtension(): Extension {
@@ -1453,11 +1432,8 @@ export function useAdminController() {
     else destroyPluginEditor();
   }
   function pluginEditorMetaValue(content: string, key: string) {
-    const aliases = new Set(
-      (key === "desc" ? ["desc", "description"] : [key]).map((item) =>
-        item.toLowerCase(),
-      ),
-    );
+    const metaKeyWanted = key.toLowerCase();
+    let value = "";
     for (const line of String(content || "").split(/\r?\n/)) {
       const legacy =
         /^[ \t]*(?:\/\/|#+)[ \t]*\[[ \t]*([\d\w+-]+)[ \t]*:[ \t]*(.*)[ \t]*\][^\r\n]*$/.exec(
@@ -1466,10 +1442,18 @@ export function useAdminController() {
       if (legacy) {
         const metaKey = String(legacy[1] || "").toLowerCase();
         const metaValue = String(legacy[2] || "").trim();
-        if (aliases.has(metaKey) && metaValue) return metaValue;
+        if (metaKey === metaKeyWanted && metaValue) value = metaValue;
+        continue;
       }
+      const at = /^[ \t]*(?:\*[ \t]*)?@([\d\w+-]+)(?:[ \t]+(.+?))?[ \t]*$/.exec(
+        line,
+      );
+      if (!at) continue;
+      const metaKey = String(at[1] || "").toLowerCase();
+      const metaValue = String(at[2] || "").trim();
+      if (metaKey === metaKeyWanted && metaValue) value = metaValue;
     }
-    return "";
+    return value;
   }
 
   function pluginEditorMetaEnabled(content: string, key: string) {
@@ -1496,7 +1480,7 @@ export function useAdminController() {
             {
               title: "[title: xxx]",
               name: "[name: 文件名]",
-              desc: "[description: xxx]",
+              desc: "[desc: xxx]",
               version: "[version: vx.y.z]",
             } as Record<string, string>
           )[item],
@@ -1507,29 +1491,30 @@ export function useAdminController() {
       !pluginEditorMetaValue(content, "rule") &&
       !pluginEditorMetaValue(content, "cron") &&
       !pluginEditorMetaEnabled(content, "on_start") &&
-      !pluginEditorMetaEnabled(content, "web")
+      !pluginEditorMetaEnabled(content, "web") &&
+      !pluginEditorMetaEnabled(content, "module")
     ) {
-      missing.push("[rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]");
+      missing.push(
+        "[rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]/[module: true]",
+      );
     }
     if (missing.length) {
       message.warning(`插件注释缺少必须字段：${missing.join("、")}`);
       return false;
     }
-    if (pluginEditor.isNew || !pluginEditor.installed) {
-      const inputName = normalizePluginEditorFileBase(pluginEditor.name);
-      const metaName = normalizePluginEditorFileBase(
-        pluginEditorMetaValue(content, "name"),
+    const inputName = normalizePluginEditorFileBase(pluginEditor.name);
+    const metaName = normalizePluginEditorFileBase(
+      pluginEditorMetaValue(content, "name"),
+    );
+    if (!inputName) {
+      message.warning("插件名称不能为空，且必须和 [name: 文件名] 一致");
+      return false;
+    }
+    if (inputName !== metaName) {
+      message.warning(
+        `插件名称必须和 [name: ${metaName || "文件名"}] 一致，当前填写：${inputName}`,
       );
-      if (!inputName) {
-        message.warning("插件名称不能为空，且必须和 [name: 文件名] 一致");
-        return false;
-      }
-      if (inputName !== metaName) {
-        message.warning(
-          `插件名称必须和 [name: ${metaName || "文件名"}] 一致，当前填写：${inputName}`,
-        );
-        return false;
-      }
+      return false;
     }
     return true;
   }
@@ -1564,6 +1549,8 @@ export function useAdminController() {
     }
   }
   async function saveMarketPluginEditor() {
+    const creatingPlugin = pluginEditor.isNew || !pluginEditor.installed;
+    const currentMarketPage = plugins.current;
     const nameInput = document.getElementById(
       "plugin-editor-name",
     ) as HTMLInputElement | null;
@@ -1577,7 +1564,7 @@ export function useAdminController() {
         type: pluginEditor.type,
         content: pluginEditor.content,
       };
-      const res = pluginEditor.isNew
+      const res = creatingPlugin
         ? await post<
             ApiEnvelope<{
               id: string;
@@ -1607,6 +1594,7 @@ export function useAdminController() {
       const savedDependencies = declaredPluginDependenciesFromContent(
         pluginEditor.content,
       );
+      const savedStatus = pluginEditorMetaValue(pluginEditor.content, "status");
       const savedRow: PluginInfo = {
         id: pluginEditor.id,
         title:
@@ -1616,17 +1604,27 @@ export function useAdminController() {
           pluginEditor.id,
         type: savedRuntime,
         suffix: savedRuntime === "python" ? ".py" : ".js",
-        status: 2,
+        status: savedStatus
+          ? pluginEditorMetaEnabled(pluginEditor.content, "status")
+          : true,
+        install_status: 2,
         address: data?.path
           ? `local://?path=${encodeURIComponent(data.path)}`
           : "",
         dependencies: savedDependencies,
       };
-      message.success(pluginEditor.isNew ? "本地插件已新增" : "插件已保存");
+      message.success(creatingPlugin ? "本地插件已新增" : "插件已保存");
       pluginEditor.open = false;
       destroyPluginEditor();
-      plugins.tab = "private";
-      await Promise.all([loadUser(), loadPlugins(1, plugins.pageSize, true)]);
+      if (creatingPlugin) plugins.tab = "private";
+      await Promise.all([
+        loadUser(),
+        loadPlugins(
+          creatingPlugin ? 1 : currentMarketPage,
+          plugins.pageSize,
+          true,
+        ),
+      ]);
       try {
         await offerPluginDependencyInstall(savedRow);
       } catch (error) {
@@ -1694,7 +1692,7 @@ export function useAdminController() {
     tool: DependencyToolStatus;
   };
 
-  function marketPluginFileName(row: PluginInfo) {
+  function marketPluginSourcePath(row: PluginInfo) {
     const address = `${row.address || ""}`.trim();
     if (!address) return "";
     const query = address.includes("?")
@@ -1707,12 +1705,14 @@ export function useAdminController() {
         candidate.startsWith("http://") || candidate.startsWith("https://")
           ? new URL(candidate).pathname
           : decodeURIComponent(candidate).split("?")[0];
-      return pathname.split(/[\\/]/).filter(Boolean).pop() || "";
+      return pathname.replace(/\\/g, "/");
     } catch {
-      return (
-        candidate.split(/[\\/]/).filter(Boolean).pop()?.split("?")[0] || ""
-      );
+      return candidate.split("?")[0].replace(/\\/g, "/");
     }
+  }
+
+  function marketPluginFileName(row: PluginInfo) {
+    return marketPluginSourcePath(row).split("/").filter(Boolean).pop() || "";
   }
 
   function marketPluginDependencyRuntime(row: PluginInfo): DependencyRuntime {
@@ -1735,9 +1735,17 @@ export function useAdminController() {
       }>
     >(`/api/admin/dependencies?runtime=${encodeURIComponent(runtime)}`);
     const listData = apiData(listRes);
+    const sourcePath = marketPluginSourcePath(row).toLowerCase();
     const fileName = marketPluginFileName(row).toLowerCase();
     const fallbackName = fileName.replace(/\.(js|py)$/i, "");
     const plugin =
+      (sourcePath
+        ? (listData.plugins || []).find(
+            (item) =>
+              `${item.path || ""}`.replace(/\\/g, "/").toLowerCase() ===
+              sourcePath,
+          )
+        : undefined) ||
       (listData.plugins || []).find(
         (item) => `${item.file || ""}`.toLowerCase() === fileName,
       ) ||
@@ -1983,9 +1991,11 @@ export function useAdminController() {
     const key = `${nodeDeps.runtime}.${row.plugin}.${row.name}`;
     nodeDeps.removing[key] = true;
     try {
-      await post(
-        `/api/admin/dependency-deletions/${encodeURIComponent(nodeDeps.runtime)}/${encodeURIComponent(row.plugin || "__shared__")}/${encodeURIComponent(row.name)}`,
-      );
+      await post("/api/admin/dependency-deletions", {
+        runtime: nodeDeps.runtime,
+        plugin: row.plugin || "__shared__",
+        package: row.name,
+      });
       message.success("依赖已卸载");
       await loadNodeDependencies(nodeDeps.plugin);
     } catch (error) {
@@ -2971,13 +2981,9 @@ export function useAdminController() {
   async function downloadSystemBackup() {
     systemBackup.downloading = true;
     try {
-      const headers = new Headers();
-      const token = getAuthToken();
-      if (token) headers.set("Authorization", `Bearer ${token}`);
       const response = await fetch("/api/admin/system-backups/current", {
         credentials: "include",
         cache: "no-store",
-        headers,
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
@@ -3247,6 +3253,7 @@ export function useAdminController() {
     pluginIconIsImage,
     pluginInitial,
     pluginInstalled,
+    pluginRuntimeEnabled,
     pluginOpenAvailable,
     pluginPanelChoices,
     pluginPanelEmptyText,
@@ -3322,6 +3329,7 @@ export function useAdminController() {
     testQinglongPanel,
     testSmallcatPanel,
     togglePluginEditorTheme,
+    togglePluginStatus,
     toggleTaskEnabled,
     toggleWebChat,
     user,

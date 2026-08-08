@@ -1,18 +1,14 @@
-export type ApiResult<T = unknown> = {
-  success?: boolean;
-  data?: T;
-  page?: number;
-  total?: number;
-  status?: string;
-  currentAuthority?: string;
-  errorMessage?: string;
-  [key: string]: unknown;
-};
-
 export type CurrentUser = {
   name?: string;
   avatar?: string;
-  plugins?: Array<{ path: string; name: string; create_at?: string; type?: 'node' | 'python' | string; file?: string; plugin?: string }>;
+  plugins?: Array<{
+    path: string;
+    name: string;
+    create_at?: string;
+    type?: "node" | "python" | string;
+    file?: string;
+    plugin?: string;
+  }>;
   adapters?: AdapterStatus[];
   integrations?: Record<string, IntegrationStatus>;
   user_stats?: UserStats;
@@ -78,11 +74,11 @@ export type PluginInfo = {
   version?: string;
   author?: string;
   icon?: string;
-  status?: number;
+  status?: boolean;
+  install_status?: number;
   current_version?: string;
   latest_version?: string;
   update_content?: string;
-  disable?: boolean;
   running?: boolean;
   debug?: boolean;
   public?: boolean;
@@ -99,6 +95,7 @@ export type PluginInfo = {
   address?: string;
   messages?: unknown;
   dependencies?: string[];
+  module_dependencies?: string[];
 };
 
 export type Reply = {
@@ -136,7 +133,12 @@ export type Task = {
   task_id?: string;
   title?: string;
   schedule?: string;
-  senders?: Array<{ chat_id?: string; user_id?: string; platform?: string; bot_id?: string }>;
+  senders?: Array<{
+    chat_id?: string;
+    user_id?: string;
+    platform?: string;
+    bot_id?: string;
+  }>;
   command?: string;
   scripts?: string[];
   created_at?: number;

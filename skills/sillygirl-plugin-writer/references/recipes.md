@@ -7,7 +7,7 @@ Copy the nearest recipe, replace its metadata and business logic, then run the b
 ```js
 // [title: Echo]
 // [name: echo]
-// [description: Echo a captured value]
+// [desc: Echo a captured value]
 // [author: AI]
 // [version: v1.0.0]
 // [rule: raw ^echo [内容]$]
@@ -30,7 +30,7 @@ main().catch(async (error) => {
 ```js
 // [title: API Query]
 // [name: apiQuery]
-// [description: Query a configured API]
+// [desc: Query a configured API]
 // [author: AI]
 // [version: v1.0.0]
 // [rule: raw ^查询$]
@@ -66,7 +66,7 @@ main().catch(async (error) => {
 ```js
 // [title: Daily Job]
 // [name: dailyJob]
-// [description: Run every day at 08:00]
+// [desc: Run every day at 08:00]
 // [author: AI]
 // [version: v1.0.0]
 // [cron: 0 0 8 * * *]
@@ -89,7 +89,7 @@ main().catch((error) => {
 ```js
 // [title: Carry Processor]
 // [name: carryProcessor]
-// [description: Process carry content]
+// [desc: Process carry content]
 // [author: AI]
 // [version: v1.0.0]
 // [rule: raw ^处理 [内容]$]
@@ -110,7 +110,7 @@ main().catch(async (error) => s.reply(`执行失败：${error?.message || error}
 ```js
 // [title: Health Server]
 // [name: healthServer]
-// [description: Expose a local health endpoint]
+// [desc: Expose a local health endpoint]
 // [author: AI]
 // [version: v1.0.0]
 // [web: true]
@@ -134,7 +134,7 @@ http.createServer((request, response) => {
 ```python
 # [title: Python Echo]
 # [name: pythonEcho]
-# [description: Echo a captured value]
+# [desc: Echo a captured value]
 # [author: AI]
 # [version: v1.0.0]
 # [rule: raw ^py [内容]$]

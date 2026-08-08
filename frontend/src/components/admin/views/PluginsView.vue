@@ -15,7 +15,6 @@ import {
   Wand2,
 } from "lucide-vue-next";
 import Button from "ant-design-vue/es/button";
-import Checkbox from "ant-design-vue/es/checkbox";
 import Empty from "ant-design-vue/es/empty";
 import Form from "ant-design-vue/es/form";
 import Input from "ant-design-vue/es/input";
@@ -36,6 +35,8 @@ import message from "ant-design-vue/es/message";
 import { python } from "@codemirror/lang-python";
 import { ref } from "vue";
 import { useAdminViewContext } from "../adminViewContext";
+import PluginStatusButton from "../PluginStatusButton.vue";
+import PluginUninstallModal from "../PluginUninstallModal.vue";
 
 const {
   addPluginSource,
@@ -69,6 +70,7 @@ const {
   pluginIconIsImage,
   pluginInitial,
   pluginInstalled,
+  pluginRuntimeEnabled,
   pluginOpenAvailable,
   pluginPanelChoices,
   pluginPanelEmptyText,
@@ -87,6 +89,7 @@ const {
   settings,
   syncPluginEditorLanguage,
   togglePluginEditorTheme,
+  togglePluginStatus,
   user,
 } = useAdminViewContext();
 </script>
@@ -97,6 +100,7 @@ const {
       <TabPane key="all" :tab="`全部 ${plugins.meta.all ?? ''}`" />
       <TabPane key="latest" :tab="`最新发布 ${plugins.meta.latest ?? ''}`" />
       <TabPane key="private" :tab="`非公开 ${plugins.meta.private ?? ''}`" />
+      <TabPane key="module" :tab="`依赖模块 ${plugins.meta.modules ?? ''}`" />
       <TabPane key="tab1" :tab="`已安装 ${plugins.meta.tab1 ?? ''}`" />
       <TabPane key="tab2" :tab="`未安装 ${plugins.meta.tab2 ?? ''}`" />
       <TabPane key="tab3" :tab="`可更新 ${plugins.meta.tab3 ?? ''}`" />
@@ -179,6 +183,7 @@ const {
                 class="plugin-card-cron-badge"
                 >定时</Tag
               >
+              <Tag v-if="record.module" color="purple">依赖模块</Tag>
             </div>
             <div class="plugin-card-meta">
               <Tag>{{
@@ -195,6 +200,19 @@ const {
             </div>
           </div>
           <div class="plugin-card-actions">
+            <PluginStatusButton
+              v-if="pluginInstalled(record) && !record.module"
+              :record="record"
+              :enabled="pluginRuntimeEnabled(record)"
+              :loading="plugins.toggling[record.id]"
+              :blocked="
+                Boolean(
+                  plugins.installing[record.id] ||
+                  plugins.uninstalling[record.id],
+                )
+              "
+              @toggle="togglePluginStatus(record)"
+            />
             <Button
               v-if="pluginCanManage(record)"
               class="plugin-card-settings"
@@ -222,7 +240,10 @@ const {
               class="plugin-card-remove"
               shape="circle"
               danger
-              :loading="plugins.uninstalling[record.id]"
+              :loading="
+                plugins.uninstalling[record.id] ||
+                plugins.dependencyChecking[record.id]
+              "
               :title="`卸载 ${record.title || record.id}`"
               :aria-label="`卸载 ${record.title || record.id}`"
               @click="openUninstallPluginModal(record)"
@@ -274,7 +295,7 @@ const {
         <Alert
           type="info"
           show-icon
-          message="本地新增插件会自动作为非公开插件进入插件市场；保存前必须包含 [title: xxx]、[name: 文件名]、[description: xxx]、[version: vx.y.z]，以及 [rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]。"
+          message="本地新增插件会自动作为非公开插件进入插件市场；保存前必须包含 [title: xxx]、[name: 文件名]、[desc: xxx]、[version: vx.y.z]，以及 [rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]/[module: true]。"
         />
         <Form layout="inline" class="plugin-editor-meta">
           <Form.Item
@@ -444,6 +465,7 @@ const {
             <Tag :color="pluginStatusColor(plugins.detail)">{{
               pluginStatusLabel(plugins.detail)
             }}</Tag>
+            <Tag v-if="plugins.detail.module" color="purple">依赖模块</Tag>
             <Tag v-if="plugins.detail.version">{{
               plugins.detail.version
             }}</Tag>
@@ -462,7 +484,9 @@ const {
       </Typography.Paragraph>
 
       <Alert
-        v-if="plugins.detail.status === 1 && plugins.detail.update_content"
+        v-if="
+          plugins.detail.install_status === 1 && plugins.detail.update_content
+        "
         type="success"
         show-icon
         :message="`更新内容：${plugins.detail.update_content}`"
@@ -470,7 +494,7 @@ const {
 
       <dl class="plugin-detail-meta">
         <template v-if="pluginTriggerText(plugins.detail)">
-          <dt>触发口令</dt>
+          <dt>{{ plugins.detail.module ? "用途" : "触发口令" }}</dt>
           <dd class="mono">{{ pluginTriggerText(plugins.detail) }}</dd>
         </template>
         <template v-if="plugins.detail.author">
@@ -492,7 +516,7 @@ const {
             </Space>
           </dd>
         </template>
-        <template v-if="plugins.detail.status === 1">
+        <template v-if="plugins.detail.install_status === 1">
           <dt>版本</dt>
           <dd>
             当前 {{ plugins.detail.current_version || "-" }} / 最新
@@ -507,41 +531,17 @@ const {
     </div>
   </Modal>
 
-  <Modal
-    v-model:open="plugins.uninstallModal.open"
-    title="卸载插件"
-    width="620px"
-    ok-text="确认卸载"
-    cancel-text="取消"
-    :confirm-loading="
+  <PluginUninstallModal
+    :state="plugins.uninstallModal"
+    :loading="
       plugins.uninstallModal.row
-        ? plugins.uninstalling[plugins.uninstallModal.row.id]
+        ? Boolean(plugins.uninstalling[plugins.uninstallModal.row.id])
         : false
     "
-    :ok-button-props="{ danger: true }"
-    @ok="confirmUninstallPlugin"
+    @confirm="confirmUninstallPlugin"
     @cancel="cancelUninstallPluginModal"
-  >
-    <Space
-      v-if="plugins.uninstallModal.row"
-      direction="vertical"
-      size="middle"
-      style="width: 100%"
-    >
-      <Alert
-        type="warning"
-        show-icon
-        :message="`确认卸载「${plugins.uninstallModal.row.title || plugins.uninstallModal.row.id}」？`"
-        description="卸载会删除本地插件脚本文件并停止正在运行的插件任务。"
-      />
-      <Checkbox v-model:checked="plugins.uninstallModal.deleteConfig">
-        同步删除插件配置
-      </Checkbox>
-      <Typography.Paragraph class="muted" style="margin-bottom: 0">
-        勾选后会同时删除该插件的配置值和配置表单缓存；不勾选则保留配置，后续重新安装可继续使用。
-      </Typography.Paragraph>
-    </Space>
-  </Modal>
+    @update-delete-config="plugins.uninstallModal.deleteConfig = $event"
+  />
 
   <Modal
     v-model:open="pluginConfigs.modalOpen"

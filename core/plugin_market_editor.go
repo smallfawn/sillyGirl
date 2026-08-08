@@ -20,6 +20,10 @@ type marketPluginScriptRequest struct {
 	Content string `json:"content"`
 }
 
+type marketPluginStatusRequest struct {
+	Status *bool `json:"status"`
+}
+
 var (
 	pluginPublicMetaPattern       = regexp.MustCompile(`(?im)^([ \t]*(?:\*[ \t]*)?@public[ \t]+)(true|false|1|yes|on)[ \t]*$`)
 	pluginLegacyPublicMetaPattern = regexp.MustCompile(`(?im)^([ \t]*(?://|#+)[ \t]*\[[ \t]*public[ \t]*:[ \t]*)(true|false|1|yes|on)([ \t]*\][^\r\n]*)$`)
@@ -28,9 +32,57 @@ var (
 
 func initMarketPluginEditor() {
 	GinApi(GET, "/api/admin/local-plugins/:id", RequireAuth, getMarketPluginScript)
+	GinApi(GET, "/api/admin/local-plugins/:id/dependents", RequireAuth, getMarketPluginDependents)
 	GinApi(POST, "/api/admin/local-plugins", RequireAuth, createMarketPluginScript)
 	GinApi(POST, "/api/admin/local-plugins/:id", RequireAuth, saveMarketPluginScript)
+	GinApi(POST, "/api/admin/local-plugins/:id/status", RequireAuth, setMarketPluginStatus)
 	GinApi(POST, "/api/admin/local-plugins/:id/deletions", RequireAuth, deleteMarketPluginScript)
+}
+
+func setMarketPluginStatus(ctx *gin.Context) {
+	req := marketPluginStatusRequest{}
+	if err := ctx.BindJSON(&req); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	if req.Status == nil {
+		ApiUnprocessable(ctx, "插件 status 必须是布尔值")
+		return
+	}
+	id := strings.TrimSpace(ctx.Param("id"))
+	f, err := nodeFunctionByID(id)
+	if err != nil {
+		ApiNotFound(ctx, err.Error())
+		return
+	}
+	if f.Module {
+		ApiConflict(ctx, "依赖模块没有独立运行状态")
+		return
+	}
+	if _, err := checkedNodeScriptPath(f.Path); err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	if err := updatePluginStatusAnnotation(f, *req.Status); err != nil {
+		ApiInternalError(ctx, err.Error())
+		return
+	}
+	ApiOK(ctx, gin.H{"id": f.UUID, "status": *req.Status})
+}
+
+func getMarketPluginDependents(ctx *gin.Context) {
+	id := strings.TrimSpace(ctx.Param("id"))
+	f, err := nodeFunctionByID(id)
+	if err != nil {
+		ApiNotFound(ctx, err.Error())
+		return
+	}
+	dependents, err := pluginModuleDependents(f, installedPluginSnapshot())
+	if err != nil {
+		ApiInternalError(ctx, err.Error())
+		return
+	}
+	ApiOK(ctx, dependents)
 }
 
 func getMarketPluginScript(ctx *gin.Context) {
@@ -75,7 +127,7 @@ func getMarketPluginScript(ctx *gin.Context) {
 	ApiOK(ctx, map[string]interface{}{
 		"id":        f.UUID,
 		"title":     f.Title,
-		"name":      safePluginDirName(firstNonEmpty(f.Title, strings.TrimSuffix(filepath.Base(f.Address), filepath.Ext(f.Address)), "plugin")),
+		"name":      availablePluginName(filepath.Join(nodePluginsRoot(), "local"), firstNonEmpty(f.Title, strings.TrimSuffix(filepath.Base(f.Address), filepath.Ext(f.Address)), "plugin")),
 		"type":      class,
 		"installed": false,
 		"editable":  true,
@@ -118,29 +170,56 @@ func saveMarketPluginScript(ctx *gin.Context) {
 		return
 	}
 	req.ID = strings.TrimSpace(ctx.Param("id"))
-	content, err := validateAndNormalizeLocalPluginContent(req.Content)
-	if err != nil {
-		ApiUnprocessable(ctx, err.Error())
-		return
-	}
 	if f, err := nodeFunctionByID(req.ID); err == nil {
+		content, err := validateExistingPluginContent(req.Content)
+		if err != nil {
+			ApiUnprocessable(ctx, err.Error())
+			return
+		}
 		path, err := checkedNodeScriptPath(f.Path)
 		if err != nil {
 			ApiInternalError(ctx, err.Error())
 			return
 		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := validateLocalPluginRequestName(nodePluginNameFromPath(path), content, f.Type); err != nil {
+			ApiUnprocessable(ctx, err.Error())
+			return
+		}
+		refreshed, err := replaceLoadedPluginSource(path, []byte(content), nodePluginIdentityFromPath(path), f.Type)
+		if err != nil {
 			ApiInternalError(ctx, err.Error())
 			return
 		}
-		if err := AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), f.Type); err != nil {
-			ApiInternalError(ctx, err.Error())
-			return
-		}
-		ApiOK(ctx, map[string]interface{}{"id": f.UUID, "title": f.Title, "type": f.Type, "path": path})
+		ApiOK(ctx, map[string]interface{}{"id": refreshed.UUID, "title": refreshed.Title, "type": refreshed.Type, "path": path})
 		return
 	}
 	ApiNotFound(ctx, "本地插件不存在")
+}
+
+func replaceLoadedPluginSource(path string, content []byte, identity, class string) (*common.Function, error) {
+	pluginLock.Lock()
+	defer pluginLock.Unlock()
+	previous, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		return nil, err
+	}
+	if err := addNodePluginLocked(strings.ReplaceAll(path, "\\", "/"), identity, class); err != nil {
+		if restoreErr := os.WriteFile(path, previous, 0644); restoreErr != nil {
+			return nil, fmt.Errorf("%w；恢复原插件源码失败：%v", err, restoreErr)
+		}
+		if restoreErr := addNodePluginLocked(strings.ReplaceAll(path, "\\", "/"), identity, class); restoreErr != nil {
+			return nil, fmt.Errorf("%w；恢复原插件运行状态失败：%v", err, restoreErr)
+		}
+		return nil, err
+	}
+	loaded := loadedNodePluginLocked(nameUuid(identity))
+	if loaded == nil {
+		return nil, errors.New("插件源码已写入，但重载后未找到插件")
+	}
+	return loaded, nil
 }
 
 func deleteMarketPluginScript(ctx *gin.Context) {
@@ -148,6 +227,10 @@ func deleteMarketPluginScript(ctx *gin.Context) {
 	f, err := nodeFunctionByID(req.ID)
 	if err != nil {
 		ApiNotFound(ctx, err.Error())
+		return
+	}
+	if err := ensurePluginModuleUnused(f, installedPluginSnapshot()); err != nil {
+		ApiConflict(ctx, err.Error())
 		return
 	}
 	path, err := checkedNodeScriptPath(f.Path)
@@ -159,18 +242,18 @@ func deleteMarketPluginScript(ctx *gin.Context) {
 		ApiInternalError(ctx, err.Error())
 		return
 	}
-	AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), UNKNOWN)
+	AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginIdentityFromPath(path), UNKNOWN)
 	ApiNoContent(ctx)
 }
 
 func marketPluginByID(id string) *common.Function {
-	for _, f := range plugin_list {
+	for _, f := range pluginMarketItemsSnapshot() {
 		if f != nil && f.UUID == id {
 			return f
 		}
 	}
 	initPluginList()
-	for _, f := range plugin_list {
+	for _, f := range pluginMarketItemsSnapshot() {
 		if f != nil && f.UUID == id {
 			return f
 		}
@@ -200,6 +283,14 @@ func readMarketPluginRemoteContent(f *common.Function) (string, string, error) {
 }
 
 func validateAndNormalizeLocalPluginContent(content string) (string, error) {
+	return validatePluginContent(content, true)
+}
+
+func validateExistingPluginContent(content string) (string, error) {
+	return validatePluginContent(content, false)
+}
+
+func validatePluginContent(content string, forcePrivate bool) (string, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return "", errors.New("插件源码不能为空")
@@ -208,11 +299,11 @@ func validateAndNormalizeLocalPluginContent(content string) (string, error) {
 	missing := []string{}
 	for _, key := range []string{"title", "name", "desc", "version"} {
 		if strings.TrimSpace(meta[key]) == "" {
-			missing = append(missing, map[string]string{"title": "[title: xxx]", "name": "[name: 文件名]", "desc": "[description: xxx]", "version": "[version: vx.y.z]"}[key])
+			missing = append(missing, map[string]string{"title": "[title: xxx]", "name": "[name: 文件名]", "desc": "[desc: xxx]", "version": "[version: vx.y.z]"}[key])
 		}
 	}
-	if strings.TrimSpace(meta["rule"]) == "" && strings.TrimSpace(meta["cron"]) == "" && strings.TrimSpace(meta["on_start"]) != "true" && strings.TrimSpace(meta["web"]) != "true" {
-		missing = append(missing, "[rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]")
+	if strings.TrimSpace(meta["rule"]) == "" && strings.TrimSpace(meta["cron"]) == "" && !parsePluginBool(meta["on_start"]) && !parsePluginBool(meta["web"]) && !parsePluginBool(meta["module"]) {
+		missing = append(missing, "[rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]/[module: true]")
 	}
 	if len(missing) > 0 {
 		return "", fmt.Errorf("插件注释缺少必须字段：%s", strings.Join(missing, "、"))
@@ -220,7 +311,10 @@ func validateAndNormalizeLocalPluginContent(content string) (string, error) {
 	if _, err := normalizePluginMetaFileName(meta["name"], normalizeMarketPluginScriptType("", "", content)); err != nil {
 		return "", err
 	}
-	return forceLocalPluginPrivate(content), nil
+	if forcePrivate {
+		content = forceLocalPluginPrivate(content)
+	}
+	return content, nil
 }
 
 func pluginMetaMap(content string) map[string]string {
@@ -346,9 +440,9 @@ func writeNewLocalMarketPlugin(name, class, content string) (*common.Function, s
 	if err != nil {
 		return nil, "", err
 	}
-	pluginName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	root := nodePluginsRoot()
-	if err := os.MkdirAll(root, 0755); err != nil {
+	target := filepath.Join(root, "local")
+	if err := os.MkdirAll(target, 0755); err != nil {
 		return nil, "", err
 	}
 	if class == NODE {
@@ -361,17 +455,35 @@ func writeNewLocalMarketPlugin(name, class, content string) (*common.Function, s
 	} else if _, err := ensurePythonSillygirlModule(); err != nil {
 		return nil, "", err
 	}
-	index := filepath.Join(root, fileName)
+	index := filepath.Join(target, fileName)
 	if _, err := checkedNodeScriptPath(index); err != nil {
 		return nil, "", err
 	}
-	if err := os.WriteFile(index, []byte(content), 0644); err != nil {
+	if err := ensurePluginBaseAvailable(target, fileName); err != nil {
 		return nil, "", err
 	}
-	if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), pluginName, class); err != nil {
+	file, err := os.OpenFile(index, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil, "", fmt.Errorf("插件文件已存在：%s", filepath.Base(index))
+		}
 		return nil, "", err
 	}
-	f, err := nodeFunctionByID(nameUuid(pluginName))
+	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close()
+		_ = os.Remove(index)
+		return nil, "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(index)
+		return nil, "", err
+	}
+	identity := nodePluginIdentityFromPath(index)
+	if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), identity, class); err != nil {
+		_ = os.Remove(index)
+		return nil, "", err
+	}
+	f, err := nodeFunctionByID(nameUuid(identity))
 	if err != nil {
 		return nil, "", err
 	}

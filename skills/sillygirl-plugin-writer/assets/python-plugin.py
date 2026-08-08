@@ -1,16 +1,16 @@
 # [title: AI Python 示例插件]
 # [name: aiPythonExample]
-# [description: 可直接修改的 SillyGirl Python 插件模板]
+# [desc: 可直接修改的 SillyGirl Python 插件模板]
 # [author: AI]
 # [version: v1.0.0]
 # [rule: raw ^Python示例$]
+# [status: true]
 # [public: false]
 
 import asyncio
 
 from sillygirl import Bucket, plugin
 from sillygirl import sender as s
-
 
 Config = plugin.Form({
     "prefix": plugin.Form.string().title("回复前缀").default("SillyGirl"),

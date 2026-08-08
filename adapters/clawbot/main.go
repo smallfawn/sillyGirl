@@ -585,7 +585,7 @@ func (a *apiClient) post(ctx context.Context, endpoint string, body interface{},
 		return err
 	}
 	defer httpResp.Body.Close()
-	data, err := io.ReadAll(httpResp.Body)
+	data, err := utils.ReadAllLimit(httpResp.Body, 4<<20)
 	if err != nil {
 		return err
 	}

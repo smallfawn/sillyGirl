@@ -78,13 +78,17 @@ var (
 )
 
 func DestroyAdapterByUUID(uuid string) {
-	// BotsLocker.RLock()
-	// defer BotsLocker.RUnlock()
-	// for i := range Bots {
-	// 	if Bots[i].uuid == uuid {
-	// 		go Bots[i].Destroy()
-	// 	}
-	// }
+	BotsLocker.RLock()
+	adapters := make([]*Factory, 0)
+	for _, adapter := range Bots {
+		if adapter.uuid == uuid {
+			adapters = append(adapters, adapter)
+		}
+	}
+	BotsLocker.RUnlock()
+	for _, adapter := range adapters {
+		adapter.Destroy()
+	}
 }
 
 func GetMessageByUUID(uuid string) string {
@@ -93,7 +97,6 @@ func GetMessageByUUID(uuid string) string {
 	defer BotsLocker.RUnlock()
 	for i, bot := range Bots {
 		plt, id := i[0], i[1]
-		// fmt.Println("plt", plt, "id", id, botplt, bots_id)
 		if bot.uuid == uuid {
 			ss[0] = plt
 			ss = append(ss, id)
@@ -209,7 +212,6 @@ func GetAdapterBotsID(botplt string) []string {
 	defer BotsLocker.RUnlock()
 	var bots_id = []string{}
 	for i := range Bots {
-		// fmt.Println("==", botplt == i[0], botplt, i[0])
 		if botplt == "" || botplt == i[0] {
 			bots_id = append(bots_id, i[1])
 		}
@@ -221,7 +223,6 @@ func GetAdapterBotPlts() []string {
 	defer BotsLocker.RUnlock()
 	var bot_plts = []string{}
 	for i := range Bots {
-		// fmt.Println("==", botplt == i[0], botplt, i[0])
 		has := false
 		for _, bot_plt := range bot_plts {
 			if bot_plt == i[0] {
@@ -236,13 +237,11 @@ func GetAdapterBotPlts() []string {
 }
 
 func (f *Factory) Init(botplt, botid string, params map[string]interface{}) {
-	// fmt.Println(params)
 	if params != nil {
 		if _, ok := params["umod"]; ok {
 			f.umod = true
 		}
 	}
-	// fmt.Println("umod", f.umod)
 	f.ctx, f.cancel = context.WithCancel(context.Background())
 	BotsLocker.Lock()
 	defer BotsLocker.Unlock()
@@ -256,7 +255,6 @@ func (f *Factory) Init(botplt, botid string, params map[string]interface{}) {
 		if v.uuid != f.uuid {
 			go v.Destroy()
 		}
-		//
 		console.Warn("%s机器人%s因冲突销毁！", botplt, botid)
 	}
 	Bots[[2]string{botplt, botid}] = f
@@ -402,11 +400,6 @@ func (f *Factory) Push(msg map[string]string) map[string]string {
 
 func (f *Factory) SetReplyHandler(function func(map[string]interface{}) string) {
 	f.reply = func(m map[string]interface{}) string {
-		// if f.uuid != "" {
-		// 	mutex := GetMutex(f.uuid)
-		// 	mutex.Lock()
-		// 	defer mutex.Unlock()
-		// }
 		defer func() {
 			err := recover()
 			if err != nil {
@@ -419,11 +412,6 @@ func (f *Factory) SetReplyHandler(function func(map[string]interface{}) string) 
 
 func (f *Factory) SetActionHandler(function func(map[string]interface{}) string) {
 	f.action = func(m map[string]interface{}) string {
-		// if f.uuid != "" {
-		// 	mutex := GetMutex(f.uuid)
-		// 	mutex.Lock()
-		// 	defer mutex.Unlock()
-		// }
 		defer func() {
 			err := recover()
 			if err != nil {
@@ -434,10 +422,6 @@ func (f *Factory) SetActionHandler(function func(map[string]interface{}) string)
 	}
 }
 
-// func (f *Factory) GetReplies() {
-
-// }
-
 func (f *Factory) GetUserMessages(user_id string, timeout int) []map[string]interface{} {
 	if timeout == 0 {
 		timeout = 2000
@@ -446,15 +430,11 @@ func (f *Factory) GetUserMessages(user_id string, timeout int) []map[string]inte
 	v, loaded := f.gmsgChan.LoadOrStore(user_id, &GMsgChan{})
 	ch := v.(*GMsgChan)
 	if !loaded {
-		// console.Debug("接收创建：", ch.Chan)
 		ch.Chan = make(chan map[string]interface{})
-	} else {
-		// console.Debug("接收加载：", ch.Chan)
 	}
 	if len(ch.Msgs) != 0 {
 		ch.Lock()
 		msgs = append(msgs, ch.Msgs...)
-		// console.Debug("数组接收：", msgs)
 		ch.Msgs = nil
 		ch.Unlock()
 		timeout = 1
@@ -464,9 +444,7 @@ func (f *Factory) GetUserMessages(user_id string, timeout int) []map[string]inte
 		case msg := <-ch.Chan:
 			msgs = append(msgs, msg)
 			timeout = 1
-			// console.Debug("管道接收：", msgs)
 		case <-time.After(time.Millisecond * time.Duration(timeout)):
-			// console.Debug("无消息")
 			goto HELL
 		}
 	}
@@ -517,7 +495,6 @@ func (f *Factory) SetIsAdmin(function func(string) bool) {
 func (f *Factory) Sender2(options map[string]string) *CustomSender {
 	var demo = *f.demo
 	sender := &demo
-	// sender.SetID()
 	if options != nil {
 		fsp := &common.FakerSenderParams{}
 		if v, ok := options[CONETNT]; ok {
@@ -544,8 +521,6 @@ func (f *Factory) Sender(options map[string]string) interface{} {
 func (f *Factory) Receive(props map[string]interface{}) *CustomSender {
 	var demo = *f.demo
 	sender := &demo
-	// sender.SetID()
-	// console.Log("senderId", sender.GetID())
 	emf := map[string]interface{}{}
 	for i := range props {
 		h := false
@@ -574,9 +549,7 @@ func (f *Factory) Receive(props map[string]interface{}) *CustomSender {
 		}
 	}
 	sender.SetExpandMessageInfo(emf)
-	// if sender.details.Content != "" {
 	Messages <- sender
-	// }
 	return sender
 }
 
@@ -673,7 +646,6 @@ func (sender *CustomSender) Reply(msgs ...interface{}) (string, error) {
 			"user_id":    user_id,
 			"chat_id":    sender.GetChatID(),
 			"bot_id":     bot_id,
-			// "uuid":       utils.GenUUID(),
 		}
 		for k, v := range sender.GetExpandMessageInfo() {
 			msg[k] = v
@@ -682,19 +654,14 @@ func (sender *CustomSender) Reply(msgs ...interface{}) (string, error) {
 			v, loaded := sender.F.gmsgChan.LoadOrStore(user_id, &GMsgChan{})
 			ch := v.(*GMsgChan)
 			if !loaded {
-				// console.Debug("发送创建：", ch.Chan)
 				ch.Chan = make(chan map[string]interface{})
-			} else {
-				// console.Debug("发送加载：", ch.Chan)
 			}
 			select {
 			case ch.Chan <- msg:
-				// console.Debug("管道发送：", msg, ch.Chan)
 			case <-time.After(time.Second):
 				ch.Lock()
 				defer ch.Unlock()
 				ch.Msgs = append(ch.Msgs, msg)
-				// console.Debug("数组发送：", msg)
 			}
 			return "", nil
 		}
@@ -715,7 +682,6 @@ func (sender *CustomSender) Reply(msgs ...interface{}) (string, error) {
 				return "", errors.New("获取消息ID超时")
 			}
 		} else {
-			//todo 阻塞延迟异常
 			v := sender.F.reply(msg)
 			return v, nil
 		}
@@ -729,7 +695,6 @@ const (
 	USER_ID    = "user_id"
 	CHAT_ID    = "chat_id"
 	IS_ADMIN   = "is_admin"
-	// UUID       = "message_id"
 )
 
 func (sender *CustomSender) Copy() common.Sender {

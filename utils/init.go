@@ -1,8 +1,6 @@
 package utils
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,12 +18,20 @@ import (
 	"strings"
 	"time"
 
-	// "github.com/smallfawn/sillyGirl/core/logs"
 	"github.com/google/uuid"
 	"github.com/smallfawn/sillyGirl/core/logs"
 )
 
 var SlaveMode bool
+
+const publicIPResponseLimit int64 = 1024
+
+var publicIPEndpoints = []string{
+	"https://ipapi.co/ip/",
+	"https://ifconfig.co/ip",
+}
+
+var publicIPHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 func GenUUID() string {
 	u2, _ := uuid.NewUUID()
@@ -53,12 +59,6 @@ func TrimHiddenCharacter(originStr string) string {
 	return strings.ReplaceAll(string(dstRunes), "￼", "")
 }
 
-func Md5(str string) string {
-	h := md5.New()
-	h.Write([]byte(str))
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 func Itob(i uint64) []byte {
 	return []byte(fmt.Sprint(i))
 }
@@ -78,7 +78,7 @@ func init() {
 	if err != nil {
 		logs.Warn("结束进程失败：", err)
 	}
-	err = os.WriteFile(GetPidFile(), []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
+	err = os.WriteFile(GetPidFile(), []byte(fmt.Sprintf("%d", os.Getpid())), 0o600)
 	if err != nil {
 		logs.Warn("写入进程ID失败：", err)
 	}
@@ -108,7 +108,7 @@ var GetDataHome = func() string {
 		}
 	}
 	once.Do(func() {
-		if err := os.MkdirAll(home, os.ModePerm); err != nil {
+		if err := os.MkdirAll(home, 0o700); err != nil {
 			fmt.Println(err)
 		}
 	})
@@ -130,8 +130,6 @@ func KillProcess(pid int) error {
 	default:
 		return fmt.Errorf("unsupported operating system: %v", runtime.GOOS)
 	}
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if _, ok := err.(*exec.ExitError); ok {
 		return nil
@@ -196,8 +194,16 @@ func CopyFile(src string, dst string) error {
 	}
 	defer srcFile.Close()
 
-	// 创建目标文件，如果目标文件已存在则覆盖
-	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+	info, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+	perm := info.Mode().Perm()
+	if perm == 0 {
+		perm = 0o600
+	}
+	// 创建目标文件并保留源文件权限。
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
@@ -242,10 +248,6 @@ func Daemon(str ...string) {
 		panic(err)
 	}
 	logs.Info("程序以静默形式运行")
-	// err = os.WriteFile(GetPidFile(), []byte(fmt.Sprintf("%d", proc.Process.Pid)), 0o644)
-	if err != nil {
-		logs.Info(err)
-	}
 	os.Exit(0)
 }
 
@@ -443,46 +445,46 @@ func Itoa(i interface{}) string {
 }
 
 func GetPublicIP() (string, error) {
-	var ip string
+	return getPublicIP(publicIPHTTPClient, publicIPEndpoints)
 
-	// 使用 ipapi.co 获取公网IP地址
-	resp, err := http.Get("https://ipapi.co/ip/")
-	if err == nil {
-		defer resp.Body.Close()
-		ipBytes, err := io.ReadAll(resp.Body)
-		if err == nil {
-			ip = string(ipBytes)
+}
+
+func getPublicIP(client *http.Client, endpoints []string) (string, error) {
+	for _, endpoint := range endpoints {
+		resp, err := client.Get(endpoint)
+		if err != nil {
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, publicIPResponseLimit+1))
+		closeErr := resp.Body.Close()
+		if readErr != nil || closeErr != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 || int64(len(data)) > publicIPResponseLimit {
+			continue
+		}
+		ip := strings.TrimSpace(string(data))
+		if IsIPv4(ip) {
+			return ip, nil
 		}
 	}
-
-	if !IsIPv4(ip) {
-		ip = ""
-	}
-
-	// 使用 ifconfig.co 获取公网IP地址
-	if ip == "" {
-		resp, err = http.Get("https://ifconfig.co/ip")
-		if err == nil {
-			defer resp.Body.Close()
-			ipBytes, err := io.ReadAll(resp.Body)
-			if err == nil {
-				ip = string(ipBytes)
-			}
-		}
-	}
-
-	if ip == "" {
-		return "", fmt.Errorf("获取IP地址失败")
-	}
-
-	if !IsIPv4(ip) {
-		return "", fmt.Errorf("获取IP地址失败")
-	}
-
-	return ip, nil
+	return "", errors.New("获取IP地址失败")
 }
 
 func IsIPv4(ip string) bool {
 	parsedIP := net.ParseIP(ip)
 	return parsedIP != nil && parsedIP.To4() != nil
+}
+
+// ReadAllLimit reads at most limit bytes and reports oversized input without
+// allocating memory for the remainder of the stream.
+func ReadAllLimit(reader io.Reader, limit int64) ([]byte, error) {
+	if limit < 0 {
+		return nil, errors.New("读取限制不能为负数")
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("内容超过 %d 字节限制", limit)
+	}
+	return data, nil
 }

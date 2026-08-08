@@ -1,8 +1,10 @@
 package core
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,5 +86,30 @@ func TestServeAdminSPAUsesSuccessfulDocumentStatus(t *testing.T) {
 	}
 	if recorder.Body.Len() == 0 {
 		t.Fatal("admin SPA response body is empty")
+	}
+}
+
+func TestGinAPILimitsRequestBody(t *testing.T) {
+	before := len(apiRouteSnapshot())
+	var readErr error
+	GinApi(POST, "/api/request-limit-probe", func(ctx *gin.Context) {
+		_, readErr = io.ReadAll(ctx.Request.Body)
+		ctx.Status(http.StatusNoContent)
+	})
+	routes := apiRouteSnapshot()
+	if len(routes) != before+1 {
+		t.Fatalf("GinApi added %d routes, want 1", len(routes)-before)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/request-limit-probe",
+		strings.NewReader(strings.Repeat("x", int(maxAPIRequestBodyBytes)+1)),
+	)
+	routes[before].Handle(ctx)
+	if readErr == nil {
+		t.Fatal("GinApi accepted an oversized request body")
 	}
 }

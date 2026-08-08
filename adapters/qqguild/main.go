@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,14 +42,101 @@ const (
 	tokenRetryMax     = time.Minute
 	modeWebhook       = "webhook"
 	modeWebsocket     = "websocket"
+	sceneChannel      = "channel"
+	sceneDirect       = "direct"
+	sceneGroup        = "group"
+	sceneC2C          = "c2c"
 )
 
 var settings = core.MakeBucket(platform)
 var websocketIntents dto.Intent
+var configRestart = restartDebouncer{delay: 150 * time.Millisecond, action: restart}
+var botGoSensitivePatterns = []struct {
+	pattern     *regexp.Regexp
+	replacement string
+}{
+	{regexp.MustCompile(`(?i)("clientSecret"\s*:\s*")[^"]*(")`), `${1}<redacted>${2}`},
+	{regexp.MustCompile(`(?i)("access_token"\s*:\s*")[^"]*(")`), `${1}<redacted>${2}`},
+	{regexp.MustCompile(`(?i)(QQBot\s+)[A-Za-z0-9._~\-]+`), `${1}<redacted>`},
+}
+
+type restartDebouncer struct {
+	sync.Mutex
+	timer  *time.Timer
+	delay  time.Duration
+	action func()
+}
+
+type botGoLogger struct{}
+
+func (botGoLogger) Debug(v ...interface{}) {
+	if settings.GetBool("debug", false) {
+		core.Logs.Debug("BotGo: %s", sanitizeBotGoLog(fmt.Sprint(v...)))
+	}
+}
+
+func (botGoLogger) Info(v ...interface{}) {
+	core.Logs.Info("BotGo: %s", sanitizeBotGoLog(fmt.Sprint(v...)))
+}
+func (botGoLogger) Warn(v ...interface{}) {
+	core.Logs.Warn("BotGo: %s", sanitizeBotGoLog(fmt.Sprint(v...)))
+}
+func (botGoLogger) Error(v ...interface{}) {
+	core.Logs.Error("BotGo: %s", sanitizeBotGoLog(fmt.Sprint(v...)))
+}
+
+func (botGoLogger) Debugf(format string, v ...interface{}) {
+	if settings.GetBool("debug", false) {
+		core.Logs.Debug("BotGo: %s", sanitizeBotGoLog(fmt.Sprintf(format, v...)))
+	}
+}
+
+func (botGoLogger) Infof(format string, v ...interface{}) {
+	core.Logs.Info("BotGo: %s", sanitizeBotGoLog(fmt.Sprintf(format, v...)))
+}
+
+func (botGoLogger) Warnf(format string, v ...interface{}) {
+	core.Logs.Warn("BotGo: %s", sanitizeBotGoLog(fmt.Sprintf(format, v...)))
+}
+
+func (botGoLogger) Errorf(format string, v ...interface{}) {
+	core.Logs.Error("BotGo: %s", sanitizeBotGoLog(fmt.Sprintf(format, v...)))
+}
+
+func (botGoLogger) Sync() error { return nil }
+
+func sanitizeBotGoLog(value string) string {
+	if secret := strings.TrimSpace(settings.GetString("app_secret")); secret != "" {
+		value = strings.ReplaceAll(value, secret, "<redacted>")
+	}
+	for _, item := range botGoSensitivePatterns {
+		value = item.pattern.ReplaceAllString(value, item.replacement)
+	}
+	return value
+}
+
+func (d *restartDebouncer) schedule() {
+	d.Lock()
+	defer d.Unlock()
+	if d.timer != nil {
+		d.timer.Stop()
+	}
+	d.timer = time.AfterFunc(d.delay, func() {
+		d.Lock()
+		d.timer = nil
+		action := d.action
+		d.Unlock()
+		if action != nil {
+			action()
+		}
+	})
+}
 
 type messageAPI interface {
 	PostMessage(context.Context, string, *dto.MessageToCreate, ...options.Option) (*dto.Message, error)
 	PostDirectMessage(context.Context, *dto.DirectMessage, *dto.MessageToCreate, ...options.Option) (*dto.Message, error)
+	PostGroupMessage(context.Context, string, dto.APIMessage, ...options.Option) (*dto.Message, error)
+	PostC2CMessage(context.Context, string, dto.APIMessage, ...options.Option) (*dto.Message, error)
 }
 
 type bot struct {
@@ -80,17 +168,19 @@ var runtime = struct {
 }{}
 
 func init() {
+	botgo.SetLogger(botGoLogger{})
 	websocketIntents = event.RegisterHandlers(
 		event.ATMessageEventHandler(handleATMessage),
 		event.MessageEventHandler(handleGuildMessage),
 		event.DirectMessageEventHandler(handleDirectMessage),
+		event.GroupATMessageEventHandler(handleGroupATMessage),
+		event.C2CMessageEventHandler(handleC2CMessage),
 	)
 	core.GinApi(core.POST, webhookPath, receiveWebhook)
 	for _, key := range []string{"enable", "app_id", "app_secret", "mode", "sandbox", "debug"} {
 		key := key
 		storage.Watch(settings, key, func(old, new, key string) *storage.Final {
-			go restart()
-			return nil
+			return &storage.Final{EndFunc: configRestart.schedule}
 		})
 	}
 	go func() {
@@ -460,7 +550,7 @@ func handleATMessage(_ *dto.WSPayload, data *dto.WSATMessageData) error {
 		return nil
 	}
 	message := dto.Message(*data)
-	return dispatchMessage(&message, false)
+	return dispatchMessage(&message, sceneChannel)
 }
 
 func handleGuildMessage(_ *dto.WSPayload, data *dto.WSMessageData) error {
@@ -468,7 +558,7 @@ func handleGuildMessage(_ *dto.WSPayload, data *dto.WSMessageData) error {
 		return nil
 	}
 	message := dto.Message(*data)
-	return dispatchMessage(&message, false)
+	return dispatchMessage(&message, sceneChannel)
 }
 
 func handleDirectMessage(_ *dto.WSPayload, data *dto.WSDirectMessageData) error {
@@ -476,18 +566,34 @@ func handleDirectMessage(_ *dto.WSPayload, data *dto.WSDirectMessageData) error 
 		return nil
 	}
 	message := dto.Message(*data)
-	return dispatchMessage(&message, true)
+	return dispatchMessage(&message, sceneDirect)
 }
 
-func dispatchMessage(message *dto.Message, direct bool) error {
+func handleGroupATMessage(_ *dto.WSPayload, data *dto.WSGroupATMessageData) error {
+	if data == nil {
+		return nil
+	}
+	message := dto.Message(*data)
+	return dispatchMessage(&message, sceneGroup)
+}
+
+func handleC2CMessage(_ *dto.WSPayload, data *dto.WSC2CMessageData) error {
+	if data == nil {
+		return nil
+	}
+	message := dto.Message(*data)
+	return dispatchMessage(&message, sceneC2C)
+}
+
+func dispatchMessage(message *dto.Message, scene string) error {
 	b := currentBot()
 	if b == nil {
 		return fmt.Errorf("qqguild adapter is not ready")
 	}
-	return b.receive(message, direct)
+	return b.receive(message, scene)
 }
 
-func (b *bot) receive(message *dto.Message, direct bool) error {
+func (b *bot) receive(message *dto.Message, scene string) error {
 	if message == nil || message.Author == nil || message.Author.Bot {
 		return nil
 	}
@@ -499,12 +605,18 @@ func (b *bot) receive(message *dto.Message, direct bool) error {
 
 	chatID := ""
 	chatName := ""
-	if direct {
+	switch scene {
+	case sceneDirect:
 		dmGuildID := firstNonEmpty(message.GuildID, message.SrcGuildID)
 		if dmGuildID != "" {
 			b.rememberDirect(userID, dmGuildID)
 		}
-	} else {
+	case sceneGroup:
+		chatID = strings.TrimSpace(message.GroupID)
+		chatName = chatID
+	case sceneC2C:
+		// C2C uses the author openid as the reply target and has no chat id.
+	default:
 		chatID = strings.TrimSpace(message.ChannelID)
 		chatName = chatID
 	}
@@ -535,7 +647,9 @@ func (b *bot) receive(message *dto.Message, direct bool) error {
 		"qqguild_guild_id":        message.GuildID,
 		"qqguild_source_guild_id": message.SrcGuildID,
 		"qqguild_channel_id":      message.ChannelID,
-		"qqguild_direct":          direct,
+		"qqguild_group_id":        message.GroupID,
+		"qqguild_scene":           scene,
+		"qqguild_direct":          scene == sceneDirect,
 	}
 	if b.debug {
 		core.Logs.Debug("qqguild处理消息：%s", string(utils.JsonMarshal(params)))
@@ -562,7 +676,23 @@ func (b *bot) reply(ctx context.Context, msg map[string]interface{}) string {
 		result *dto.Message
 		err    error
 	)
-	if boolValue(msg["qqguild_direct"]) {
+	scene := strings.TrimSpace(stringValue(msg["qqguild_scene"]))
+	switch scene {
+	case sceneGroup:
+		groupID := firstNonEmpty(stringValue(msg["qqguild_group_id"]), stringValue(msg[core.CHAT_ID]))
+		if groupID == "" {
+			core.Logs.Warn("qqguild发送群消息失败：缺少 group_id")
+			return ""
+		}
+		result, err = b.api.PostGroupMessage(requestCtx, groupID, payload)
+	case sceneC2C:
+		userID := strings.TrimSpace(stringValue(msg[core.USER_ID]))
+		if userID == "" {
+			core.Logs.Warn("qqguild发送 C2C 消息失败：缺少 user_id")
+			return ""
+		}
+		result, err = b.api.PostC2CMessage(requestCtx, userID, payload)
+	case sceneDirect:
 		userID := strings.TrimSpace(stringValue(msg[core.USER_ID]))
 		dmGuildID := firstNonEmpty(
 			stringValue(msg["qqguild_guild_id"]),
@@ -574,7 +704,22 @@ func (b *bot) reply(ctx context.Context, msg map[string]interface{}) string {
 			return ""
 		}
 		result, err = b.api.PostDirectMessage(requestCtx, &dto.DirectMessage{GuildID: dmGuildID}, payload)
-	} else {
+	default:
+		// Keep compatibility with messages created before qqguild_scene existed.
+		if boolValue(msg["qqguild_direct"]) {
+			userID := strings.TrimSpace(stringValue(msg[core.USER_ID]))
+			dmGuildID := firstNonEmpty(
+				stringValue(msg["qqguild_guild_id"]),
+				stringValue(msg["qqguild_source_guild_id"]),
+				b.directGuildID(userID),
+			)
+			if dmGuildID == "" {
+				core.Logs.Warn("qqguild发送私信失败：缺少私信 guild_id")
+				return ""
+			}
+			result, err = b.api.PostDirectMessage(requestCtx, &dto.DirectMessage{GuildID: dmGuildID}, payload)
+			break
+		}
 		channelID := firstNonEmpty(stringValue(msg[core.CHAT_ID]), stringValue(msg["qqguild_channel_id"]))
 		if channelID == "" {
 			core.Logs.Warn("qqguild发送频道消息失败：缺少 channel_id")
