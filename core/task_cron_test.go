@@ -4,14 +4,34 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	"github.com/smallfawn/sillyGirl/core/common"
 	"github.com/smallfawn/sillyGirl/utils"
 )
+
+func writeTaskTestPlugin(t *testing.T, name, content string) string {
+	t.Helper()
+	root := nodePluginsRoot()
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(root, ".task-plugin-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func TestParseCronMetaValue(t *testing.T) {
 	tests := []struct {
@@ -63,6 +83,32 @@ func TestUpsertPluginCronAnnotationPython(t *testing.T) {
 	}
 }
 
+func TestUpsertPluginStatusAnnotation(t *testing.T) {
+	legacy := "// [title: Demo]\n// [status: true] 保留说明\nconsole.log('ok');\n"
+	updated := upsertPluginStatusAnnotation(legacy, false, NODE)
+	if strings.Count(updated, "[status:") != 1 || !strings.Contains(updated, "// [status: false] 保留说明") {
+		t.Fatalf("legacy status annotation was not updated cleanly:\n%s", updated)
+	}
+
+	atStyle := "/**\n * @title Demo\n * @rule ^demo$\n */\n"
+	updated = upsertPluginStatusAnnotation(atStyle, false, NODE)
+	if !strings.Contains(updated, " * @status false\n */") {
+		t.Fatalf("@status annotation was not inserted inside the metadata block:\n%s", updated)
+	}
+
+	python := "# [title: Demo]\nprint('ok')\n"
+	updated = upsertPluginStatusAnnotation(python, true, PYTHON)
+	if !strings.Contains(updated, "# [status: true]") {
+		t.Fatalf("python status annotation was not inserted:\n%s", updated)
+	}
+
+	shebang := "#!/usr/bin/env node\n// [title: Demo]\nconsole.log('ok');\n"
+	updated = upsertPluginStatusAnnotation(shebang, false, NODE)
+	if !strings.HasPrefix(updated, "#!/usr/bin/env node\n") || !strings.Contains(updated, "// [title: Demo]\n// [status: false]") {
+		t.Fatalf("node shebang or metadata header was damaged:\n%s", updated)
+	}
+}
+
 func TestScriptCommandForPythonFunction(t *testing.T) {
 	f := &common.Function{
 		Type: PYTHON,
@@ -77,11 +123,78 @@ func TestScriptCommandForPythonFunction(t *testing.T) {
 	}
 }
 
+func TestScriptCommandAndLookupUsePublisherIdentity(t *testing.T) {
+	t.Setenv("SILLYGIRL_DATA_PATH", t.TempDir())
+	root := nodePluginsRoot()
+	first := &common.Function{UUID: "author-a-same", Type: NODE, Path: filepath.Join(root, "author-a", "same.js"), Title: "Same A"}
+	second := &common.Function{UUID: "author-b-same", Type: NODE, Path: filepath.Join(root, "author-b", "same.js"), Title: "Same B"}
+	previous := Functions
+	Functions = []*common.Function{first, second}
+	t.Cleanup(func() { Functions = previous })
+
+	if got := scriptCommandForFunction(first); got != "node author-a/same.js" {
+		t.Fatalf("publisher command = %q", got)
+	}
+	if got := scriptFunctionByCommandTarget("author-b/same.js", NODE); got != second {
+		t.Fatalf("publisher lookup = %#v; want author-b plugin", got)
+	}
+	if got := scriptFunctionByCommandTarget("same.js", NODE); got != nil {
+		t.Fatalf("ambiguous bare lookup = %#v; want nil", got)
+	}
+}
+
 func TestDisabledTaskIsNotRegistered(t *testing.T) {
 	task := &Tasks{Schedule: "0 * * * *", Enable: false}
 	RegistTasks(task)
 	if task.CronID != 0 {
 		t.Fatalf("disabled task cron id = %d; want 0", task.CronID)
+	}
+}
+
+func TestPluginCronRegistrationUsesTaskAndPluginStatesIndependently(t *testing.T) {
+	uuid := "plugin-cron-registration-test-" + utils.GenUUID()
+	disabledTaskID := pluginCronTaskID(uuid+"-task-off", "task")
+	pluginCronStatus.Set(disabledTaskID, false)
+	previous := Functions
+	functions := []*common.Function{
+		{
+			UUID:   uuid + "-task-off",
+			Status: pluginStatusValue(true),
+			Cron:   map[string]string{"task": "0 0 1 1 *"},
+			Handle: func(common.Sender) interface{} { return nil },
+		},
+		{
+			UUID:   uuid + "-plugin-off",
+			Status: pluginStatusValue(false),
+			Cron:   map[string]string{"task": "0 0 1 1 *"},
+			Handle: func(common.Sender) interface{} { return nil },
+		},
+		{
+			UUID:   uuid + "-active",
+			Status: pluginStatusValue(true),
+			Cron:   map[string]string{"task": "0 0 1 1 *"},
+			Handle: func(common.Sender) interface{} { return nil },
+		},
+	}
+	t.Cleanup(func() {
+		for _, function := range functions {
+			for _, id := range function.CronIds {
+				CRON.Remove(cron.EntryID(id))
+			}
+		}
+		Functions = previous
+		pluginCronStatus.Set(disabledTaskID, "")
+	})
+
+	AddCommand(functions)
+	if len(functions[0].CronIds) != 0 {
+		t.Fatal("task-disabled plugin cron was registered")
+	}
+	if len(functions[1].CronIds) != 0 {
+		t.Fatal("plugin-disabled cron was registered")
+	}
+	if len(functions[2].CronIds) != 1 {
+		t.Fatalf("active plugin cron registrations = %d; want 1", len(functions[2].CronIds))
 	}
 }
 
@@ -103,37 +216,51 @@ func TestSetTaskEnabledPersistsOrdinaryTask(t *testing.T) {
 	}
 }
 
-func TestSetTaskEnabledUpdatesPluginConfig(t *testing.T) {
+func TestSetTaskEnabledPersistsPluginCronStateWithoutChangingPluginStatus(t *testing.T) {
 	uuid := "plugin-toggle-test-" + utils.GenUUID()
-	f := &common.Function{UUID: uuid, Type: NODE, Cron: map[string]string{"task": "0 * * * *"}}
+	taskID := pluginCronTaskID(uuid, "task")
+	path := writeTaskTestPlugin(t, "toggle.js", "// [title: Toggle]\n// [status: true]\n")
+	f := &common.Function{UUID: uuid, Type: NODE, Path: path, Cron: map[string]string{"task": "0 * * * *"}}
 	previous := Functions
 	Functions = append(Functions, f)
 	t.Cleanup(func() {
 		Functions = previous
-		pluginConfigValues.Set(uuid, "")
+		pluginCronStatus.Set(taskID, "")
 	})
 
-	if err := setTaskEnabled(pluginCronTaskID(uuid, "task"), false); err != nil {
+	if err := setTaskEnabled(taskID, false); err != nil {
 		t.Fatal(err)
 	}
-	if pluginExecutionEnabled(f) {
-		t.Fatal("plugin cron remains enabled")
+	if pluginCronTaskEnabled(uuid, "task") || pluginCronTask(f, "task").Enable {
+		t.Fatal("plugin cron task remains enabled")
+	}
+	if !pluginExecutionEnabled(f) {
+		t.Fatal("task switch changed the plugin status")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "// [status: true]") || strings.Contains(string(data), "// [status: false]") {
+		t.Fatalf("task switch changed the plugin status annotation:\n%s", data)
 	}
 }
 
 func TestPluginCronEnableOnlyUpdateDoesNotRequireTitle(t *testing.T) {
 	uuid := "plugin-toggle-request-test-" + utils.GenUUID()
-	f := &common.Function{UUID: uuid, Type: NODE, Cron: map[string]string{"task": "0 * * * *"}}
+	taskID := pluginCronTaskID(uuid, "task")
+	path := writeTaskTestPlugin(t, "toggle-request.js", "// [status: true]\n")
+	f := &common.Function{UUID: uuid, Type: NODE, Path: path, Cron: map[string]string{"task": "0 * * * *"}}
 	previous := Functions
 	Functions = append(Functions, f)
 	t.Cleanup(func() {
 		Functions = previous
-		pluginConfigValues.Set(uuid, "")
+		pluginCronStatus.Set(taskID, "")
 	})
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	handled := handleTaskEnabledOnlyUpdate(ctx, pluginCronTaskID(uuid, "task"), map[string]interface{}{
+	handled := handleTaskEnabledOnlyUpdate(ctx, taskID, map[string]interface{}{
 		"enable": false,
 	})
 	if !handled {
@@ -145,8 +272,11 @@ func TestPluginCronEnableOnlyUpdateDoesNotRequireTitle(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), "定时任务标题不能为空") {
 		t.Fatalf("enable-only update still requires a title: %s", recorder.Body.String())
 	}
-	if pluginExecutionEnabled(f) {
-		t.Fatal("plugin cron remains enabled after enable-only update")
+	if pluginCronTaskEnabled(uuid, "task") {
+		t.Fatal("plugin cron task remains enabled after enable-only update")
+	}
+	if !pluginExecutionEnabled(f) {
+		t.Fatal("enable-only task update changed the plugin status")
 	}
 }
 
@@ -191,10 +321,13 @@ func TestPluginCronTaskHydrationSupportsPartialUpdates(t *testing.T) {
 
 func TestRunTaskNowExecutesPluginCron(t *testing.T) {
 	uuid := "plugin-run-test-" + utils.GenUUID()
+	taskID := pluginCronTaskID(uuid, "task")
 	called := 0
+	path := writeTaskTestPlugin(t, "run-task.js", "// [status: true]\n")
 	f := &common.Function{
 		UUID: uuid,
 		Type: NODE,
+		Path: path,
 		Cron: map[string]string{"task": "0 * * * *"},
 		Handle: func(common.Sender) interface{} {
 			called++
@@ -205,10 +338,10 @@ func TestRunTaskNowExecutesPluginCron(t *testing.T) {
 	Functions = append(Functions, f)
 	t.Cleanup(func() {
 		Functions = previous
-		pluginConfigValues.Set(uuid, "")
+		pluginCronStatus.Set(taskID, "")
 	})
 
-	if err := runTaskNow(pluginCronTaskID(uuid, "task")); err != nil {
+	if err := runTaskNow(taskID); err != nil {
 		t.Fatal(err)
 	}
 	if called != 1 {
@@ -217,10 +350,20 @@ func TestRunTaskNowExecutesPluginCron(t *testing.T) {
 	if err := runTaskNow(pluginCronTaskID(uuid, "missing")); err == nil {
 		t.Fatal("unknown plugin cron platform was executed")
 	}
-	if err := setTaskEnabled(pluginCronTaskID(uuid, "task"), false); err != nil {
+	if err := setTaskEnabled(taskID, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := runTaskNow(pluginCronTaskID(uuid, "task")); err == nil {
-		t.Fatal("disabled plugin cron was executed")
+	if err := runTaskNow(taskID); err == nil || !strings.Contains(err.Error(), "定时任务未启用") {
+		t.Fatalf("disabled plugin cron execution error = %v", err)
+	}
+	if !pluginExecutionEnabled(f) {
+		t.Fatal("disabling the cron task changed the plugin status")
+	}
+	if err := setTaskEnabled(taskID, true); err != nil {
+		t.Fatal(err)
+	}
+	f.Status = pluginStatusValue(false)
+	if err := runTaskNow(taskID); err == nil || !strings.Contains(err.Error(), "插件未启用") {
+		t.Fatalf("disabled plugin execution error = %v", err)
 	}
 }

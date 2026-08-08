@@ -11,7 +11,7 @@ type Function struct {
 	Handle         func(Sender) interface{} `json:"-"`
 	Cron           map[string]string        `json:"cron"`
 	Priority       int                      `json:"-"`
-	Disable        bool                     `json:"disable"`
+	Status         *bool                    `json:"status"`
 	Hidden         bool                     `json:"-"`
 	CronIds        []int                    `json:"-"`
 	Origin         string                   `json:"-"`
@@ -19,7 +19,7 @@ type Function struct {
 	Title          string                   `json:"title"`
 	Type           string                   `json:"type"`   //脚本类型
 	Suffix         string                   `json:"suffix"` //脚本后缀
-	Description    string                   `json:"desc"`
+	Desc           string                   `json:"desc"`
 	Rule           string                   `json:"rule,omitempty"`
 	Public         bool                     `json:"public"`
 	Open           bool                     `json:"open"`
@@ -30,26 +30,27 @@ type Function struct {
 	UpdateContent  string                   `json:"update_content,omitempty"`
 	Author         string                   `json:"author"`
 	Class          string                   `json:"class"`
-	Status         int                      `json:"status"` //0未安装 1可更新 2已安装
+	InstallStatus  int                      `json:"install_status"` //0未安装 1可更新 2已安装
 	Address        string                   `json:"-"`
 	CreateAt       string                   `json:"create_at"`
 	Module         bool                     `json:"module"`
 	OnStart        bool                     `json:"on_start"`
 	Web            bool                     `json:"web"`
 	PluginPublisher
-	Running          bool        `json:"running"`
-	Downloads        int         `json:"downloads"`
-	HasForm          bool        `json:"has_form"`
-	HasUserForm      bool        `json:"has_user_form"`
-	ConfigRegistered bool        `json:"config_registered"`
-	UsesSmallCat     bool        `json:"uses_smallcat"`
-	Carry            bool        `json:"carry"`
-	Messages         interface{} `json:"messages"`
-	Classes          []string    `json:"-"`
-	Dependencies     []string    `json:"dependencies,omitempty"`
-	Debug            bool        `json:"debug"`
-	Path             string      `json:"-"`
-	Reload           func()      `json:"-"`
+	Running            bool        `json:"running"`
+	Downloads          int         `json:"downloads"`
+	HasForm            bool        `json:"has_form"`
+	HasUserForm        bool        `json:"has_user_form"`
+	ConfigRegistered   bool        `json:"config_registered"`
+	UsesSmallCat       bool        `json:"uses_smallcat"`
+	Carry              bool        `json:"carry"`
+	Messages           interface{} `json:"messages"`
+	Classes            []string    `json:"-"`
+	Dependencies       []string    `json:"dependencies,omitempty"`
+	ModuleDependencies []string    `json:"module_dependencies,omitempty"`
+	Debug              bool        `json:"debug"`
+	Path               string      `json:"-"`
+	Reload             func()      `json:"-"`
 }
 
 type PluginPublisher struct {

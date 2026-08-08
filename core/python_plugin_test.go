@@ -47,8 +47,9 @@ func TestCreatePythonPluginWritesFlatScriptAndRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Clean(root) != nodePluginsRoot() {
-		t.Fatalf("createNodePlugin root = %q; want %q", root, nodePluginsRoot())
+	wantRoot := filepath.Join(nodePluginsRoot(), "local")
+	if filepath.Clean(root) != filepath.Clean(wantRoot) {
+		t.Fatalf("createNodePlugin root = %q; want %q", root, wantRoot)
 	}
 	if filepath.Base(index) != "python-smoke.py" {
 		t.Fatalf("createNodePlugin index = %q; want python-smoke.py", index)

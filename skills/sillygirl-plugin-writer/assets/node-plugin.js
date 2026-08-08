@@ -1,9 +1,10 @@
 // [title: AI 示例插件]
 // [name: aiExample]
-// [description: 可直接修改的 SillyGirl JavaScript 插件模板]
+// [desc: 可直接修改的 SillyGirl JavaScript 插件模板]
 // [author: AI]
 // [version: v1.0.0]
 // [rule: raw ^示例$]
+// [status: true]
 // [public: false]
 
 const { sender: s, Bucket, plugin } = require("sillygirl");

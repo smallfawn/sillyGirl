@@ -125,12 +125,12 @@ func TestPluginUserSmallcatAuthorizationRecords(t *testing.T) {
 		t.Fatalf("closed plugin retained effective authorization: %#v", users)
 	}
 	plugin.Open = true
-	plugin.Disable = true
+	plugin.Status = pluginStatusValue(false)
 	users = pluginRuntimeUsers(plugin.UUID)
 	if len(users) != 1 || users[0].Authorized || len(users[0].Bindings.SmallcatOpenIDs) != 0 {
-		t.Fatalf("disabled plugin retained effective authorization: %#v", users)
+		t.Fatalf("status=false plugin retained effective authorization: %#v", users)
 	}
-	plugin.Disable = false
+	plugin.Status = pluginStatusValue(true)
 	plugin.UsesSmallCat = false
 	users = pluginRuntimeUsers(plugin.UUID)
 	if len(users) != 1 || users[0].Authorized || len(users[0].Bindings.SmallcatOpenIDs) != 0 {

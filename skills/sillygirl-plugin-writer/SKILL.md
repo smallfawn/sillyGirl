@@ -13,7 +13,7 @@ Produce a complete runnable plugin, not a fragment or plan. Prefer editing or cr
 2. Determine language and execution kind. Default to JavaScript/NodeJS unless the user requests Python or a Python library is materially better.
 3. Choose exactly one primary activation: message `rule`, `cron`, `on_start`, or `web`. Add `carry` or `module` only when required.
 4. Write current square-bracket metadata, a single-file implementation, configuration, error handling, and user-facing replies.
-5. Save new files as `plugins/<name>.js` or `plugins/<name>.py` in a source checkout; runtime installations use `/data/plugins/<name>.<ext>`.
+5. Save source-repository files in its existing `plugins/` layout. Runtime marketplace installs use `/data/plugins/<publisher>/<name>.<ext>`; Admin-created local plugins use `/data/plugins/local/<name>.<ext>`. Shared package runtimes remain at `/data/plugins/node_modules` and `/data/plugins/python_packages`.
 6. Run `python skills/sillygirl-plugin-writer/scripts/validate_plugin.py <file>`. Fix every error. Run `node --check <file>` for JavaScript or `python -m py_compile <file>` for Python when available.
 7. For repository edits, run the smallest relevant tests and inspect the final diff. Return the file path, trigger/configuration, dependencies, and validation results.
 
@@ -28,7 +28,11 @@ Produce a complete runnable plugin, not a fragment or plan. Prefer editing or cr
 | Carry processor | `[carry: true]` plus a normal activation accepted by the install path | Appears in carry-script selection |
 | Shared library | `[module: true]` | Does not handle normal messages |
 
-The Admin local-plugin editor requires `title`, `name`, `description`, `version`, and at least one of `rule`, `cron`, `on_start`, or `web`.
+The Admin local-plugin editor requires `title`, `name`, `desc`, `version`, and at least one of `rule`, `cron`, `on_start`, `web`, or `module=true`.
+
+Normal plugins and `[module: true]` files share their publisher directory. Declare a same-publisher module with `[depe: ["./sharedTools.js"]]` or `[depe: ["./shared_tools.py"]]`. Resolution uses only `depe`, does not inspect `require`/`import`, and rejects `../` or cross-publisher paths.
+
+Marketplace installation recursively installs declared modules first. Before each module or target script is written and loaded, its own npm/PyPI dependencies are installed into the shared runtime. Keep `package.json`, `node_modules`, and `python_packages` at `/data/plugins`, never inside a publisher directory. The same publisher cannot own both `name.js` and `name.py` because they share one plugin identity.
 
 ## Write Current Metadata
 
@@ -37,10 +41,11 @@ Use square-bracket comments for new plugins. Keep `name` filesystem-safe and omi
 ```js
 // [title: 插件标题]
 // [name: pluginName]
-// [description: 插件说明]
+// [desc: 插件说明]
 // [author: 作者]
 // [version: v1.0.0]
 // [rule: raw ^命令$]
+// [status: true]
 // [public: false]
 // [class: 工具]
 // [depe: ["axios"]]
@@ -114,7 +119,7 @@ Register forms at file top level so Admin can discover them without executing bu
 const Config = new plugin.Form({
   apiBase: plugin.Form.string().title("接口地址").default(""),
   token: plugin.Form.string().title("Token").format("password").default(""),
-  enabled: plugin.Form.boolean().title("启用功能").default(true),
+  featureEnabled: plugin.Form.boolean().title("启用功能").default(true),
 });
 ```
 
@@ -142,7 +147,7 @@ Read [references/runtime-api.md](references/runtime-api.md) before using forms, 
 - Keep secrets in `plugin.Form`, Bucket, or environment variables.
 - Keep configuration registration at top level and business execution inside `main`.
 - Use the exact runtime casing: `QingLong`, `SmallCat`, `DaiDai`, `checkQr`.
-- Use `enable` only for the plugin-wide switch; use a distinct key for feature-specific toggles.
+- Use `[status: true|false]` metadata for the plugin-wide runtime switch; use distinct form keys for feature-specific toggles.
 - Avoid hidden compatibility files or extra installers; prefer one portable plugin file.
 - Run the bundled validator and language parser.
 - Explain the trigger, configuration fields, dependency declarations, install path, and test command in the final response.

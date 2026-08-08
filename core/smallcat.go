@@ -673,7 +673,7 @@ func requestSmallcatJSONWithTimeout(panel *SmallcatPanel, method string, path st
 		return nil, fmt.Errorf("smallcat 请求失败：%v", err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := utils.ReadAllLimit(resp.Body, 8<<20)
 	if err != nil {
 		return nil, err
 	}

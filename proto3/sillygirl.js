@@ -1579,7 +1579,7 @@ async function verifyReleaseChecksum(release, asset, archive, timeout) {
     const expected = parseReleaseChecksum(text, asset.name);
     if (!expected)
         throw new Error(`checksums.txt 中缺少 ${asset.name} 的 SHA256`);
-    const actual = sha256File(archive);
+    const actual = await sha256File(archive);
     if (actual.toLowerCase() !== expected.toLowerCase())
         throw new Error(`Release 包校验失败：${asset.name}`);
 }
@@ -1593,9 +1593,13 @@ function parseReleaseChecksum(text, fileName) {
     return "";
 }
 function sha256File(file) {
-    const hash = crypto.createHash("sha256");
-    hash.update(fs.readFileSync(file));
-    return hash.digest("hex");
+    return new Promise((resolve, reject) => {
+        const hash = crypto.createHash("sha256");
+        const input = fs.createReadStream(file);
+        input.on("error", reject);
+        input.on("data", (chunk) => hash.update(chunk));
+        input.on("end", () => resolve(hash.digest("hex")));
+    });
 }
 async function extractReleaseArchive(archive, tmpDir, timeout) {
     await validateReleaseArchiveEntries(archive, timeout);

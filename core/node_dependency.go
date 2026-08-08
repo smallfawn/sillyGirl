@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -28,6 +29,12 @@ type nodeDependencyPlugin struct {
 	File  string `json:"file"`
 	Path  string `json:"path"`
 	Type  string `json:"type"`
+}
+
+type nodePluginScriptEntry struct {
+	Path     string
+	Identity string
+	Class    string
 }
 
 type nodeDependencyRow struct {
@@ -150,6 +157,7 @@ var nodeRuntimeNodePathCache sync.Map
 func init() {
 	GinApi(GET, "/api/admin/dependencies", RequireAuth, handlePluginDependencies)
 	GinApi(POST, "/api/admin/dependencies", RequireAuth, handleInstallPluginDependency)
+	GinApi(POST, "/api/admin/dependency-deletions", RequireAuth, handleRemovePluginDependency)
 	GinApi(POST, "/api/admin/dependency-deletions/:runtime/:plugin/*package", RequireAuth, handleRemovePluginDependency)
 
 	GinApi(GET, "/api/admin/dependency-registries/:runtime", RequireAuth, handlePluginDependencyRegistry)
@@ -187,7 +195,7 @@ func init() {
 			return
 		}
 		title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
-		pluginName := safePluginDirName(title)
+		pluginName := availablePluginName(filepath.Join(nodePluginsRoot(), "local"), title)
 		class := pluginClassFromExt(filepath.Ext(fileName))
 		fileName = pluginName + filepath.Ext(fileName)
 		_, index, err := createNodePlugin(pluginName, title, fileName, class)
@@ -199,11 +207,13 @@ func init() {
 			}
 			return
 		}
-		if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), pluginName, class); err != nil {
+		identity := nodePluginIdentityFromPath(index)
+		if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), identity, class); err != nil {
+			_ = os.Remove(index)
 			ApiInternalError(ctx, err.Error())
 			return
 		}
-		id := nameUuid(pluginName)
+		id := nameUuid(identity)
 		ApiCreated(ctx, "/api/admin/scripts/"+id, map[string]interface{}{
 			"id":     id,
 			"plugin": pluginName,
@@ -233,7 +243,7 @@ func init() {
 			ApiInternalError(ctx, err.Error())
 			return
 		}
-		if err := AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), f.Type); err != nil {
+		if err := AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginIdentityFromPath(path), f.Type); err != nil {
 			ApiInternalError(ctx, err.Error())
 			return
 		}
@@ -256,7 +266,7 @@ func init() {
 			ApiInternalError(ctx, err.Error())
 			return
 		}
-		AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), UNKNOWN)
+		AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginIdentityFromPath(path), UNKNOWN)
 		ApiNoContent(ctx)
 	})
 }
@@ -480,10 +490,14 @@ func handleInstallPluginDependency(ctx *gin.Context) {
 }
 
 func handleRemovePluginDependency(ctx *gin.Context) {
-	req := nodeDependencyRequest{
-		Runtime: ctx.Param("runtime"),
-		Plugin:  ctx.Param("plugin"),
-		Package: strings.TrimPrefix(ctx.Param("package"), "/"),
+	req := nodeDependencyRequest{}
+	if runtime := strings.TrimSpace(ctx.Param("runtime")); runtime != "" {
+		req.Runtime = runtime
+		req.Plugin = ctx.Param("plugin")
+		req.Package = strings.TrimPrefix(ctx.Param("package"), "/")
+	} else if err := ctx.BindJSON(&req); err != nil {
+		ApiFail(ctx, err.Error())
+		return
 	}
 	runtime := normalizeDependencyRuntime(req.Runtime)
 	output := ""
@@ -548,33 +562,27 @@ func pipxDependencyStatus() map[string]interface{} {
 func listDependencyPlugins(runtime string) []nodeDependencyPlugin {
 	runtime = normalizeDependencyRuntime(runtime)
 	root := nodePluginsRoot()
-	files, err := os.ReadDir(root)
-	if err != nil {
-		return nil
-	}
 	rows := []nodeDependencyPlugin{}
-	for _, file := range files {
-		if shouldIgnoreNodePluginEntry(file.Name()) {
+	installed := installedPluginSnapshot()
+	for _, entry := range discoverNodePluginScripts(root) {
+		if entry.Class != runtime {
 			continue
 		}
-		path := filepath.Join(root, file.Name())
-		if index, class := FindMainIndex(strings.ReplaceAll(path, "\\", "/")); index != "" && class == runtime {
-			name := nodePluginNameFromPath(index)
-			title := name
-			for _, f := range Functions {
-				if f != nil && f.Type == runtime && f.Path != "" && samePath(f.Path, index) {
-					title = firstNonEmpty(f.Title, title)
-					break
-				}
+		name := entry.Identity
+		title := nodePluginNameFromPath(entry.Path)
+		for _, f := range installed {
+			if f != nil && f.Type == runtime && f.Path != "" && samePath(f.Path, entry.Path) {
+				title = firstNonEmpty(f.Title, title)
+				break
 			}
-			rows = append(rows, nodeDependencyPlugin{
-				Name:  name,
-				Title: title,
-				File:  filepath.Base(index),
-				Path:  index,
-				Type:  runtime,
-			})
 		}
+		rows = append(rows, nodeDependencyPlugin{
+			Name:  name,
+			Title: title,
+			File:  filepath.Base(entry.Path),
+			Path:  entry.Path,
+			Type:  runtime,
+		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		return rows[i].Name < rows[j].Name
@@ -601,6 +609,85 @@ func samePath(a, b string) bool {
 
 func nodePluginsRoot() string {
 	return filepath.Clean(filepath.Join(utils.GetDataHome(), "plugins"))
+}
+
+func pluginPublisherDirName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = unsafePackageNamePattern.ReplaceAllString(value, "-")
+	value = strings.Trim(value, "-._")
+	if value == "" {
+		return "local"
+	}
+	if windowsReservedPathBase(value) {
+		return value + "-publisher"
+	}
+	return value
+}
+
+func pluginIdentity(publisher, name string) string {
+	publisher = pluginPublisherDirName(publisher)
+	name = strings.TrimSuffix(filepath.Base(strings.TrimSpace(name)), filepath.Ext(name))
+	return filepath.ToSlash(filepath.Join(publisher, name))
+}
+
+func nodePluginIdentityFromPath(value string) string {
+	root := nodePluginsRoot()
+	clean := filepath.Clean(value)
+	rel, err := filepath.Rel(root, clean)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nodePluginNameFromPath(value)
+	}
+	rel = strings.TrimSuffix(rel, filepath.Ext(rel))
+	return filepath.ToSlash(rel)
+}
+
+func nodePluginPublisherFromPath(value string) string {
+	identity := nodePluginIdentityFromPath(value)
+	parts := strings.Split(filepath.ToSlash(identity), "/")
+	if len(parts) == 2 {
+		return parts[0]
+	}
+	return ""
+}
+
+func discoverNodePluginScripts(root string) []nodePluginScriptEntry {
+	entries := []nodePluginScriptEntry{}
+	files, err := os.ReadDir(root)
+	if err != nil {
+		return entries
+	}
+	appendScript := func(value string, entry os.DirEntry) {
+		if entry.IsDir() || shouldIgnoreNodePluginEntry(entry.Name()) {
+			return
+		}
+		class, ok := CheckMainIndex(entry.Name())
+		if !ok {
+			return
+		}
+		if _, err := checkedNodeScriptPath(value); err != nil {
+			return
+		}
+		entries = append(entries, nodePluginScriptEntry{Path: value, Identity: nodePluginIdentityFromPath(value), Class: class})
+	}
+	for _, file := range files {
+		if shouldIgnoreNodePluginEntry(file.Name()) {
+			continue
+		}
+		value := filepath.Join(root, file.Name())
+		if !file.IsDir() {
+			appendScript(value, file)
+			continue
+		}
+		children, err := os.ReadDir(value)
+		if err != nil {
+			continue
+		}
+		for _, child := range children {
+			appendScript(filepath.Join(value, child.Name()), child)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Identity < entries[j].Identity })
+	return entries
 }
 
 func shouldIgnoreNodePluginEntry(name string) bool {
@@ -642,21 +729,41 @@ func nodePluginScriptPath(name string) (string, error) {
 
 func pluginScriptPath(name string, runtime string) (string, error) {
 	runtime = normalizeDependencyRuntime(runtime)
-	name = strings.TrimSpace(name)
+	name = filepath.ToSlash(strings.Trim(strings.TrimSpace(name), "/"))
 	if name == "" {
 		return "", fmt.Errorf("请选择 %s 脚本插件", dependencyRuntimeLabel(runtime))
 	}
-	if strings.ContainsAny(name, `/\:`) || strings.Contains(name, "..") {
+	parts := strings.Split(name, "/")
+	if len(parts) > 2 || strings.Contains(name, "..") || strings.ContainsAny(name, `\:`) {
 		return "", errors.New("插件名称不合法")
 	}
+	for _, part := range parts {
+		if part == "" || strings.HasPrefix(part, ".") || unsafePackageNamePattern.MatchString(strings.ToLower(part)) {
+			return "", errors.New("插件名称不合法")
+		}
+	}
 	root := nodePluginsRoot()
-	index := filepath.Clean(filepath.Join(root, name+dependencyRuntimeSuffix(runtime)))
+	index := filepath.Clean(filepath.Join(root, filepath.FromSlash(name)+dependencyRuntimeSuffix(runtime)))
 	rel, err := filepath.Rel(root, index)
 	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
 		return "", errors.New("插件路径不合法")
 	}
 	if info, err := os.Stat(index); err == nil && !info.IsDir() {
-		return index, nil
+		return checkedNodeScriptPath(index)
+	}
+	if len(parts) == 1 {
+		matches := []string{}
+		for _, entry := range discoverNodePluginScripts(root) {
+			if entry.Class == runtime && strings.EqualFold(nodePluginNameFromPath(entry.Path), name) {
+				matches = append(matches, entry.Path)
+			}
+		}
+		if len(matches) == 1 {
+			return matches[0], nil
+		}
+		if len(matches) > 1 {
+			return "", fmt.Errorf("存在多个同名插件，请使用 发布者/%s", name)
+		}
 	}
 	dir := filepath.Clean(filepath.Join(root, name))
 	rel, err = filepath.Rel(root, dir)
@@ -698,6 +805,25 @@ func checkedNodeScriptPath(path string) (string, error) {
 	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || rel == "." {
 		return "", errors.New("脚本插件文件路径不合法")
 	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("解析插件根目录失败：%w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("解析脚本插件路径失败：%w", err)
+		}
+		realParent, parentErr := filepath.EvalSymlinks(filepath.Dir(clean))
+		if parentErr != nil {
+			return "", fmt.Errorf("解析脚本插件目录失败：%w", parentErr)
+		}
+		realPath = filepath.Join(realParent, filepath.Base(clean))
+	}
+	realRel, err := filepath.Rel(realRoot, realPath)
+	if err != nil || realRel == "." || filepath.IsAbs(realRel) || realRel == ".." || strings.HasPrefix(realRel, ".."+string(filepath.Separator)) {
+		return "", errors.New("脚本插件路径不能通过符号链接跳出插件目录")
+	}
 	return clean, nil
 }
 
@@ -706,7 +832,7 @@ func nodeFunctionByID(id string) (*common.Function, error) {
 	if id == "" {
 		return nil, errors.New("缺少脚本 ID")
 	}
-	for _, f := range Functions {
+	for _, f := range installedPluginSnapshot() {
 		if f.UUID == id {
 			if f.Type != NODE && f.Type != PYTHON {
 				return nil, errors.New("该脚本不是文件脚本")
@@ -738,24 +864,58 @@ func safePluginDirName(name string) string {
 	if name == "" {
 		name = "script"
 	}
-	root := nodePluginsRoot()
+	return name
+}
+
+func availablePluginName(dir, name string) string {
+	name = safePluginDirName(name)
 	base := name
 	for i := 1; ; i++ {
 		jsMissing := false
 		pyMissing := false
-		if _, err := os.Stat(filepath.Join(root, name+".js")); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(dir, name+".js")); os.IsNotExist(err) {
 			jsMissing = true
 		}
-		if _, err := os.Stat(filepath.Join(root, name+".py")); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(dir, name+".py")); os.IsNotExist(err) {
 			pyMissing = true
 		}
 		if jsMissing && pyMissing {
-			if _, err := os.Stat(filepath.Join(root, name)); os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
 				return name
 			}
 		}
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
+}
+
+func ensurePluginBaseAvailable(dir, fileName string) error {
+	base := strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName))
+	for _, ext := range []string{".js", ".py"} {
+		candidate := filepath.Join(dir, base+ext)
+		if _, err := os.Stat(candidate); err == nil {
+			return fmt.Errorf("插件文件已存在：%s", filepath.Base(candidate))
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureNoPluginRuntimeNameConflict(dir, fileName string) error {
+	base := strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName))
+	ext := strings.ToLower(filepath.Ext(fileName))
+	for _, candidateExt := range []string{".js", ".py"} {
+		if candidateExt == ext {
+			continue
+		}
+		candidate := filepath.Join(dir, base+candidateExt)
+		if _, err := os.Stat(candidate); err == nil {
+			return fmt.Errorf("同一发布者目录不能同时存在同名 JS/Python 插件：%s", filepath.Base(candidate))
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func normalizeNodeScriptFileName(name string) (string, error) {
@@ -776,12 +936,28 @@ func normalizeNodeScriptFileName(name string) (string, error) {
 	if strings.TrimSpace(title) == "" || title == "." {
 		return "", errors.New("脚本文件名不能为空")
 	}
+	if windowsReservedPathBase(title) {
+		return "", errors.New("脚本文件名不能使用 Windows 保留设备名")
+	}
 	return name, nil
+}
+
+func windowsReservedPathBase(value string) bool {
+	value = strings.ToUpper(strings.TrimSpace(strings.TrimSuffix(value, filepath.Ext(value))))
+	switch value {
+	case "CON", "PRN", "AUX", "NUL", "CLOCK$":
+		return true
+	}
+	if len(value) == 4 && (strings.HasPrefix(value, "COM") || strings.HasPrefix(value, "LPT")) && value[3] >= '1' && value[3] <= '9' {
+		return true
+	}
+	return false
 }
 
 func createNodePlugin(pluginName, title, fileName string, class string) (string, string, error) {
 	root := nodePluginsRoot()
-	if err := os.MkdirAll(root, 0755); err != nil {
+	target := filepath.Join(root, "local")
+	if err := os.MkdirAll(target, 0755); err != nil {
 		return "", "", err
 	}
 	content := ""
@@ -793,7 +969,7 @@ func createNodePlugin(pluginName, title, fileName string, class string) (string,
 		if err := ensureNodePackageJSON(root, "sillygirl-plugins"); err != nil {
 			return "", "", err
 		}
-		content = strings.TrimRight(defaultScript(title), "\n") + `
+		content = strings.TrimRight(defaultScript(title, pluginName), "\n") + `
 
 async function main() {
   await s.reply("pong");
@@ -805,32 +981,54 @@ main();
 		if _, err := ensurePythonSillygirlModule(); err != nil {
 			return "", "", err
 		}
-		content = defaultPythonScript(title)
+		content = defaultPythonScript(title, pluginName)
 	default:
 		return "", "", errors.New("不支持的脚本类型")
 	}
-	index := filepath.Join(root, fileName)
+	index := filepath.Join(target, fileName)
 	if _, err := checkedNodeScriptPath(index); err != nil {
 		return "", "", err
 	}
-	if err := os.WriteFile(index, []byte(content), 0644); err != nil {
+	if err := ensurePluginBaseAvailable(target, fileName); err != nil {
 		return "", "", err
 	}
-	return root, index, nil
+	file, err := os.OpenFile(index, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			return "", "", fmt.Errorf("插件文件已存在：%s", filepath.Base(index))
+		}
+		return "", "", err
+	}
+	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close()
+		_ = os.Remove(index)
+		return "", "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(index)
+		return "", "", err
+	}
+	return target, index, nil
 }
 
 func removeNodePluginScript(path string) error {
-	root := nodePluginsRoot()
-	clean := filepath.Clean(path)
-	if filepath.Dir(clean) == root {
-		return os.Remove(clean)
+	clean, checkedErr := checkedNodeScriptPath(path)
+	if checkedErr != nil {
+		return checkedErr
 	}
-	dir := filepath.Dir(clean)
-	rel, err := filepath.Rel(root, dir)
-	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || rel == "." {
+	root := nodePluginsRoot()
+	rel, err := filepath.Rel(root, clean)
+	if err != nil || filepath.IsAbs(rel) || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return errors.New("NodeJS 插件路径不合法")
 	}
-	return os.RemoveAll(dir)
+	if err := os.Remove(clean); err != nil {
+		return err
+	}
+	parent := filepath.Dir(clean)
+	if !strings.EqualFold(parent, root) {
+		_ = os.Remove(parent)
+	}
+	return nil
 }
 
 func readNodeDependencies(plugin nodeDependencyPlugin) ([]nodeDependencyRow, error) {
@@ -1123,6 +1321,16 @@ func nodePluginWorkDir(scriptOrDir string) string {
 }
 
 func parseDeclaredDependencies(content string, runtime string) []string {
+	packages, _ := splitDeclaredDependencyValues(declaredDependencyMetaValues(content), runtime)
+	return packages
+}
+
+func parseDeclaredModuleDependencies(content string, runtime string) []string {
+	_, modules := splitDeclaredDependencyValues(declaredDependencyMetaValues(content), runtime)
+	return modules
+}
+
+func declaredDependencyMetaValues(content string) []string {
 	values := []string{}
 	for _, entry := range pluginMetaEntries(content) {
 		if len(entry) < 3 {
@@ -1144,7 +1352,7 @@ func parseDeclaredDependencies(content string, runtime string) []string {
 		}
 	}
 	if block == "" {
-		return normalizeDependencyNamesForRuntime(values, runtime)
+		return values
 	}
 	matches := dependencyMetaPattern.FindAllStringSubmatch(block, -1)
 	for _, match := range matches {
@@ -1153,7 +1361,46 @@ func parseDeclaredDependencies(content string, runtime string) []string {
 		}
 		values = appendDependencyMetaValues(values, match[1])
 	}
-	return normalizeDependencyNamesForRuntime(values, runtime)
+	return values
+}
+
+func splitDeclaredDependencyValues(values []string, runtime string) (packages []string, modules []string) {
+	packageValues := make([]string, 0, len(values))
+	moduleSet := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if strings.HasPrefix(value, "./") {
+			if module, ok := normalizePluginModuleDependency(value, runtime); ok && !moduleSet[module] {
+				moduleSet[module] = true
+				modules = append(modules, module)
+			}
+			continue
+		}
+		packageValues = append(packageValues, value)
+	}
+	packages = normalizeDependencyNamesForRuntime(packageValues, runtime)
+	sort.Strings(modules)
+	return packages, modules
+}
+
+func normalizePluginModuleDependency(value string, runtime string) (string, bool) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if !strings.HasPrefix(value, "./") || strings.Contains(value, "..") || strings.Contains(value[2:], "/") {
+		return "", false
+	}
+	name := path.Base(value)
+	if name == "" || name == "." || name == ".." {
+		return "", false
+	}
+	ext := strings.ToLower(path.Ext(name))
+	wantExt := ".js"
+	if normalizeDependencyRuntime(runtime) == PYTHON {
+		wantExt = ".py"
+	}
+	if ext != wantExt || strings.TrimSuffix(name, ext) == "" {
+		return "", false
+	}
+	return "./" + name, true
 }
 
 func appendDependencyMetaValues(values []string, raw string) []string {

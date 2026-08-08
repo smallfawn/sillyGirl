@@ -76,12 +76,13 @@ func initPlugins() {
 			}
 			return &storage.Final{
 				Now:   storage.EMPTY,
-				Error: errors.New("旧内嵌 JS 插件数据已不支持，请使用 /data/plugins/*.js 的 NodeJS 插件"),
+				Error: errors.New("旧内嵌 JS 插件数据已不支持，请使用 /data/plugins/<发布者>/*.js 的 NodeJS 插件"),
 			}
 		}
 		if new == "install" {
 			var marketPlugin *common.Function
-			for _, p := range plugin_list {
+			marketItems := pluginMarketItemsSnapshot()
+			for _, p := range marketItems {
 				if p.UUID == key {
 					marketPlugin = p
 					break
@@ -98,7 +99,7 @@ func initPlugins() {
 					Error: errors.New("旧插件源已不支持，请导入 GitHub NodeJS 插件源"),
 				}
 			}
-			if err := installGithubNodePlugin(marketPlugin.Address); err != nil {
+			if err := installMarketPluginWithModuleDependencies(marketPlugin, marketItems, installedPluginSnapshot(), installGithubNodePlugin, installMarketPluginRuntimeDependency); err != nil {
 				return &storage.Final{
 					Error: errors.New("安装异常！" + err.Error()),
 				}
@@ -110,6 +111,7 @@ func initPlugins() {
 		}
 		pluginLock.Lock()
 		defer pluginLock.Unlock()
+		requestedUninstall := new == "uninstall"
 		if new == "uninstall" {
 			new = ""
 			fin = &storage.Final{
@@ -120,6 +122,11 @@ func initPlugins() {
 		for i := range Functions {
 			if Functions[i].UUID == key {
 				current := Functions[i]
+				if requestedUninstall {
+					if err := ensurePluginModuleUnused(current, Functions); err != nil {
+						return &storage.Final{Now: storage.EMPTY, Error: err}
+					}
+				}
 				DestroyAdapterByUUID(key)
 				current.Running = false
 				if len(current.CronIds) != 0 {
@@ -128,10 +135,7 @@ func initPlugins() {
 					}
 				}
 				Functions = append(Functions[:i], Functions[i+1:]...)
-				CancelPluginCrons(key)
-				CancelPluginWebs(key)
 				CancelPluginlistening(key)
-				remStatic(key)
 				storage.DisableHandle(key)
 				if new == "reload" {
 					go current.Reload()
@@ -175,33 +179,31 @@ func removeNodePluginFiles(filename string) error {
 	if filename == "" {
 		return nil
 	}
+	checked, checkedErr := checkedNodeScriptPath(filename)
+	if checkedErr != nil {
+		return checkedErr
+	}
+	filename = checked
 	root := nodePluginsRoot()
 	rel, err := filepath.Rel(root, filename)
 	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return errors.New("插件文件路径不合法")
 	}
-	if isFlatNodePluginPath(filename) {
+	if isSupportedScriptExt(filepath.Ext(filename)) {
 		if err := os.Remove(filename); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+		parent := filepath.Dir(filename)
+		if !strings.EqualFold(parent, root) {
+			_ = os.Remove(parent)
+		}
 		return nil
 	}
-	dir := filepath.Dir(filename)
-	rel, err = filepath.Rel(root, dir)
-	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return errors.New("插件目录路径不合法")
-	}
-	if shouldIgnoreNodePluginEntry(filepath.Base(dir)) {
-		return errors.New("拒绝删除保留插件目录")
-	}
-	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return errors.New("插件入口文件类型不合法")
 }
 
 func GetFunctionByUUID(uuid string) *common.Function {
-	for _, f := range Functions {
+	for _, f := range installedPluginSnapshot() {
 		if f.UUID == uuid {
 			return f
 		}

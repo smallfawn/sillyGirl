@@ -224,7 +224,7 @@ func decodePluginUserFormJSON(ctx *gin.Context, target interface{}) error {
 func accessiblePluginUserForm(uuid string) (*common.Function, pluginUserFormDefinition, error) {
 	uuid = strings.TrimSpace(uuid)
 	plugin := installedPluginByUUID(uuid)
-	if plugin == nil || plugin.Disable || !plugin.Open || !plugin.HasUserForm {
+	if plugin == nil || !pluginExecutionEnabled(plugin) || !plugin.Open || !plugin.HasUserForm {
 		return nil, pluginUserFormDefinition{}, errors.New("插件用户表单未开放")
 	}
 	definition, ok := getPluginUserFormDefinition(uuid)

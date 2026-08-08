@@ -10,7 +10,7 @@ func TestPluginMatchesKeyword(t *testing.T) {
 	plugin := &common.Function{
 		UUID:            "jdCodeLogin",
 		Title:           "京东CODE登录",
-		Description:     "通过 SmallCat OAuth 获取 Cookie",
+		Desc:            "通过 SmallCat OAuth 获取 Cookie",
 		Author:          "SmallFawn",
 		Class:           "工具",
 		PluginPublisher: common.PluginPublisher{Organization: "Example/Plugin-Market"},

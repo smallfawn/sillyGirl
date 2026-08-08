@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+func TestParseOneBotMessageRejectsHeartbeat(t *testing.T) {
+	if _, _, ok := parseOneBotMessage([]byte(`{"time":1723037865,"self_id":123,"post_type":"meta_event","meta_event_type":"heartbeat","status":{"online":true}}`)); ok {
+		t.Fatal("OneBot heartbeat was accepted as a user message")
+	}
+}
+
+func TestParseOneBotMessageAcceptsMessage(t *testing.T) {
+	msg, content, ok := parseOneBotMessage([]byte(`{"self_id":123,"post_type":"message","message_type":"group","group_id":456,"user_id":789,"message_id":10,"message":"hello","raw_message":" hello&#91;x&#93; "}`))
+	if !ok || msg == nil {
+		t.Fatal("OneBot user message was rejected")
+	}
+	if content != "hello[x]" || msg.PostType != "message" {
+		t.Fatalf("content=%q msg=%+v", content, msg)
+	}
+}
+
+func TestParseOneBotMessageAcceptsSegmentArray(t *testing.T) {
+	_, content, ok := parseOneBotMessage([]byte(`{"self_id":123,"post_type":"message","message_type":"group","group_id":456,"user_id":789,"message_id":10,"message":[{"type":"text","data":{"text":"hello"}}],"raw_message":"hello"}`))
+	if !ok || content != "hello" {
+		t.Fatalf("ok=%v content=%q", ok, content)
+	}
+}
+
 func TestValidOneBotAuthorization(t *testing.T) {
 	tests := []struct {
 		name  string

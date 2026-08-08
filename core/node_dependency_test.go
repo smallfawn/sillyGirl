@@ -10,6 +10,24 @@ import (
 	proto3assets "github.com/smallfawn/sillyGirl/proto3"
 )
 
+func TestDeclaredDependenciesSplitPackagesAndPluginModules(t *testing.T) {
+	nodeSource := `// [depe: ["axios", "./shared-tools.js", "./wrong.py", "../escape.js"]]`
+	if got := parseDeclaredDependencies(nodeSource, NODE); len(got) != 1 || got[0] != "axios" {
+		t.Fatalf("node package dependencies = %#v", got)
+	}
+	if got := parseDeclaredModuleDependencies(nodeSource, NODE); len(got) != 1 || got[0] != "./shared-tools.js" {
+		t.Fatalf("node module dependencies = %#v", got)
+	}
+
+	pythonSource := `# [depe: ["requests", "./shared_data.py", "./wrong.js", "./nested/tool.py"]]`
+	if got := parseDeclaredDependencies(pythonSource, PYTHON); len(got) != 1 || got[0] != "requests" {
+		t.Fatalf("python package dependencies = %#v", got)
+	}
+	if got := parseDeclaredModuleDependencies(pythonSource, PYTHON); len(got) != 1 || got[0] != "./shared_data.py" {
+		t.Fatalf("python module dependencies = %#v", got)
+	}
+}
+
 func TestEnsureNodePackageJSONRepairsInvalidDependencyFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "package.json")

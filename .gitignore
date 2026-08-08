@@ -40,6 +40,8 @@ core/dist
 test
 .sillyGirl
 test*
+!proto3/test_sillygirl_security.py
+!proto3/test_sillygirl_values.py
 node_modules
 *.tsbuildinfo
 plugins

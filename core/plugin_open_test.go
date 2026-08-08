@@ -24,7 +24,7 @@ func TestLocalPrivatePluginsExcludesRemoteAndNonScriptFunctions(t *testing.T) {
 	if rows[0].UUID != "local-node" || rows[1].UUID != "local-python" {
 		t.Fatalf("unexpected private plugins: %#v", rows)
 	}
-	if rows[0].Status != 2 || rows[0].Organization != "本地插件" || rows[0].CurrentVersion != "v1.2.3" {
+	if rows[0].InstallStatus != 2 || rows[0].Organization != "本地插件" || rows[0].CurrentVersion != "v1.2.3" {
 		t.Fatalf("local plugin market fields not initialized: %#v", rows[0])
 	}
 	rows[0].Dependencies[0] = "changed"
@@ -38,7 +38,7 @@ func TestOpenPluginRecordsOnlyReturnsEnabledOpenScripts(t *testing.T) {
 		{UUID: "open", Title: "开放插件", Type: NODE, Open: true, UsesSmallCat: true, Version: "v1.0.0", Dependencies: []string{"ipp"}},
 		{UUID: "no-smallcat", Title: "普通插件", Type: NODE, Open: true},
 		{UUID: "closed", Title: "未开放", Type: NODE},
-		{UUID: "disabled", Title: "已停用", Type: PYTHON, Open: true, Disable: true},
+		{UUID: "status-off", Title: "已关闭", Type: PYTHON, Open: true, Status: pluginStatusValue(false)},
 		{UUID: "builtin", Title: "内置函数", Type: "go", Open: true},
 	}
 

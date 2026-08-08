@@ -49,11 +49,7 @@ func checkFilePlugin(key string, value *string) {
 				return
 			}
 		}
-		// if v, ok := plugins_id.Load(key); ok {
-
-		// } else {
 		*value = "非法操作，请勿乱动。"
-		// }
 	}
 }
 
@@ -132,19 +128,15 @@ func init() {
 				if isBackendVersionStorageKey(ar[0], ar[1]) {
 					continue
 				}
-				if ar[0] == "plugins" && false { //todo
-					// data[bk] = halfDeEct(MakeBucket(ar[0]).GetString(ar[1]))
-				} else {
-					value := MakeBucket(ar[0]).GetString(ar[1])
-					if !storageEntryMatchesSearch(ar[1], value, search) {
-						continue
-					}
-					data = append(data, map[string]string{
-						"bucket": ar[0],
-						"key":    ar[1],
-						"value":  value,
-					})
+				value := MakeBucket(ar[0]).GetString(ar[1])
+				if !storageEntryMatchesSearch(ar[1], value, search) {
+					continue
 				}
+				data = append(data, map[string]string{
+					"bucket": ar[0],
+					"key":    ar[1],
+					"value":  value,
+				})
 			}
 			if len(ar) == 1 {
 				MakeBucket(ar[0]).Foreach(func(b1, b2 []byte) error {

@@ -12,8 +12,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -50,6 +52,7 @@ type RequestPluginResult struct {
 	Tab3     int                   `json:"tab3"`
 	Latest   int                   `json:"latest"`
 	Private  int                   `json:"private"`
+	Modules  int                   `json:"modules"`
 	All      int                   `json:"all"`
 	Tab      string                `json:"tab"`
 	Time     time.Time             `json:"time"`
@@ -60,6 +63,58 @@ type RequestPluginResult struct {
 }
 
 var plugin_list = []*common.Function{}
+var pluginMarketLock sync.RWMutex
+
+func clonePluginFunctions(items []*common.Function) []*common.Function {
+	cloned := make([]*common.Function, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		copyItem := *item
+		copyItem.Rules = append([]string(nil), item.Rules...)
+		copyItem.RulePatterns = append([]*regexp.Regexp(nil), item.RulePatterns...)
+		copyItem.RuleErrors = append([]error(nil), item.RuleErrors...)
+		copyItem.Params = make([][]string, len(item.Params))
+		for index := range item.Params {
+			copyItem.Params[index] = append([]string(nil), item.Params[index]...)
+		}
+		copyItem.CronIds = append([]int(nil), item.CronIds...)
+		copyItem.Classes = append([]string(nil), item.Classes...)
+		copyItem.Dependencies = append([]string(nil), item.Dependencies...)
+		copyItem.ModuleDependencies = append([]string(nil), item.ModuleDependencies...)
+		if item.Cron != nil {
+			copyItem.Cron = make(map[string]string, len(item.Cron))
+			for key, value := range item.Cron {
+				copyItem.Cron[key] = value
+			}
+		}
+		if item.Status != nil {
+			status := *item.Status
+			copyItem.Status = &status
+		}
+		cloned = append(cloned, &copyItem)
+	}
+	return cloned
+}
+
+func setPluginMarketItems(items []*common.Function) {
+	pluginMarketLock.Lock()
+	plugin_list = items
+	pluginMarketLock.Unlock()
+}
+
+func pluginMarketItemsSnapshot() []*common.Function {
+	pluginMarketLock.RLock()
+	defer pluginMarketLock.RUnlock()
+	return clonePluginFunctions(plugin_list)
+}
+
+func installedPluginSnapshot() []*common.Function {
+	pluginLock.Lock()
+	defer pluginLock.Unlock()
+	return clonePluginFunctions(Functions)
+}
 
 const latestPluginMarketLimit = 20
 
@@ -116,12 +171,13 @@ func pluginMatchesKeyword(plugin *common.Function, keyword string) bool {
 		return false
 	}
 	fields := []string{
-		plugin.Title, plugin.Description, plugin.Author, plugin.Class,
+		plugin.Title, plugin.Desc, plugin.Author, plugin.Class,
 		plugin.Organization, plugin.Address, plugin.UUID, plugin.Type,
 		plugin.Suffix, plugin.Rule, plugin.Version,
 	}
 	fields = append(fields, plugin.Classes...)
 	fields = append(fields, plugin.Dependencies...)
+	fields = append(fields, plugin.ModuleDependencies...)
 	haystack := strings.ToLower(strings.Join(fields, " "))
 	compactHaystack := compactPluginSearchText(haystack)
 	for _, token := range strings.Fields(keyword) {
@@ -147,9 +203,9 @@ func initPluginList() {
 		list = append(list, items...)
 	}
 	sort.SliceStable(list, func(i, j int) bool {
-		return list[i].Description < list[j].Description
+		return list[i].Desc < list[j].Desc
 	})
-	plugin_list = list
+	setPluginMarketItems(list)
 }
 
 var plugin_downloads = MakeBucket("plugin_downloads")
@@ -244,7 +300,7 @@ func initWebPluginList() {
 		}
 		sources = append(sources, address)
 		savePluginSourceAddresses(sources)
-		plugin_list = append(plugin_list[:0], listPluginSources()...)
+		setPluginMarketItems(listPluginSources())
 		ApiCreated(ctx, "/api/admin/plugin-market/sources/"+url.PathEscape(address), map[string]interface{}{"address": address, "count": len(items)})
 	})
 	GinApi(POST, "/api/admin/plugin-market/source-deletions/*address", RequireAuth, func(ctx *gin.Context) {
@@ -263,7 +319,7 @@ func initWebPluginList() {
 			return
 		}
 		savePluginSourceAddresses(next)
-		plugin_list = append(plugin_list[:0], listPluginSources()...)
+		setPluginMarketItems(listPluginSources())
 		ApiNoContent(ctx)
 	})
 	GinApi(GET, "/api/plugin-market/plugins", handlePluginMarketPlugins)
@@ -282,6 +338,8 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 	if ctx.Request.Method == http.MethodPost || ctx.Request.URL.Path == "/api/plugin-market/plugins" {
 		initPluginList()
 	}
+	marketItems := pluginMarketItemsSnapshot()
+	installedItems := installedPluginSnapshot()
 	if pageSize <= 0 {
 		pageSize = 10
 	} else if pageSize > 200 {
@@ -296,14 +354,12 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 	rr.Page = current
 	rr.Data = []*common.Function{}
 	if current != 0 {
-		privatePlugins := localPrivatePlugins(plugin_list, Functions)
+		privatePlugins := localPrivatePlugins(marketItems, installedItems)
 		rr.Private = len(privatePlugins)
-		marketPlugins := append([]*common.Function(nil), plugin_list...)
+		allMarketPlugins := append(append([]*common.Function(nil), privatePlugins...), marketItems...)
+		marketPlugins := allMarketPlugins
 		if activeKey == "private" {
 			marketPlugins = privatePlugins
-		} else {
-			// “全部”和安装状态标签应包含本地插件；“非公开”仍可单独筛选。
-			marketPlugins = append(append([]*common.Function(nil), privatePlugins...), marketPlugins...)
 		}
 		var list []*common.Function
 		if keyword == "" {
@@ -339,8 +395,7 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 		tab1 := []*common.Function{}
 		tab2 := []*common.Function{}
 		tab3 := []*common.Function{}
-		fc := []*common.Function{}
-		fc = append(fc, Functions...)
+		fc := installedItems
 		classes := map[string][]*common.Function{}
 		classesNum := map[string]int{}
 		for i := range list {
@@ -369,7 +424,9 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 			list = classes[class]
 		}
 		latest := latestPluginMarketItems(list, latestPluginMarketLimit)
+		modules := pluginModuleMarketItems(list)
 		rr.Latest = len(latest)
+		rr.Modules = len(modules)
 		rr.Class = classesNum
 		var origins = map[string]string{}
 		for i := range list { //处理第二分类
@@ -398,8 +455,10 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 		rr.Tab2 = len(tab2)
 		rr.Tab3 = len(tab3)
 		if activeKey == "private" {
-			rr.All = len(plugin_list)
-			rr.Tab1, rr.Tab2, rr.Tab3 = pluginMarketCounts(plugin_list, fc)
+			rr.All = len(allMarketPlugins)
+			rr.Tab1, rr.Tab2, rr.Tab3 = pluginMarketCounts(allMarketPlugins, fc)
+			rr.Latest = len(latestPluginMarketItems(allMarketPlugins, latestPluginMarketLimit))
+			rr.Modules = len(pluginModuleMarketItems(allMarketPlugins))
 		}
 		if activeKey == "tab1" {
 			list = tab1
@@ -409,6 +468,8 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 			list = tab3
 		} else if activeKey == "latest" {
 			list = latest
+		} else if activeKey == "module" {
+			list = modules
 		}
 		tab := ""
 		if mclass == "true" {
@@ -441,7 +502,7 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 		}
 		rr.Data = append(rr.Data, list[begin:end]...)
 		publics := []string{}
-		for _, f := range Functions {
+		for _, f := range installedItems {
 			if f.Public && f.UUID != "" {
 				publics = append(publics, f.UUID)
 			}
@@ -461,15 +522,15 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 					rr.Data[i].CurrentVersion = fc[j].Version
 					rr.Data[i].LatestVersion = rr.Data[i].Version
 					if rr.Data[i].Version != fc[j].Version {
-						rr.Data[i].Status = 1
+						rr.Data[i].InstallStatus = 1
 						if rr.Data[i].UpdateContent == "" {
-							rr.Data[i].UpdateContent = firstNonEmpty(rr.Data[i].Description, "发现新版本")
+							rr.Data[i].UpdateContent = firstNonEmpty(rr.Data[i].Desc, "发现新版本")
 						}
 					} else {
-						rr.Data[i].Status = 2
+						rr.Data[i].InstallStatus = 2
 					}
-					if rr.Data[i].Status != 1 && Contains(publics, rr.Data[i].UUID) {
-						rr.Data[i].Status = 6
+					if rr.Data[i].InstallStatus != 1 && Contains(publics, rr.Data[i].UUID) {
+						rr.Data[i].InstallStatus = 6
 					}
 					if fc[j].HasForm {
 						rr.Data[i].HasForm = true
@@ -480,11 +541,11 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 						rr.Data[i].Running = true
 					}
 					rr.Data[i].Debug = plugin_debug.GetString(rr.Data[i].UUID) == "b:true"
-					rr.Data[i].Disable = fc[j].Disable
+					rr.Data[i].Status = pluginStatusValue(pluginExecutionEnabled(fc[j]))
 					rr.Data[i].Open = fc[j].Open && (fc[j].UsesSmallCat || fc[j].HasUserForm)
 				}
 			}
-			rr.Data[i].Description = parseReply2(rr.Data[i].Description)
+			rr.Data[i].Desc = parseReply2(rr.Data[i].Desc)
 		}
 
 		includePluginMarketResources(ctx, &rr)
@@ -493,6 +554,16 @@ func handlePluginMarketPlugins(ctx *gin.Context) {
 	}
 
 	ApiOK(ctx, GetPublicResponse())
+}
+
+func pluginModuleMarketItems(items []*common.Function) []*common.Function {
+	modules := make([]*common.Function, 0)
+	for _, item := range items {
+		if item != nil && item.Module {
+			modules = append(modules, item)
+		}
+	}
+	return modules
 }
 
 func includePluginMarketResources(ctx *gin.Context, response *RequestPluginResult) {
@@ -551,13 +622,14 @@ func localPrivatePlugins(remote []*common.Function, installed []*common.Function
 			continue
 		}
 		item := *plugin
-		item.Status = 2
+		item.InstallStatus = 2
 		item.CurrentVersion = plugin.Version
 		item.LatestVersion = plugin.Version
 		item.Organization = "本地插件"
 		item.Address = ""
 		item.Messages = nil
 		item.Dependencies = append([]string(nil), plugin.Dependencies...)
+		item.ModuleDependencies = append([]string(nil), plugin.ModuleDependencies...)
 		item.Classes = append([]string(nil), plugin.Classes...)
 		local = append(local, &item)
 	}
@@ -708,25 +780,34 @@ type githubTreeItem struct {
 }
 
 type githubPublicFileIndexEntry struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Title        string   `json:"title"`
-	Author       string   `json:"author"`
-	Version      string   `json:"version"`
-	Desc         string   `json:"desc"`
-	Icon         string   `json:"icon"`
-	Class        string   `json:"class"`
-	Rule         string   `json:"rule"`
-	Public       bool     `json:"public"`
-	Admin        bool     `json:"admin"`
-	Cron         string   `json:"cron"`
-	Disable      bool     `json:"disable"`
-	Path         string   `json:"path"`
-	Raw          string   `json:"raw"`
-	Dependencies []string `json:"dependencies"`
-	Type         string   `json:"type"`
-	Origin       string   `json:"origin"`
-	CreateAt     string   `json:"create_at"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Title              string   `json:"title"`
+	Author             string   `json:"author"`
+	Version            string   `json:"version"`
+	Desc               string   `json:"desc"`
+	Icon               string   `json:"icon"`
+	Class              string   `json:"class"`
+	Rule               string   `json:"rule"`
+	Public             bool     `json:"public"`
+	Admin              bool     `json:"admin"`
+	Module             bool     `json:"module"`
+	Cron               string   `json:"cron"`
+	Status             *bool    `json:"status"`
+	Path               string   `json:"path"`
+	Raw                string   `json:"raw"`
+	Dependencies       []string `json:"dependencies"`
+	ModuleDependencies []string `json:"module_dependencies"`
+	Type               string   `json:"type"`
+	Origin             string   `json:"origin"`
+	CreateAt           string   `json:"create_at"`
+}
+
+func normalizedPluginStatus(status *bool) *bool {
+	if status == nil {
+		return pluginStatusValue(true)
+	}
+	return pluginStatusValue(*status)
 }
 
 func parseGithubPluginSource(address string) (*githubPluginSource, error) {
@@ -775,7 +856,7 @@ func githubPluginTree(source *githubPluginSource) ([]githubTreeItem, error) {
 
 func githubArchiveTree(source *githubPluginSource) ([]githubTreeItem, error) {
 	archiveURL := fmt.Sprintf("https://codeload.github.com/%s/%s/zip/refs/heads/%s", source.Owner, source.Repo, url.PathEscape(source.Branch))
-	data, err := httpGetBytes(archiveURL, 60*time.Second)
+	data, err := httpGetBytesLimit(archiveURL, 60*time.Second, 128<<20)
 	if err != nil {
 		return nil, err
 	}
@@ -828,26 +909,45 @@ func githubPluginSourceItems(address string) ([]*common.Function, error) {
 			continue
 		}
 		pluginName := strings.TrimSuffix(path.Base(item.Path), path.Ext(item.Path))
+		identity := pluginIdentity(source.Owner, pluginName)
 		class := pluginClassFromExt(path.Ext(item.Path))
 		rawURL := githubRawURL(source.Owner, source.Repo, source.Branch, item.Path)
 		pluginAddress := makeGithubNodePluginAddress(source, item.Path, rawURL, class)
 		dependencies := []string{}
+		moduleDependencies := []string{}
+		metadata := &common.Function{}
 		if data, err := httpGetBytes(rawURL, 20*time.Second); err == nil {
-			dependencies = parseDeclaredDependencies(string(data), class)
+			script := string(data)
+			dependencies = parseDeclaredDependencies(script, class)
+			moduleDependencies = parseDeclaredModuleDependencies(script, class)
+			metadata, _ = pluginParse(script, nameUuid(identity))
+		}
+		classes := metadata.Classes
+		if len(classes) == 0 {
+			classes = []string{source.Owner}
 		}
 		items = append(items, &common.Function{
-			UUID:         nameUuid(pluginName),
-			Title:        pluginName,
-			Type:         class,
-			Suffix:       path.Ext(item.Path),
-			Description:  item.Path,
-			Icon:         defaultPluginIconURL,
-			Version:      "v1.0.0",
-			Author:       source.Owner,
-			Class:        source.Owner,
-			Address:      pluginAddress,
-			Classes:      []string{source.Owner},
-			Dependencies: dependencies,
+			UUID:               nameUuid(identity),
+			Title:              firstNonEmpty(metadata.Title, pluginName),
+			Type:               class,
+			Suffix:             path.Ext(item.Path),
+			Desc:               firstNonEmpty(metadata.Desc, item.Path),
+			Rule:               strings.Join(metadata.Rules, " "),
+			Icon:               pluginIconOrDefault(metadata.Icon),
+			Version:            firstNonEmpty(metadata.Version, "v1.0.0"),
+			Author:             firstNonEmpty(metadata.Author, source.Owner),
+			Class:              strings.Join(classes, " "),
+			Address:            pluginAddress,
+			Classes:            classes,
+			Public:             metadata.Public,
+			Admin:              metadata.Admin,
+			Cron:               metadata.Cron,
+			Status:             normalizedPluginStatus(metadata.Status),
+			Module:             metadata.Module,
+			OnStart:            metadata.OnStart,
+			Web:                metadata.Web,
+			Dependencies:       dependencies,
+			ModuleDependencies: moduleDependencies,
 			PluginPublisher: common.PluginPublisher{
 				Address:      pluginAddress,
 				Organization: organization,
@@ -855,7 +955,7 @@ func githubPluginSourceItems(address string) ([]*common.Function, error) {
 		})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].Description < items[j].Description
+		return items[i].Desc < items[j].Desc
 	})
 	if len(items) == 0 {
 		return nil, errors.New("该仓库 plugins 目录下没有找到 JS 或 Python 插件")
@@ -881,6 +981,7 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 		}
 		pluginPath := strings.TrimSpace(record.Path)
 		pluginName := strings.TrimSuffix(path.Base(pluginPath), path.Ext(pluginPath))
+		identity := pluginIdentity(source.Owner, pluginName)
 		class := pluginClassFromIndexType(record.Type, pluginPath)
 		title := record.Title
 		if title == "" {
@@ -889,7 +990,7 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 		if title == "" {
 			title = pluginName
 		}
-		id := nameUuid(pluginName)
+		id := nameUuid(identity)
 		classes := []string{}
 		for _, item := range strings.FieldsFunc(record.Class, func(r rune) bool {
 			return r == ',' || r == '，' || r == ' ' || r == '\t' || r == '\n'
@@ -914,24 +1015,26 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 			cron["task"] = schedule
 		}
 		items = append(items, &common.Function{
-			UUID:         id,
-			Title:        title,
-			Type:         class,
-			Suffix:       path.Ext(pluginPath),
-			Description:  record.Desc,
-			Rule:         strings.TrimSpace(record.Rule),
-			Icon:         pluginIconOrDefault(record.Icon),
-			Version:      firstNonEmpty(record.Version, "v1.0.0"),
-			Author:       firstNonEmpty(record.Author, source.Owner),
-			Class:        strings.Join(classes, " "),
-			Address:      pluginAddress,
-			Classes:      classes,
-			Public:       record.Public,
-			Admin:        record.Admin,
-			Cron:         cron,
-			Disable:      record.Disable,
-			Dependencies: record.Dependencies,
-			CreateAt:     strings.TrimSpace(record.CreateAt),
+			UUID:               id,
+			Title:              title,
+			Type:               class,
+			Suffix:             path.Ext(pluginPath),
+			Desc:               record.Desc,
+			Rule:               strings.TrimSpace(record.Rule),
+			Icon:               pluginIconOrDefault(record.Icon),
+			Version:            firstNonEmpty(record.Version, "v1.0.0"),
+			Author:             firstNonEmpty(record.Author, source.Owner),
+			Class:              strings.Join(classes, " "),
+			Address:            pluginAddress,
+			Classes:            classes,
+			Public:             record.Public,
+			Admin:              record.Admin,
+			Module:             record.Module,
+			Cron:               cron,
+			Status:             normalizedPluginStatus(record.Status),
+			Dependencies:       record.Dependencies,
+			ModuleDependencies: record.ModuleDependencies,
+			CreateAt:           strings.TrimSpace(record.CreateAt),
 			PluginPublisher: common.PluginPublisher{
 				Address:      pluginAddress,
 				Organization: organization,
@@ -978,9 +1081,11 @@ func completeGithubPublicFileIndexEntry(record githubPublicFileIndexEntry, key s
 	if record.Title == "" {
 		record.Title = record.Name
 	}
-	if len(record.Dependencies) != 0 {
-		record.Dependencies = normalizeDependencyNamesForRuntime(record.Dependencies, pluginClassFromIndexType(record.Type, record.Path))
-	}
+	runtime := pluginClassFromIndexType(record.Type, record.Path)
+	record.Dependencies, record.ModuleDependencies = splitDeclaredDependencyValues(
+		append(append([]string{}, record.Dependencies...), record.ModuleDependencies...),
+		runtime,
+	)
 	return record
 }
 
@@ -1067,14 +1172,20 @@ func installGithubNodePlugin(address string) error {
 	}
 
 	pluginName := strings.TrimSuffix(path.Base(pluginPath), path.Ext(pluginPath))
-	target := nodePluginsRoot()
+	root := nodePluginsRoot()
+	target := filepath.Join(root, pluginPublisherDirName(source.Owner))
 	if err := os.MkdirAll(target, 0755); err != nil {
 		return err
 	}
-	if info, err := os.Stat(filepath.Join(target, pluginName)); err == nil && info.IsDir() {
-		if err := os.RemoveAll(filepath.Join(target, pluginName)); err != nil {
+	if class == NODE {
+		if err := ensureNodeSillygirlModule(root); err != nil {
 			return err
 		}
+		if err := ensureNodePackageJSON(root, "sillygirl-plugins"); err != nil {
+			return err
+		}
+	} else if _, err := ensurePythonSillygirlModule(); err != nil {
+		return err
 	}
 	downloadURL := rawURL
 	if downloadURL == "" {
@@ -1088,24 +1199,34 @@ func installGithubNodePlugin(address string) error {
 	if strings.EqualFold(fileName, "main.js") || strings.EqualFold(fileName, "main.py") || strings.EqualFold(fileName, "demo.main.js") {
 		fileName = pluginName + path.Ext(pluginPath)
 	}
+	if err := ensureNoPluginRuntimeNameConflict(target, fileName); err != nil {
+		return err
+	}
 	mainFile := filepath.Join(target, fileName)
 	if err := ensureChildPath(target, mainFile); err != nil {
 		return err
 	}
+	checkedMainFile, err := checkedNodeScriptPath(mainFile)
+	if err != nil {
+		return err
+	}
+	mainFile = checkedMainFile
+	previous, previousErr := os.ReadFile(mainFile)
 	if err := os.WriteFile(mainFile, data, 0644); err != nil {
 		return err
 	}
-	if class == NODE {
-		if err := ensureNodeSillygirlModule(target); err != nil {
-			return err
+	identity := pluginIdentity(source.Owner, pluginName)
+	if err := addNodePluginLocked(strings.ReplaceAll(mainFile, "\\", "/"), identity, class); err != nil {
+		if previousErr == nil {
+			if restoreErr := os.WriteFile(mainFile, previous, 0644); restoreErr != nil {
+				return fmt.Errorf("%w；恢复原插件源码失败：%v", err, restoreErr)
+			}
+			if restoreErr := addNodePluginLocked(strings.ReplaceAll(mainFile, "\\", "/"), identity, class); restoreErr != nil {
+				return fmt.Errorf("%w；恢复原插件运行状态失败：%v", err, restoreErr)
+			}
+		} else {
+			_ = os.Remove(mainFile)
 		}
-		if err := ensureNodePackageJSON(target, "sillygirl-plugins"); err != nil {
-			return err
-		}
-	} else if _, err := ensurePythonSillygirlModule(); err != nil {
-		return err
-	}
-	if err := addNodePluginLocked(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, class); err != nil {
 		return err
 	}
 	console.Log("已安装脚本插件 %s", pluginName)
@@ -1128,7 +1249,13 @@ func httpGetJSON(address string, timeout time.Duration, target interface{}) erro
 	return json.Unmarshal(data, target)
 }
 
+const maxPluginDownloadBytes int64 = 16 << 20
+
 func httpGetBytes(address string, timeout time.Duration) ([]byte, error) {
+	return httpGetBytesLimit(address, timeout, maxPluginDownloadBytes)
+}
+
+func httpGetBytesLimit(address string, timeout time.Duration, limit int64) ([]byte, error) {
 	reqURL := githubAcceleratedURLFor(address)
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -1144,7 +1271,14 @@ func httpGetBytes(address string, timeout time.Duration) ([]byte, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("下载内容超过 %d 字节限制", limit)
+	}
+	return data, nil
 }
 
 func githubAcceleratedURLFor(address string) string {
@@ -1213,7 +1347,7 @@ func firstNonEmpty(values ...string) string {
 func GetPublicResponse() *RequestPluginResult {
 	rr := &RequestPluginResult{}
 	fs := []*common.Function{}
-	for _, f := range Functions {
+	for _, f := range installedPluginSnapshot() {
 		if f.Public {
 			fs = append(fs, f)
 			f.Downloads = plugin_downloads.GetInt(f.UUID)

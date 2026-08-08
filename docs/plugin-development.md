@@ -2,7 +2,7 @@
 
 [返回项目导航](../README.md) · [界面截图](screenshots.md) · [API 与存储](api-storage.md) · [适配器](adapters.md)
 
-SillyGirl 的插件系统基于外部脚本运行时。插件使用 JavaScript/NodeJS（`.js`）或 Python（`.py`），统一放在 `/data/plugins`，通过顶部注释声明元数据，由框架自动加载、匹配，并通过 gRPC 与 Go 主程序通信。
+SillyGirl 的插件系统基于外部脚本运行时。插件使用 JavaScript/NodeJS（`.js`）或 Python（`.py`），按发布者放在 `/data/plugins/<发布者>/`，通过顶部注释声明元数据，由框架自动加载、匹配，并通过 gRPC 与 Go 主程序通信。
 
 ![插件市场与本地插件](images/plugin-market.png)
 
@@ -31,25 +31,39 @@ SillyGirl 的插件系统基于外部脚本运行时。插件使用 JavaScript/N
 
 一个最小插件由注释元数据和执行代码组成：
 
-脚本插件默认使用扁平文件结构，容器内路径为：
+脚本插件按发布者使用一层目录，容器内路径为：
 
 ```text
 /data/plugins/
-  smallcat.js
-  hello.py
   package.json
   pnpm-lock.yaml
   node_modules/
+  python_packages/
+  smallfawn/
+    normal.js
+    sharedTools.js
+  local/
+    hello.py
 ```
 
-NodeJS 依赖是插件目录共享的，所有 NodeJS 插件共用 `/data/plugins/package.json` 和 `/data/plugins/node_modules`。旧版
-`/data/plugins/插件名/main.js` 仍会兼容加载，但新建和插件市场安装都会写入 `/data/plugins/插件名.js`。
-Python 插件使用 Python 3.12，文件为 `/data/plugins/插件名.py`。Docker 镜像已内置 Python 3.12、pipx、`grpcio==1.83.0` 和 `protobuf==7.35.1`；本地运行时需要自行安装 Python 3.12 和 pipx。
+插件市场安装路径为 `/data/plugins/<GitHub Owner>/<插件文件>`，本地创建的插件写入 `/data/plugins/local/`。普通插件和 `[module: true]` 模块插件（包括 `sharedTools.js` 一类公共代码）都放在发布者目录；同作者插件用 `[depe: ["./sharedTools.js"]]` 声明模块依赖。不同作者可以使用相同文件名，插件身份按 `发布者/文件名` 区分；模块解析不跨作者目录，也不接受 `../`。
+
+NodeJS 包依赖仍由所有插件共享 `/data/plugins/package.json` 和 `/data/plugins/node_modules`；Python 包依赖共享 `/data/plugins/python_packages`。旧版根目录 `.js`/`.py` 文件继续兼容加载，新安装和新建插件使用发布者目录。
+Python 插件使用 Python 3.12。Docker 镜像已内置 Python 3.12、pipx、`grpcio==1.83.0` 和 `protobuf==7.35.1`；本地运行时需要自行安装 Python 3.12 和 pipx。
+
+目录和身份约束：
+
+- 发布者目录只允许一层，脚本入口必须是 `/data/plugins/<发布者>/<文件>.js|.py`；嵌套目录不会被扫描。
+- 发布者名称会转成安全的小写目录名；空作者归入 `local`。Windows 保留名会追加 `-publisher`。
+- 同一发布者下同 stem 的 `.js` 和 `.py` 不能并存，例如 `demo.js` 与 `demo.py` 会因插件身份相同而被拒绝。
+- 编辑、保存、安装和目录 watcher 都会校验真实路径；通过符号链接跳出 `/data/plugins` 的脚本不会加载或写入。
+- Cron 脚本命令使用 `node <发布者>/<文件>.js` 或 `python <发布者>/<文件>.py`。旧的裸文件名仅在全局唯一时兼容解析，重名时必须写发布者路径。
 
 ```js
 /**
  * @title HelloWorld
  * @rule raw ^你好$
+ * @status true
  */
 
 s.reply("Hello World!");
@@ -78,7 +92,7 @@ asyncio.run(main())
 
 Python 插件和 NodeJS 插件共用同一套元数据、规则匹配、配置表单、定时任务和插件市场逻辑。差别主要在运行时和 SDK 调用方式。
 
-插件市场支持直接新增本地非公开插件：点击插件市场工具栏“新增插件”会打开源码编辑器，保存时必须包含新式 `[title: xxx]`、`[name: 文件名]`、`[description: xxx]`、`[version: vx.y.z]`，并至少包含 `[rule: xxx]` 或 `[cron: xxx]`/`[on_start: true]`/`[web: true]` 之一；系统会强制写入/修正为 `[public: false]`。已安装插件卡片图标也可打开同款源码编辑器，支持格式化、保存和删除。旧式 `@title` 注释仍兼容。
+插件市场支持直接新增本地非公开插件：点击插件市场工具栏“新增插件”会打开源码编辑器，保存时必须包含新式 `[title: xxx]`、`[name: 文件名]`、`[desc: xxx]`、`[version: vx.y.z]`，并至少包含 `[rule: xxx]` 或 `[cron: xxx]`/`[on_start: true]`/`[web: true]`/`[module: true]` 之一；系统会强制写入/修正为 `[public: false]`。已安装插件卡片图标也可打开同款源码编辑器，支持格式化、保存和删除。源码 `[name]` 必须与实际文件名一致，保存时不会再用元数据悄悄改分类。旧式 `@title` 注释仍兼容。
 
 ### 运行环境
 
@@ -89,7 +103,7 @@ Python 插件和 NodeJS 插件共用同一套元数据、规则匹配、配置�
 | gRPC 依赖 | 运行时自动准备 `grpcio==1.83.0`、`protobuf==7.35.1` |
 | 第三方依赖 | 通过新式 `[depe: ["包名"]]` 声明；安装、卸载和查看在 Admin 面板「依赖管理」里选择 Python；旧式 `@depe` 仍兼容 |
 | 依赖管理 | Python 依赖由 pipx 管理，统一安装到 `/data/plugins/python_packages`，所有 Python 插件共享 |
-| 文件结构 | 推荐 `/data/plugins/插件名.py` 扁平文件；插件市场按索引 `path` 写入同名 `.py` 文件 |
+| 文件结构 | 插件市场安装到 `/data/plugins/<发布者>/<插件名>.py`；本地创建安装到 `/data/plugins/local/<插件名>.py` |
 
 本地运行时可以按需指定：
 
@@ -187,7 +201,7 @@ accounts = await container.SmallCat({"id": 1}).userList()
 }
 ```
 
-未授权或已禁用用户仍会出现在列表中用于判断状态，但 `bindings.smallcat_openids` 会被运行时清空。插件关闭、禁用或未声明使用 SmallCat 时，所有用户的 `authorized` 都为 `false`；插件只能读取当前有效授权用户的 SmallCat openid。
+未授权或已禁用用户仍会出现在列表中用于判断状态，但 `bindings.smallcat_openids` 会被运行时清空。插件未开放、`status=false` 或源码未检测到 SmallCat 调用时，所有用户的 `authorized` 都为 `false`；插件只能读取当前有效授权用户的 SmallCat openid。
 
 ### Bucket 存储
 
@@ -219,8 +233,8 @@ config = plugin.Form({
         .title("Token")
         .format("password")
         .default(""),
-    "enable": plugin.Form.boolean()
-        .title("启用")
+    "feature_enabled": plugin.Form.boolean()
+        .title("启用此功能")
         .default(False),
 })
 
@@ -353,6 +367,7 @@ if (content === "你好") {
 | `title` | string | 是 | 插件标题，显示在管理面板和插件市场 |
 | `rule` | string | 否 | 消息匹配规则，支持多行。详见[规则匹配语法](#规则匹配语法) |
 | `priority` | number | 否 | 匹配优先级，数字越大越优先，默认 0 |
+| `status` | boolean | 否 | 插件运行状态，`false` 时消息、Cron 和启动入口均不执行；默认 `true` |
 | `cron` | string | 否 | 脚本定时任务表达式，例如 `@cron 0 * * * *`；只支持直接写 Cron 表达式 |
 | `on_start` | boolean | 否 | `true` 时随系统启动执行一次，常用于初始化服务 |
 | `web` | boolean | 否 | `true` 时作为 Web 常驻脚本启动；端口和路由由脚本内 Express 自己处理 |
@@ -361,10 +376,9 @@ if (content === "你好") {
 | `version` | string | 否 | 版本号，如 `v1.0.1` |
 | `author` | string | 否 | 作者名 |
 | `desc` | string | 否 | 插件描述 |
-| `depe` | JSON array | 否 | 插件依赖声明，例如 `[depe: ["ipp"]]`；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装；旧式 `@depe` 兼容 |
+| `depe` | JSON array | 否 | 插件依赖声明。包名由 pnpm/pipx 安装；`./xxx.js` 或 `./xxx.py` 表示插件市场里的依赖模块；旧式 `@depe` 兼容 |
 | `icon` | string | 否 | 插件图标 URL，未填写时使用默认苹果图标 |
 | `public` | boolean | 否 | `true` 时允许发布到插件市场 |
-| `disable` | boolean | 否 | `true` 时禁用插件 |
 | `admin` | boolean | 否 | `true` 时仅管理员可触发 |
 
 
@@ -377,7 +391,7 @@ NodeJS 新式写法：
 ```js
 // [title: 新式插件]
 // [name: newPlugin]
-// [description: 新式说明]
+// [desc: 新式说明]
 // [rule: ^新式命令$]
 // [version: v1.0.0]
 // [author: admin]
@@ -390,14 +404,14 @@ Python 新式写法：
 ```python
 # [title: 新式Python插件]
 # [name: newPythonPlugin]
-# [description: 新式说明]
+# [desc: 新式说明]
 # [rule: ^新式命令$]
 # [cron: 12 8 * * *]
 # [version: v1.0.0]
 # [depe: ["requests"]]
 ```
 
-兼容字段包括：`title`、`name`、`description`（等同 `desc`）、`rule`、`cron`、`admin`、`priority`、`version`、`author`、`class`、`public`、`icon`、`module`、`carry`、`on_start`、`web`、`smallcat`、`depe` 等。新插件建议使用 `[title: ...]` / `[rule: ...]` / `[depe: ...]` 形式。
+兼容字段包括：`title`、`name`、`desc`、`status`、`rule`、`cron`、`admin`、`priority`、`version`、`author`、`class`、`public`、`icon`、`module`、`carry`、`on_start`、`web`、`depe` 等。新插件建议使用 `[title: ...]` / `[rule: ...]` / `[depe: ...]` 形式。
 
 ### 旧式 `@` 注释兼容
 
@@ -591,14 +605,15 @@ bucket.count();        // 获取键数量（number）
 
 SillyGirl 支持声明式插件配置。Node 插件使用顶层 `new plugin.Form({...})` 注册并读取配置。`plugin.Form.string()` / `plugin.Form.boolean()` / `plugin.Form.select()` 等 helper 会生成配置表单结构；后台会在「插件设置」弹窗展示已注册的配置表单。
 
-`enable` 是保留的插件总开关。声明为 boolean 后，SillyGirl 核心会在消息、`@cron` 和 `@on_start` 三类入口执行前统一检查；值为 `false` 时保留 Cron 表达式但跳过插件执行，重新开启后无需重写定时配置。没有声明 `enable` 的旧插件保持默认启用。
+插件总开关读取顶部 `status` 注释元数据：新式写法为 `// [status: true]`，旧式 `@status true` 也兼容。SillyGirl 核心会在消息、`@cron` 和 `@on_start` 三类入口执行前统一检查；值为 `false` 时跳过插件执行，未声明时默认启用。
 
-定时任务页面的“启用”是调度开关。最终执行条件为：**插件总开关开启，并且定时任务启用**。插件需要单独控制定时行为时，可再声明普通业务字段（例如 `cron_run`），但不能替代 `enable` 总开关。
+定时任务页面中插件 `@cron` 行的“启用”开关使用独立的持久化任务状态，不修改脚本顶部的 `status` 注释。插件卡片的开启/关闭只修改 `status`；`status=false` 仍作为插件总开关阻止消息、Cron 和启动入口执行，而 Cron 行的开关只控制对应定时任务是否注册和执行。
 
 ```js
 /**
  * @title 配置示例
  * @rule raw ^配置测试$
+ * @status true
  */
 
 const { sender: s, plugin } = require("sillygirl");
@@ -608,8 +623,8 @@ const ConfigDB = new plugin.Form({
     .title("服务地址")
     .description("例如 http://127.0.0.1:9090")
     .default("http://127.0.0.1:9090"),
-  enable: plugin.Form.boolean()
-    .title("启用开关")
+  feature_enabled: plugin.Form.boolean()
+    .title("启用此功能")
     .default(false),
   delTime: plugin.Form.number()
     .title("撤回时间")
@@ -680,8 +695,8 @@ config = plugin.Form({
     "host": plugin.Form.string()
         .title("服务地址")
         .default("http://127.0.0.1:9090"),
-    "enable": plugin.Form.boolean()
-        .title("启用")
+    "feature_enabled": plugin.Form.boolean()
+        .title("启用此功能")
         .default(False),
 })
 
@@ -1386,20 +1401,33 @@ console.error("错误:", err);
 
 ### 5. 模块复用
 
-将公共逻辑抽取为 `@module true` 插件，其他插件通过 `require` 或全局变量复用：
+将公共逻辑抽取为 `[module: true]` 插件，使用方必须在 `depe` 中写明同运行时、同目录的模块文件名：
 
 ```js
-/**
- * @title 工具模块
- * @module true
- */
+// [title: 工具模块]
+// [module: true]
 
-// 定义全局工具函数
-RegistFuncs["utils"] = {
-  formatTime: (t) => t.Format("2006-01-02"),
-  isWeekend: (t) => t.Weekday() === 0 || t.Weekday() === 6,
+module.exports = {
+  formatTime(value) {
+    return String(value);
+  },
 };
 ```
+
+```js
+// [title: 使用工具模块]
+// [depe: ["./utils.js"]]
+
+const utils = require("./utils.js");
+```
+
+模块依赖只根据 `depe` 判断，不扫描 `require` / `import`。路径必须指向同一发布者目录的平铺文件：NodeJS 仅接受 `./xxx.js`，Python 仅接受 `./xxx.py`；不接受 `../`、绝对路径、嵌套目录或跨作者引用。安装普通插件时会先递归安装同作者的这些模块；模块被引用时禁止卸载；循环依赖会中止安装。
+
+插件卡片执行“安装/升级”前会在同一个确认框列出当前插件的包依赖和模块依赖。确认后，后端按以下顺序处理：递归解析模块、为每个待安装脚本安装其 pnpm/pipx 包依赖、写入并加载模块，最后写入并加载目标插件。任一步失败都会停止后续安装，不会先加载缺少运行依赖的脚本。
+
+### 旧目录迁移
+
+旧版 `/data/plugins/demo.js` 和 `/data/plugins/demo.py` 仍可直接运行，不要求启动时搬迁。需要改成作者目录时，停用对应插件后把文件移动到 `/data/plugins/<发布者>/`，再重启或等待 watcher 重新加载；`package.json`、`pnpm-lock.yaml`、`node_modules` 和 `python_packages` 保持在 `/data/plugins` 顶层。不要把 `sharedTools.js` 放到顶层作为跨作者模块，模块应与引用它的插件位于同一个作者目录。迁移后重新保存相关 Cron 任务，使命令持久化为带发布者的路径。
 
 
 迁移旧插件时不要依赖外部兼容脚本；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`plugin`、`user`、`container`、`utils` 等现有能力。

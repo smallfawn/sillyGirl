@@ -1,6 +1,6 @@
 # SillyGirl
 
-[![Version](https://img.shields.io/badge/version-v1.0.9-1677ff)](VERSION)
+[![Version](https://img.shields.io/badge/version-v1.1.0-1677ff)](VERSION)
 [![Go](https://img.shields.io/badge/Go-1.18+-00ADD8?logo=go)](go.mod)
 
 > SillyGirl 文档导航。功能说明、配置方法和示例统一维护在 `docs/` 的四个板块中。

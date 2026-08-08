@@ -48,12 +48,11 @@ type OpenPlugin = {
   dependencies?: string[];
 };
 
-const tokenKey = 'sillygirl_user_token';
 const authMode = ref<'login' | 'register'>('login');
 const loading = ref(false);
 const currentUser = ref<PublicUser | null>(null);
 const openPlugins = ref<OpenPlugin[]>([]);
-const token = ref(localStorage.getItem(tokenKey) || '');
+localStorage.removeItem('sillygirl_user_token');
 const loginForm = reactive({
   username: '',
   password: '',
@@ -91,9 +90,6 @@ async function requestJSON<T>(url: string, options: RequestInit = {}): Promise<T
   if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json');
   }
-  if (token.value && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token.value}`);
-  }
   const res = await fetch(url, {
     credentials: 'include',
     ...options,
@@ -113,15 +109,12 @@ async function requestJSON<T>(url: string, options: RequestInit = {}): Promise<T
 }
 
 function setAuth(data: AuthPayload) {
-  token.value = data.token;
   currentUser.value = data.user;
-  localStorage.setItem(tokenKey, data.token);
 }
 
 function clearAuth() {
-  token.value = '';
   currentUser.value = null;
-  localStorage.removeItem(tokenKey);
+  localStorage.removeItem('sillygirl_user_token');
 }
 
 async function login() {
@@ -179,9 +172,6 @@ async function logout() {
 }
 
 async function loadCurrentUser() {
-  if (!token.value) {
-    return;
-  }
   try {
     const data = await requestJSON<{ user: PublicUser }>('/api/user/profile');
     currentUser.value = data.user;

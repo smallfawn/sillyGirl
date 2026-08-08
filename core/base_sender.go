@@ -13,140 +13,6 @@ import (
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
-var RegistedSenders = map[string]func() common.Sender{}
-
-type Faker struct {
-	Message string
-	Type    string
-	UserID  string
-	ChatID  string
-	Carry   chan string
-	BaseSender
-	Admin bool
-}
-
-//func (sender *Faker) Listen() chan string {
-// 	return sender.Carry
-// }
-
-//func (sender *Faker) GetContent() string {
-// 	if sender.Fsps.Content != "" {
-// 		return sender.Fsps.Content
-// 	}
-// 	return sender.Message
-// }
-
-//func (sender *Faker) GetUserID() string {
-// 	return sender.UserID
-// }
-
-//func (sender *Faker) GetBotID() string {
-// 	return ""
-// }
-
-//func (sender *Faker) GetChatID() string {
-// 	return sender.ChatID
-// }
-
-//func (sender *Faker) GetImType() string {
-// 	if sender.Type == "" {
-// 		return "fake"
-// 	}
-// 	return sender.Type
-// }
-
-//func (sender *Faker) GetMessageID() string {
-// 	return ""
-// }
-
-//func (sender *Faker) GetUserName() string {
-// 	return ""
-// }
-
-//func (sender *Faker) GetChatName() string {
-// 	return ""
-// }
-
-//func (sender *Faker) IsReply() bool {
-// 	return false
-// }
-
-// //func (sender *Faker) GetReplyUserID() int {
-// 	return 0
-// }
-
-// //func (sender *Faker) GetRawMessage() interface{} {
-// 	return sender.Message
-// }
-
-// //func (sender *Faker) IsAdmin() bool {
-// 	return sender.Admin
-// }
-
-// //func (sender *Faker) IsMedia() bool {
-// 	return false
-// }
-
-//func (sender *Faker) Reply(msgs ...interface{}) (string, error) {
-// rt := ""
-// for _, msg := range msgs {
-// 	switch msg := msg.(type) {
-// 	case []byte:
-// 		rt = (string(msg))
-// 	case string:
-// 		rt = msg
-// 	}
-// }
-// {
-
-// 	for _, v := range regexp.MustCompile(`\[CQ:image,file=([^\[\]]+)\]`).FindAllStringSubmatch(rt, -1) {
-// 		// qr := qrcode2console.NewQRCode2ConsoleWithUrl(v[1], true)
-// 		// defer qr.Output()
-// 		rt = strings.Replace(rt, fmt.Sprintf(`[CQ:image,file=%s]`, v[1]), "", -1)
-// 	}
-// }
-
-// if rt != "" && n != nil {
-// 	NotifyMasters(rt)
-// }
-
-// if rt != "" && sender.Carry != nil {
-// 	sender.Carry <- rt
-// }
-
-// 	if rt != "" && sender.Type == "terminal" {
-// 		fmt.Printf("\x1b[%dm%s \x1b[0m\n", 31, rt)
-// 	}
-// 	return "", nil
-// }
-
-//func (sender *Faker) Delete() error {
-// 	return nil
-// }
-
-//func (sender *Faker) Disappear(lifetime ...time.Duration) {
-
-// }
-
-//func (sender *Faker) Finish() {
-// 	if sender.Carry != nil {
-// 		close(sender.Carry)
-// 	}
-// }
-
-//func (sender *Faker) Copy() common.Sender {
-// 	new := reflect.Indirect(reflect.ValueOf(interface{}(sender))).Interface().(Faker)
-// 	return &new
-// }
-
-//func (sender *Faker) GroupKick(uid string, reject_add_request bool) error {
-// return nil
-// }
-
-//func (sender *Faker) GroupBan(uid string, duration int) error {
-// 	return nil
-// }
-
 type BaseSender struct {
 	matches        [][]string
 	goon           bool
@@ -352,7 +218,6 @@ type Carrys struct {
 }
 
 func (cs *Carrys) Add(key int64, c *Carry) {
-	// logs.Info("add", c.Function.Rules)
 	cs.Lock()
 	defer cs.Unlock()
 	cs.list[key] = c
@@ -363,7 +228,6 @@ func (cs *Carrys) Remove(Key1 int64) {
 	defer cs.Unlock()
 	for key := range cs.list {
 		if key == Key1 {
-			// logs.Info("rem", cs.list[key].Function.Rules)
 			delete(cs.list, Key1)
 		}
 	}
@@ -405,7 +269,6 @@ var waits = map[int]*Carrys{
 }
 
 type Carry struct {
-	// Rules             []string
 	Chan              chan interface{}
 	Result            chan interface{}
 	Message           common.Sender
@@ -470,24 +333,14 @@ func (s *CustomSender) Await(message common.Sender, callback func(common.Sender)
 			c = param
 		}
 	}
-	// c.UserID
 	c.Message = message
 	if len(c.Function.Rules) == 0 {
 		c.Function.Rules = []string{`raw [\s\S]+`}
 	}
-	// fmt.Println("carry", c)
 	fmtRule(&c.Function)
 	c.Chan = make(chan interface{}, 1)
 	c.Result = make(chan interface{}, 1)
 	key := atomic.AddInt64(&listenCounter, 1)
-	// key := fmt.Sprintf("u=%v&c=%v&i=%v&t=%v&p=%v", message.GetUserID(), message.GetChatID(), message.GetImType(), atomic.LoadInt64(&listenCounter))
-	// if fg != nil {
-	// 	if *fg == "me" {
-	// 		key += "&f=me"
-	// 	} else {
-	// 		key += "&f=true"
-	// 	}
-	// }
 	waits[4-s.level].Add(key, c)
 	defer func() {
 		waits[4-s.level].Remove(key)
