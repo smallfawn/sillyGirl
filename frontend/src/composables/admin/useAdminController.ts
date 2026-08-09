@@ -319,8 +319,8 @@ export function useAdminController() {
   const overviewVersion = computed(() => {
     const info = user.value?.version || {};
     return {
-      local: info.local || "1.1.3",
-      remote: info.remote || info.local || "1.1.3",
+      local: info.local || "1.1.4",
+      remote: info.remote || info.local || "1.1.4",
       source: info.source || "reserved",
       repository: info.repository || "https://github.com/smallfawn/sillyGirl",
     };
