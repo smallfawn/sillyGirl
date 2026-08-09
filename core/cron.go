@@ -10,3 +10,7 @@ func init() {
 	)))
 	CRON.Start()
 }
+
+func skipIfStillRunningCronFunc(run func()) cron.Job {
+	return cron.SkipIfStillRunning(cron.DefaultLogger)(cron.FuncJob(run))
+}

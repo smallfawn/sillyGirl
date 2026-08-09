@@ -414,12 +414,12 @@ func AddCommand(cmds []*common.Function) {
 					if len(cronFieldPattern.FindAllString(cron, -1)) == 5 {
 						Cron = "0 " + Cron
 					}
-					cronId, err := CRON.AddFunc(Cron, func() {
+					cronId, err := CRON.AddJob(Cron, skipIfStillRunningCronFunc(func() {
 						if !pluginExecutionEnabled(cmds[j]) || !pluginCronTaskEnabled(cmds[j].UUID, plt) {
 							return
 						}
 						runPluginCronFunction(cmds[j], plt)
-					})
+					}))
 					if err == nil {
 						cmds[j].CronIds = append(cmds[j].CronIds, int(cronId))
 					} else {

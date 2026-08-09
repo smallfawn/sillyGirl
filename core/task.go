@@ -369,7 +369,7 @@ func RegistTasks(pt *Tasks) {
 		pt.CronID = 0
 		return
 	}
-	cid, _ := CRON.AddFunc(pt.Schedule, pt.Handle)
+	cid, _ := CRON.AddJob(pt.Schedule, skipIfStillRunningCronFunc(pt.Handle))
 	pt.CronID = int(cid)
 	// console.Debug("已添加计划任务：%s(%v)", pt.Title, pt.CronID)
 }
