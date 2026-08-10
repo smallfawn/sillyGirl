@@ -45,12 +45,7 @@ const {
       <Table.Column title="标题" data-index="title" :width="180" />
       <Table.Column title="Cron" data-index="schedule" :width="180" />
       <Table.Column title="命令" data-index="command" ellipsis />
-      <Table.Column
-        title="触发口令"
-        data-index="trigger"
-        :width="180"
-        ellipsis
-      >
+      <Table.Column title="触发口令" data-index="trigger" :width="180" ellipsis>
         <template #default="{ text }">{{ text || "—" }}</template>
       </Table.Column>
       <Table.Column title="状态" data-index="enable" :width="80" align="center">
@@ -151,16 +146,33 @@ const {
           :options="tasks.platforms"
           placeholder="选择 BOT 平台"
       /></Form.Item>
+      <Form.Item label="接收类型" html-for="task-recipient-type"
+        ><Select
+          id="task-recipient-type"
+          v-model:value="tasks.form.recipient_type"
+          :options="[
+            { value: 'user', label: '私聊用户' },
+            { value: 'group', label: '群聊' },
+          ]"
+      /></Form.Item>
       <Form.Item
-        label="接收人 ID"
+        :label="tasks.form.recipient_type === 'group' ? '群号' : '用户 ID'"
         html-for="task-recipient"
-        help="填写该平台的用户 ID；插件调用 s.reply() 时会私聊此账号"
+        :help="
+          tasks.form.recipient_type === 'group'
+            ? '填写该平台的群号或群聊 OpenID；插件调用 s.reply() 时会发送到该群聊'
+            : '填写该平台的用户 ID；插件调用 s.reply() 时会私聊此账号'
+        "
         ><Input
           id="task-recipient"
           v-model:value="tasks.form.recipient"
           name="task-recipient"
           allow-clear
-          placeholder="请输入用户 ID / OpenID"
+          :placeholder="
+            tasks.form.recipient_type === 'group'
+              ? '请输入群号 / 群聊 OpenID'
+              : '请输入用户 ID / OpenID'
+          "
       /></Form.Item>
     </Form>
   </Modal>

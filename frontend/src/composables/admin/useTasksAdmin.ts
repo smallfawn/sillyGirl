@@ -66,7 +66,8 @@ export function useTasksAdmin() {
     tasks.form = {
       ...data,
       platform: target?.platform || "",
-      recipient: target?.user_id || target?.chat_id || "",
+      recipient_type: target?.chat_id ? "group" : "user",
+      recipient: target?.chat_id || target?.user_id || "",
     };
     if (
       tasks.form.platform &&
@@ -100,6 +101,8 @@ export function useTasksAdmin() {
       return;
     }
     const platform = `${tasks.form.platform || ""}`.trim();
+    const recipientType =
+      tasks.form.recipient_type === "group" ? "group" : "user";
     const recipient = `${tasks.form.recipient || ""}`.trim();
     if ((platform && !recipient) || (!platform && recipient)) {
       message.error("平台和接收人必须同时填写");
@@ -112,7 +115,14 @@ export function useTasksAdmin() {
       command: tasks.form.command,
       trigger: `${tasks.form.trigger || ""}`.trim(),
       enable: tasks.form.enable,
-      senders: platform && recipient ? [{ platform, user_id: recipient }] : [],
+      senders:
+        platform && recipient
+          ? [
+              recipientType === "group"
+                ? { platform, chat_id: recipient }
+                : { platform, user_id: recipient },
+            ]
+          : [],
     };
     if (payload.task_id) {
       await post(
