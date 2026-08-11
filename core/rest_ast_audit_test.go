@@ -395,3 +395,70 @@ func TestProductionAPIClientsUseOnlyGETAndPOST(t *testing.T) {
 	}
 	t.Logf("audited %d production API client requests", checked)
 }
+
+func TestProductionGinJSONResponsesUseOnlyEnvelopeWriter(t *testing.T) {
+	files, err := goSourceFiles("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	envelopeWrites := 0
+	for _, path := range files {
+		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch callName(call) {
+			case "JSON", "IndentedJSON", "PureJSON", "SecureJSON", "JSONP", "AsciiJSON", "AbortWithStatusJSON":
+			default:
+				return true
+			}
+			position := fileSet.Position(call.Pos())
+			if filepath.Base(path) != "api_response.go" || callName(call) != "JSON" {
+				t.Errorf("%s:%d writes JSON outside the shared API envelope", position.Filename, position.Line)
+				return true
+			}
+			envelopeWrites++
+			return true
+		})
+	}
+	if envelopeWrites != 1 {
+		t.Fatalf("shared API envelope JSON writes=%d; want 1", envelopeWrites)
+	}
+}
+
+func TestCoreReadAllErrorsAreNotDiscarded(t *testing.T) {
+	files, err := goSourceFiles(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	for _, path := range files {
+		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			assignment, ok := node.(*ast.AssignStmt)
+			if !ok || len(assignment.Lhs) < 2 || len(assignment.Rhs) != 1 {
+				return true
+			}
+			ignored, ok := assignment.Lhs[1].(*ast.Ident)
+			if !ok || ignored.Name != "_" {
+				return true
+			}
+			call, ok := assignment.Rhs[0].(*ast.CallExpr)
+			if !ok || callName(call) != "ReadAll" {
+				return true
+			}
+			position := fileSet.Position(assignment.Pos())
+			t.Errorf("%s:%d discards an io.ReadAll error", position.Filename, position.Line)
+			return true
+		})
+	}
+}

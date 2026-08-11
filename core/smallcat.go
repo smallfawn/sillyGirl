@@ -55,7 +55,7 @@ type PublicSmallcatPanel struct {
 
 func handleSmallcatPanelConnectionTest(ctx *gin.Context) {
 	panel := SmallcatPanel{}
-	if err := ctx.BindJSON(&panel); err != nil {
+	if err := ctx.ShouldBindJSON(&panel); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -93,7 +93,7 @@ func handleSmallcatPanelAccounts(ctx *gin.Context) {
 
 func handleSaveSmallcatPanel(ctx *gin.Context) {
 	panel := SmallcatPanel{}
-	if err := ctx.BindJSON(&panel); err != nil {
+	if err := ctx.ShouldBindJSON(&panel); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}

@@ -385,24 +385,22 @@ async function requestJSON<T>(
     ...options,
     headers,
   });
-  if (res.status === 204) return undefined as T;
   const payload = (await res.json().catch(() => ({
     status: false,
     message: "服务响应异常",
     data: null,
   }))) as ApiEnvelope<T>;
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    typeof payload.status !== "boolean" ||
+    typeof payload.message !== "string" ||
+    !("data" in payload)
+  ) {
+    throw new UserRequestError("服务响应格式错误", null);
+  }
   if (!res.ok || payload.status === false) {
-    const problem = payload as ApiEnvelope<T> & {
-      detail?: string;
-      title?: string;
-      errors?: unknown;
-    };
-    const errorData =
-      payload.data ?? (problem.errors ? { errors: problem.errors } : null);
-    throw new UserRequestError(
-      problem.detail || payload.message || problem.title || "请求失败",
-      errorData,
-    );
+    throw new UserRequestError(payload.message || "请求失败", payload.data);
   }
   return payload.data;
 }

@@ -104,7 +104,7 @@ func handlePutAdminSettings(ctx *gin.Context) {
 		PnpmRegistry string                 `json:"pnpm_registry"`
 		PipxRegistry string                 `json:"pipx_registry"`
 	}{}
-	if err := ctx.BindJSON(&req); err != nil {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -202,7 +202,7 @@ func handlePutMessageRule(ctx *gin.Context) {
 		return
 	}
 	value := map[string]interface{}{}
-	if err := ctx.BindJSON(&value); err != nil {
+	if err := ctx.ShouldBindJSON(&value); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -239,5 +239,5 @@ func handleDeleteMessageRule(ctx *gin.Context) {
 		ApiInternalError(ctx, err.Error())
 		return
 	}
-	ApiNoContent(ctx)
+	ApiOK(ctx, nil)
 }

@@ -29,6 +29,20 @@ func responseJWT(t *testing.T, response *httptest.ResponseRecorder) string {
 	return payload.Data.Token
 }
 
+func TestAdminLoginRejectsMalformedJSON(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/admin/sessions", strings.NewReader(`{"username":`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	handleAdminLogin(ctx)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d; want=%d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	assertRESTEnvelope(t, recorder, false)
+}
+
 func requestWithAuthHeader(router http.Handler, method, target, token string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(method, target, nil)
@@ -144,7 +158,7 @@ func TestAdminJWTTokenHeaderInterfaceFlow(t *testing.T) {
 	if legacyBearerResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("admin Authorization header unexpectedly authenticated: status=%d", legacyBearerResponse.Code)
 	}
-	if response := requestWithAuthHeader(router, http.MethodPost, "/api/admin/sessions/current/deletions", token); response.Code != http.StatusNoContent {
+	if response := requestWithAuthHeader(router, http.MethodPost, "/api/admin/sessions/current/deletions", token); response.Code != http.StatusOK {
 		t.Fatalf("admin logout rejected: status=%d body=%s", response.Code, response.Body.String())
 	}
 	if response := requestWithAuthHeader(router, http.MethodGet, "/api/admin/sessions/current", token); response.Code != http.StatusUnauthorized {
@@ -198,7 +212,7 @@ func TestUserJWTTokenHeaderInterfaceFlow(t *testing.T) {
 			}
 		})
 	}
-	if response := requestWithAuthHeader(router, http.MethodPost, "/api/user/sessions/current/deletions", token); response.Code != http.StatusNoContent {
+	if response := requestWithAuthHeader(router, http.MethodPost, "/api/user/sessions/current/deletions", token); response.Code != http.StatusOK {
 		t.Fatalf("user logout rejected: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
@@ -351,7 +365,9 @@ func TestEveryProtectedInterfaceRejectsMissingAndMalformedHeaderJWT(t *testing.T
 			router.ServeHTTP(response, request)
 			if response.Code != http.StatusUnauthorized {
 				t.Errorf("%s %s %s token status=%d body=%s", kind, route.Method, route.Path, response.Code, response.Body.String())
+				continue
 			}
+			assertRESTEnvelope(t, response, false)
 		}
 	}
 	if checkedAdmin < 65 || checkedUser < 16 {

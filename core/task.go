@@ -475,7 +475,7 @@ func init() {
 	saveTask := func(ctx *gin.Context) {
 		// 将请求的 JSON 数据解析为一个 map[string]interface{} 类型的变量
 		var updateData map[string]interface{}
-		err := ctx.BindJSON(&updateData)
+		err := ctx.ShouldBindJSON(&updateData)
 		if err != nil {
 			ApiFail(ctx, err.Error())
 			return
@@ -663,7 +663,7 @@ func init() {
 				ApiInternalError(ctx, err.Error())
 				return
 			}
-			ApiNoContent(ctx)
+			ApiOK(ctx, nil)
 			return
 		}
 		if strings.TrimSpace(tasks.GetString(pt.ID)) == "" {
@@ -674,7 +674,7 @@ func init() {
 			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 	GinApi(GET, "/api/admin/task-options", RequireAuth, func(ctx *gin.Context) {
 		var scripts = map[string]string{}

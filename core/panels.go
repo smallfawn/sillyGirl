@@ -91,7 +91,7 @@ func handleDeleteAdminPanel(ctx *gin.Context) {
 		ApiNotFound(ctx, "面板不存在")
 		return
 	}
-	ApiNoContent(ctx)
+	ApiOK(ctx, nil)
 }
 
 func adminPanelKindFromRequest(ctx *gin.Context, id string) (string, error) {

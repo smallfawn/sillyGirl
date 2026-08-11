@@ -47,7 +47,7 @@ func init() {
 	})
 	GinApi(POST, "/api/admin/masters", RequireAuth, func(c *gin.Context) {
 		m := Master{}
-		if err := c.BindJSON(&m); err != nil {
+		if err := c.ShouldBindJSON(&m); err != nil {
 			ApiFail(c, err.Error())
 			return
 		}
@@ -107,6 +107,6 @@ func init() {
 			return
 		}
 
-		ApiNoContent(c)
+		ApiOK(c, nil)
 	})
 }

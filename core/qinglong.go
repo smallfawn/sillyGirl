@@ -43,7 +43,7 @@ type qinglongTokenResponse struct {
 
 func handleQinglongPanelConnectionTest(ctx *gin.Context) {
 	panel := QinglongPanel{}
-	if err := ctx.BindJSON(&panel); err != nil {
+	if err := ctx.ShouldBindJSON(&panel); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -61,7 +61,7 @@ func handleQinglongPanelConnectionTest(ctx *gin.Context) {
 
 func handleSaveQinglongPanel(ctx *gin.Context) {
 	panel := QinglongPanel{}
-	if err := ctx.BindJSON(&panel); err != nil {
+	if err := ctx.ShouldBindJSON(&panel); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}

@@ -268,7 +268,7 @@ func init() {
 	saveCarryGroup := func(ctx *gin.Context) {
 		// 将请求的 JSON 数据解析为一个 map[string]interface{} 类型的变量
 		var updateData map[string]interface{}
-		err := ctx.BindJSON(&updateData)
+		err := ctx.ShouldBindJSON(&updateData)
 		if err != nil {
 			ApiFail(ctx, err.Error())
 			return
@@ -361,7 +361,7 @@ func init() {
 			return
 		}
 		CarryGroups.Set(cg.ID, "")
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 }
 

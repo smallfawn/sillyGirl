@@ -44,7 +44,8 @@ test*
 !proto3/test_sillygirl_values.py
 node_modules
 *.tsbuildinfo
-plugins
+plugins/*
+!plugins/chinaMobileToken.js
 bin
 language
 .VSCodeCounter

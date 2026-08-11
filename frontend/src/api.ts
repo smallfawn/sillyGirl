@@ -2,14 +2,22 @@ import { message } from "ant-design-vue";
 
 export class ApiError extends Error {
   status: number;
+  data: unknown;
 
-  constructor(status: number, text: string) {
+  constructor(status: number, text: string, data: unknown = null) {
     super(text);
     this.status = status;
+    this.data = data;
   }
 }
 
 type RequestOptions = RequestInit & { raw?: boolean };
+
+type ApiEnvelope<T> = {
+  status: boolean;
+  message: string;
+  data: T;
+};
 
 const authTokenKey = "sillygirl_admin_jwt";
 const adminAuthExpiredEvent = "sillygirl:admin-auth-expired";
@@ -61,6 +69,39 @@ function handleAdminAuthExpired() {
   }
 }
 
+function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
+  if (!value || typeof value !== "object") return false;
+  const envelope = value as Record<string, unknown>;
+  return (
+    typeof envelope.status === "boolean" &&
+    typeof envelope.message === "string" &&
+    "data" in envelope
+  );
+}
+
+function envelopeErrorText(envelope: ApiEnvelope<unknown>) {
+  if (envelope.data && typeof envelope.data === "object") {
+    const errors = (envelope.data as Record<string, unknown>).errors;
+    const candidates = Array.isArray(errors)
+      ? errors
+      : errors && typeof errors === "object"
+        ? Object.values(errors)
+        : [];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+      if (candidate && typeof candidate === "object") {
+        const detail = (candidate as Record<string, unknown>).message;
+        if (typeof detail === "string" && detail.trim()) {
+          return detail.trim();
+        }
+      }
+    }
+  }
+  return envelope.message || "请求失败";
+}
+
 export async function request<T>(
   url: string,
   options: RequestOptions = {},
@@ -81,32 +122,31 @@ export async function request<T>(
   });
   const contentType = res.headers.get("content-type") || "";
   const isJSON = contentType.includes("/json") || contentType.includes("+json");
-  const data =
-    res.status === 204 ? null : isJSON ? await res.json() : await res.text();
+  const data = isJSON ? await res.json().catch(() => null) : await res.text();
   const errorText =
     typeof data === "string"
       ? data
-      : data?.detail ||
-        data?.message ||
-        data?.title ||
-        data?.errorMessage ||
-        data?.msg ||
-        data?.error ||
-        res.statusText ||
-        "请求失败";
-  if (!res.ok) {
-    if (adminProtected && res.status === 401) {
-      handleAdminAuthExpired();
-    }
-    throw new ApiError(res.status, errorText);
+      : isApiEnvelope(data)
+        ? envelopeErrorText(data)
+        : res.statusText || "服务响应格式错误";
+  if (adminProtected && res.status === 401) {
+    handleAdminAuthExpired();
   }
-  if (
-    !options.raw &&
-    data &&
-    typeof data === "object" &&
-    (data.status === false || data.success === false)
-  ) {
-    throw new ApiError(200, errorText);
+  if (options.raw) {
+    if (!res.ok) {
+      throw new ApiError(
+        res.status,
+        errorText,
+        isApiEnvelope(data) ? data.data : null,
+      );
+    }
+    return data as T;
+  }
+  if (!isApiEnvelope(data)) {
+    throw new ApiError(res.status, "服务响应格式错误");
+  }
+  if (!res.ok || !data.status) {
+    throw new ApiError(res.status, errorText, data.data);
   }
   return data as T;
 }
@@ -127,16 +167,14 @@ export async function saveStorage(
   uuid?: string,
 ) {
   const query = uuid ? `?uuid=${encodeURIComponent(uuid)}` : "";
-  const res = await post<{
-    data?: {
+  const res = await post<
+    ApiEnvelope<{
       messages?: Record<string, string>;
       errors?: Record<string, string>;
       changes?: Record<string, boolean>;
-    };
-    messages?: Record<string, string>;
-    errors?: Record<string, string>;
-  }>(`/api/admin/storage/values${query}`, updates);
-  const payload = res.data || res;
+    }>
+  >(`/api/admin/storage/values${query}`, updates);
+  const payload = res.data;
   const errors = payload.errors || {};
   const firstError = Object.values(errors).find(Boolean);
   if (firstError) {

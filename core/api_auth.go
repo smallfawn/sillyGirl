@@ -145,46 +145,10 @@ func init() {
 			"expiresIn":        adminJWTExpireSeconds,
 		})
 	})
-	adminLoginHandler := func(ctx *gin.Context) {
-		var auth = struct {
-			Password string `json:"password"`
-			Username string `json:"username"`
-		}{}
-		json.NewDecoder(ctx.Request.Body).Decode(&auth)
-		auth.Username = strings.TrimSpace(auth.Username)
-		if strings.TrimSpace(password) == "" {
-			ApiConflict(ctx, "后台尚未初始化")
-			return
-		}
-		attemptKey := "admin:" + auth.Username
-		if loginAttemptBlocked(ctx, attemptKey) {
-			ApiError(ctx, http.StatusTooManyRequests, "登录失败次数过多，请稍后再试")
-			return
-		}
-		if verifyAdminPassword(auth.Password) && auth.Username == name {
-			clearLoginAttempts(ctx, attemptKey)
-			token, err := createAdminJWTSession(ctx, name)
-			if err != nil {
-				ApiInternalError(ctx, err.Error())
-				return
-			}
-			console.Log("登录成功，当前有效令牌数%d，总数%d", len(ValidAuths()), adminSessionCount())
-			ApiCreated(ctx, "/api/admin/sessions/current", map[string]interface{}{
-				"status":           "ok",
-				"type":             "account",
-				"currentAuthority": "admin",
-				"token":            token,
-				"expiresIn":        adminJWTExpireSeconds,
-			})
-		} else {
-			recordFailedLoginAttempt(ctx, attemptKey)
-			ApiUnauthorized(ctx, "账号或密码错误")
-		}
-	}
-	GinApi(POST, "/api/admin/sessions", adminLoginHandler)
+	GinApi(POST, "/api/admin/sessions", handleAdminLogin)
 	GinApi(POST, "/api/admin/sessions/current/deletions", RequireAuth, DestroyAuth, func(ctx *gin.Context) {
 		sillyGirl.Set("web_token", "")
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 	pluginNextUuid := sillyGirl.GetString("pluginNextUuid")
 	if pluginNextUuid == "" {
@@ -245,6 +209,47 @@ func init() {
 			"version":      overviewVersionInfo(),
 		})
 	})
+}
+
+func handleAdminLogin(ctx *gin.Context) {
+	auth := struct {
+		Password string `json:"password"`
+		Username string `json:"username"`
+	}{}
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&auth); err != nil {
+		ApiFail(ctx, "请求体不是有效 JSON")
+		return
+	}
+	auth.Username = strings.TrimSpace(auth.Username)
+	if strings.TrimSpace(password) == "" {
+		ApiConflict(ctx, "后台尚未初始化")
+		return
+	}
+	attemptKey := "admin:" + auth.Username
+	if loginAttemptBlocked(ctx, attemptKey) {
+		ApiError(ctx, http.StatusTooManyRequests, "登录失败次数过多，请稍后再试")
+		return
+	}
+	adminName := strings.TrimSpace(sillyGirl.GetString("name", "傻妞"))
+	if verifyAdminPassword(auth.Password) && auth.Username == adminName {
+		clearLoginAttempts(ctx, attemptKey)
+		token, err := createAdminJWTSession(ctx, adminName)
+		if err != nil {
+			ApiInternalError(ctx, err.Error())
+			return
+		}
+		console.Log("登录成功，当前有效令牌数%d，总数%d", len(ValidAuths()), adminSessionCount())
+		ApiCreated(ctx, "/api/admin/sessions/current", map[string]interface{}{
+			"status":           "ok",
+			"type":             "account",
+			"currentAuthority": "admin",
+			"token":            token,
+			"expiresIn":        adminJWTExpireSeconds,
+		})
+	} else {
+		recordFailedLoginAttempt(ctx, attemptKey)
+		ApiUnauthorized(ctx, "账号或密码错误")
+	}
 }
 
 func overviewUserStats() map[string]interface{} {

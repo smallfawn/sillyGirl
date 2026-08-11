@@ -43,6 +43,30 @@ func decodeRESTBody(t *testing.T, recorder *httptest.ResponseRecorder) map[strin
 	return body
 }
 
+func assertRESTEnvelope(t *testing.T, recorder *httptest.ResponseRecorder, wantStatus bool) map[string]interface{} {
+	t.Helper()
+	if got := recorder.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("content type=%q; body=%s", got, recorder.Body.String())
+	}
+	body := decodeRESTBody(t, recorder)
+	if len(body) != 3 {
+		t.Fatalf("envelope fields=%v; want exactly status, message, data", body)
+	}
+	for _, key := range []string{"status", "message", "data"} {
+		if _, ok := body[key]; !ok {
+			t.Fatalf("envelope is missing %q: %v", key, body)
+		}
+	}
+	status, ok := body["status"].(bool)
+	if !ok || status != wantStatus {
+		t.Fatalf("envelope status=%#v; want boolean %t", body["status"], wantStatus)
+	}
+	if _, ok := body["message"].(string); !ok {
+		t.Fatalf("envelope message=%#v; want string", body["message"])
+	}
+	return body
+}
+
 func TestRegisteredDynamicRoutesResolveParameters(t *testing.T) {
 	router := newRESTContractRouter(
 		Req{Method: GET, Path: "/api/widgets/:id", Handle: func(ctx *gin.Context) {
@@ -83,12 +107,9 @@ func TestRESTMethodAndNotFoundContracts(t *testing.T) {
 	if methodResponse.Header().Get("Allow") != http.MethodGet+", "+http.MethodOptions {
 		t.Fatalf("wrong Allow header: %q", methodResponse.Header().Get("Allow"))
 	}
-	if got := methodResponse.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/problem+json") {
-		t.Fatalf("wrong problem content type: %q", got)
-	}
-	problem := decodeRESTBody(t, methodResponse)
-	if problem["status"] != float64(http.StatusMethodNotAllowed) || problem["instance"] != "/api/widgets/widget-7" {
-		t.Fatalf("wrong method problem: %#v", problem)
+	problem := assertRESTEnvelope(t, methodResponse, false)
+	if problem["message"] != "请求方法不受支持" || problem["data"] != nil {
+		t.Fatalf("wrong method error envelope: %#v", problem)
 	}
 
 	notFound := performRESTRequest(router, http.MethodGet, "/api/missing")
@@ -106,7 +127,7 @@ func TestRESTResponseStatusContracts(t *testing.T) {
 		ApiAccepted(ctx, "/api/jobs/job-3", gin.H{"id": "job-3"})
 	})
 	router.POST("/api/widgets/:id/deletions", func(ctx *gin.Context) {
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 	router.GET("/api/failure", func(ctx *gin.Context) {
 		ApiFail(ctx, "参数错误")
@@ -116,21 +137,27 @@ func TestRESTResponseStatusContracts(t *testing.T) {
 	if created.Code != http.StatusCreated || created.Header().Get("Location") != "/api/widgets/widget-7" {
 		t.Fatalf("created contract mismatch: status=%d location=%q", created.Code, created.Header().Get("Location"))
 	}
+	assertRESTEnvelope(t, created, true)
 	accepted := performRESTRequest(router, http.MethodPost, "/api/jobs")
 	if accepted.Code != http.StatusAccepted || accepted.Header().Get("Location") != "/api/jobs/job-3" {
 		t.Fatalf("accepted contract mismatch: status=%d location=%q", accepted.Code, accepted.Header().Get("Location"))
 	}
+	assertRESTEnvelope(t, accepted, true)
 	deleted := performRESTRequest(router, http.MethodPost, "/api/widgets/widget-7/deletions")
-	if deleted.Code != http.StatusNoContent || deleted.Body.Len() != 0 {
-		t.Fatalf("no-content contract mismatch: status=%d body=%q", deleted.Code, deleted.Body.String())
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("empty success contract mismatch: status=%d body=%q", deleted.Code, deleted.Body.String())
+	}
+	if envelope := assertRESTEnvelope(t, deleted, true); envelope["data"] != nil {
+		t.Fatalf("empty success data=%#v; want null", envelope["data"])
 	}
 	failure := performRESTRequest(router, http.MethodGet, "/api/failure")
 	if failure.Code != http.StatusBadRequest {
 		t.Fatalf("failure contract mismatch: status=%d body=%s", failure.Code, failure.Body.String())
 	}
+	assertRESTEnvelope(t, failure, false)
 }
 
-func TestRESTProblemStatusHelpers(t *testing.T) {
+func TestRESTErrorStatusHelpers(t *testing.T) {
 	tests := []struct {
 		name   string
 		status int
@@ -153,17 +180,34 @@ func TestRESTProblemStatusHelpers(t *testing.T) {
 			if recorder.Code != test.status {
 				t.Fatalf("status=%d; want=%d; body=%s", recorder.Code, test.status, recorder.Body.String())
 			}
-			if got := recorder.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/problem+json") {
-				t.Fatalf("content type=%q", got)
+			envelope := assertRESTEnvelope(t, recorder, false)
+			if envelope["data"] != nil {
+				t.Fatalf("error data=%#v; want null", envelope["data"])
 			}
 		})
+	}
+}
+
+func TestRESTValidationErrorStoresExtensionsInData(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/widgets", nil)
+	ApiValidationError(ctx, "字段校验失败", map[string]string{"name": "不能为空"})
+
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d; body=%s", recorder.Code, recorder.Body.String())
+	}
+	envelope := assertRESTEnvelope(t, recorder, false)
+	data, ok := envelope["data"].(map[string]interface{})
+	if !ok || data["errors"] == nil {
+		t.Fatalf("validation error data=%#v", envelope["data"])
 	}
 }
 
 func TestCORSAdvertisesOnlyGETAndPOSTForAPIRequests(t *testing.T) {
 	router := gin.New()
 	router.Use(Cors())
-	router.POST("/api/settings", func(ctx *gin.Context) { ApiNoContent(ctx) })
+	router.POST("/api/settings", func(ctx *gin.Context) { ApiOK(ctx, nil) })
 
 	request := httptest.NewRequest(http.MethodOptions, "/api/settings", nil)
 	request.Header.Set("Origin", "http://localhost:5173")
@@ -247,4 +291,5 @@ func TestAPIHandlerPanicDoesNotLeakInternalDetails(t *testing.T) {
 	if strings.Contains(response.Body.String(), sensitive) {
 		t.Fatalf("panic response leaked internal details: %s", response.Body.String())
 	}
+	assertRESTEnvelope(t, response, false)
 }

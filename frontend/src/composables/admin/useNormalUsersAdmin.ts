@@ -1,7 +1,10 @@
 import { reactive } from "vue";
 import message from "ant-design-vue/es/message";
 import { get, post } from "../../api";
-import type { AdminUserRow } from "../../types";
+import type {
+  AdminUserPluginAuthorization,
+  AdminUserRow,
+} from "../../types";
 import { apiData, type ApiEnvelope } from "./adminApi";
 
 export function useNormalUsersAdmin(
@@ -37,6 +40,14 @@ export function useNormalUsersAdmin(
     deleting: {} as Record<string, boolean>,
     form: emptyNormalUserForm(),
   });
+  const pluginAuthorizations = reactive({
+    rows: [] as AdminUserPluginAuthorization[],
+    loading: false,
+    saving: {} as Record<string, boolean>,
+    modalOpen: false,
+    user: null as AdminUserRow | null,
+  });
+
   async function loadNormalUsers() {
     normalUsers.loading = true;
     try {
@@ -125,10 +136,73 @@ export function useNormalUsersAdmin(
     }
   }
 
+  function normalUserPluginAuthorizations(row?: AdminUserRow) {
+    return row?.plugin_authorizations || [];
+  }
+
+  async function loadNormalUserPluginAuthorizations(row: AdminUserRow) {
+    pluginAuthorizations.loading = true;
+    try {
+      const res = await get<
+        ApiEnvelope<{ list: AdminUserPluginAuthorization[]; total: number }>
+      >(`/api/admin/users/${encodeURIComponent(row.username)}/plugins`);
+      const data = apiData(res);
+      pluginAuthorizations.rows = data?.list || [];
+      pluginAuthorizations.user = row;
+    } catch (error) {
+      pluginAuthorizations.rows = [];
+      message.error(
+        error instanceof Error ? error.message : "加载插件授权失败",
+      );
+    } finally {
+      pluginAuthorizations.loading = false;
+    }
+  }
+
+  async function openNormalUserPluginAuthorizations(row: AdminUserRow) {
+    pluginAuthorizations.user = row;
+    pluginAuthorizations.modalOpen = true;
+    await loadNormalUserPluginAuthorizations(row);
+  }
+
+  async function saveNormalUserPluginAuthorization(
+    row: AdminUserPluginAuthorization,
+    authorized: boolean,
+  ) {
+    if (!pluginAuthorizations.user) return;
+    pluginAuthorizations.saving[row.uuid] = true;
+    try {
+      await post(
+        `/api/admin/users/${encodeURIComponent(pluginAuthorizations.user.username)}/plugins/${encodeURIComponent(row.uuid)}`,
+        { authorized },
+      );
+      row.authorized = authorized;
+      const current = normalUsers.rows.find(
+        (item) => item.username === pluginAuthorizations.user?.username,
+      );
+      if (current) {
+        current.plugin_authorizations = pluginAuthorizations.rows.filter(
+          (item) => item.authorized,
+        );
+      }
+      message.success(authorized ? "插件授权已添加" : "插件授权已删除");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "更新授权失败");
+      await loadNormalUserPluginAuthorizations(pluginAuthorizations.user);
+    } finally {
+      pluginAuthorizations.saving[row.uuid] = false;
+    }
+  }
+
   return {
+    normalUserPluginAuthorizations,
     normalUsers,
+    openNormalUserPluginAuthorizations,
+    pluginAuthorizations,
     loadNormalUsers,
     openNormalUser,
+    loadNormalUserPluginAuthorizations,
+    saveNormalUserPluginAuthorization,
     saveNormalUser,
     removeNormalUser,
   };

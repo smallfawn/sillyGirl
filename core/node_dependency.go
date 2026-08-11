@@ -186,45 +186,11 @@ func init() {
 		})
 	})
 
-	GinApi(POST, "/api/admin/scripts", RequireAuth, func(ctx *gin.Context) {
-		req := nodeScriptRequest{}
-		_ = ctx.BindJSON(&req)
-		fileName, err := normalizeNodeScriptFileName(req.Name)
-		if err != nil {
-			ApiUnprocessable(ctx, err.Error())
-			return
-		}
-		title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
-		pluginName := availablePluginName(filepath.Join(nodePluginsRoot(), "local"), title)
-		class := pluginClassFromExt(filepath.Ext(fileName))
-		fileName = pluginName + filepath.Ext(fileName)
-		_, index, err := createNodePlugin(pluginName, title, fileName, class)
-		if err != nil {
-			if strings.Contains(err.Error(), "存在") {
-				ApiConflict(ctx, err.Error())
-			} else {
-				ApiInternalError(ctx, err.Error())
-			}
-			return
-		}
-		identity := nodePluginIdentityFromPath(index)
-		if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), identity, class); err != nil {
-			_ = os.Remove(index)
-			ApiInternalError(ctx, err.Error())
-			return
-		}
-		id := nameUuid(identity)
-		ApiCreated(ctx, "/api/admin/scripts/"+id, map[string]interface{}{
-			"id":     id,
-			"plugin": pluginName,
-			"path":   index,
-			"file":   filepath.Base(index),
-		})
-	})
+	GinApi(POST, "/api/admin/scripts", RequireAuth, handleCreateNodeScript)
 
 	GinApi(POST, "/api/admin/scripts/:id", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
-		if err := ctx.BindJSON(&req); err != nil {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
@@ -267,7 +233,46 @@ func init() {
 			return
 		}
 		AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginIdentityFromPath(path), UNKNOWN)
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
+	})
+}
+
+func handleCreateNodeScript(ctx *gin.Context) {
+	req := nodeScriptRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ApiFail(ctx, err.Error())
+		return
+	}
+	fileName, err := normalizeNodeScriptFileName(req.Name)
+	if err != nil {
+		ApiUnprocessable(ctx, err.Error())
+		return
+	}
+	title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	pluginName := availablePluginName(filepath.Join(nodePluginsRoot(), "local"), title)
+	class := pluginClassFromExt(filepath.Ext(fileName))
+	fileName = pluginName + filepath.Ext(fileName)
+	_, index, err := createNodePlugin(pluginName, title, fileName, class)
+	if err != nil {
+		if strings.Contains(err.Error(), "存在") {
+			ApiConflict(ctx, err.Error())
+		} else {
+			ApiInternalError(ctx, err.Error())
+		}
+		return
+	}
+	identity := nodePluginIdentityFromPath(index)
+	if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), identity, class); err != nil {
+		_ = os.Remove(index)
+		ApiInternalError(ctx, err.Error())
+		return
+	}
+	id := nameUuid(identity)
+	ApiCreated(ctx, "/api/admin/scripts/"+id, map[string]interface{}{
+		"id":     id,
+		"plugin": pluginName,
+		"path":   index,
+		"file":   filepath.Base(index),
 	})
 }
 
@@ -333,7 +338,7 @@ func handleSetPluginDependencyRegistry(ctx *gin.Context) {
 		Runtime  string `json:"runtime"`
 		Registry string `json:"registry"`
 	}{}
-	if err := ctx.BindJSON(&req); err != nil {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -366,7 +371,7 @@ func handleAddPluginDependencyRegistryOption(ctx *gin.Context) {
 		Runtime  string `json:"runtime"`
 		Registry string `json:"registry"`
 	}{}
-	if err := ctx.BindJSON(&req); err != nil {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -425,7 +430,7 @@ func handleRemovePluginDependencyRegistryOption(ctx *gin.Context) {
 	req.Runtime = ctx.Param("runtime")
 	req.Registry = strings.TrimPrefix(ctx.Param("registry"), "/")
 	if req.Registry == "" {
-		if err := ctx.BindJSON(&req); err != nil {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
@@ -465,7 +470,7 @@ func handleRemovePluginDependencyRegistryOption(ctx *gin.Context) {
 
 func handleInstallPluginDependency(ctx *gin.Context) {
 	req := nodeDependencyRequest{}
-	if err := ctx.BindJSON(&req); err != nil {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -495,7 +500,7 @@ func handleRemovePluginDependency(ctx *gin.Context) {
 		req.Runtime = runtime
 		req.Plugin = ctx.Param("plugin")
 		req.Package = strings.TrimPrefix(ctx.Param("package"), "/")
-	} else if err := ctx.BindJSON(&req); err != nil {
+	} else if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -515,7 +520,7 @@ func handleRemovePluginDependency(ctx *gin.Context) {
 		ApiUnprocessable(ctx, message)
 		return
 	}
-	ApiNoContent(ctx)
+	ApiOK(ctx, nil)
 }
 
 func normalizeDependencyRuntime(runtime string) string {

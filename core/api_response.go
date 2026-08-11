@@ -25,16 +25,8 @@ func ApiAccepted(ctx *gin.Context, location string, data interface{}) {
 	apiSuccess(ctx, http.StatusAccepted, data)
 }
 
-func ApiNoContent(ctx *gin.Context) {
-	ctx.Status(http.StatusNoContent)
-}
-
 func apiSuccess(ctx *gin.Context, httpStatus int, data interface{}) {
-	ctx.JSON(httpStatus, gin.H{
-		"status":  true,
-		"message": "成功",
-		"data":    data,
-	})
+	apiResponse(ctx, httpStatus, true, "成功", data)
 }
 
 func ApiList(ctx *gin.Context, list interface{}, total int, extras ...map[string]interface{}) {
@@ -66,29 +58,19 @@ func ApiProblem(ctx *gin.Context, httpStatus int, message string, extensions map
 	if httpStatus == 0 {
 		httpStatus = http.StatusInternalServerError
 	}
-	title := http.StatusText(httpStatus)
-	if title == "" {
-		title = "Request Failed"
+	var data interface{}
+	if len(extensions) != 0 {
+		data = extensions
 	}
-	instance := ""
-	if ctx.Request != nil && ctx.Request.URL != nil {
-		instance = ctx.Request.URL.Path
-	}
-	ctx.Header("Content-Type", "application/problem+json")
-	problem := gin.H{
-		"type":     "about:blank",
-		"title":    title,
-		"status":   httpStatus,
-		"detail":   message,
-		"instance": instance,
-		"message":  message,
-	}
-	for key, value := range extensions {
-		if _, reserved := problem[key]; !reserved {
-			problem[key] = value
-		}
-	}
-	ctx.JSON(httpStatus, problem)
+	apiResponse(ctx, httpStatus, false, message, data)
+}
+
+func apiResponse(ctx *gin.Context, httpStatus int, status bool, message string, data interface{}) {
+	ctx.JSON(httpStatus, gin.H{
+		"status":  status,
+		"message": message,
+		"data":    data,
+	})
 }
 
 func ApiUnauthorized(ctx *gin.Context, message string) {

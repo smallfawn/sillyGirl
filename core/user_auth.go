@@ -57,10 +57,11 @@ type normalUserBindings struct {
 
 type adminNormalUserRow struct {
 	publicNormalUser
-	Bindings   normalUserBindings `json:"bindings"`
-	UpdatedAt  int64              `json:"updated_at"`
-	Disabled   bool               `json:"disabled"`
-	StorageKey string             `json:"storage_key"`
+	Bindings             normalUserBindings                `json:"bindings"`
+	UpdatedAt            int64                             `json:"updated_at"`
+	Disabled             bool                              `json:"disabled"`
+	StorageKey           string                            `json:"storage_key"`
+	PluginAuthorizations []adminUserPluginAuthorizationRow `json:"plugin_authorizations,omitempty"`
 }
 
 type adminNormalUserPayload struct {
@@ -155,7 +156,7 @@ func init() {
 			}
 			return
 		}
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 
 	GinApi(POST, "/api/user/accounts", func(ctx *gin.Context) {
@@ -530,7 +531,7 @@ func init() {
 	})
 
 	GinApi(POST, "/api/user/sessions/current/deletions", RequireUserAuth, func(ctx *gin.Context) {
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 }
 
@@ -691,11 +692,12 @@ func deleteNormalUser(username string) error {
 
 func adminNormalUserRowFor(user *normalUser, bindings normalUserBindings) adminNormalUserRow {
 	return adminNormalUserRow{
-		publicNormalUser: toPublicNormalUser(user),
-		Bindings:         normalizeNormalUserBindings(bindings),
-		UpdatedAt:        user.UpdatedAt,
-		Disabled:         user.Disabled,
-		StorageKey:       normalUserStorageKey(user.Username),
+		publicNormalUser:     toPublicNormalUser(user),
+		Bindings:             normalizeNormalUserBindings(bindings),
+		UpdatedAt:            user.UpdatedAt,
+		Disabled:             user.Disabled,
+		StorageKey:           normalUserStorageKey(user.Username),
+		PluginAuthorizations: adminUserPluginAuthorizationsForUser(user.ID),
 	}
 }
 
@@ -989,11 +991,12 @@ func listNormalUsers() ([]adminNormalUserRow, error) {
 			return nil
 		}
 		rows = append(rows, adminNormalUserRow{
-			publicNormalUser: toPublicNormalUser(user),
-			Bindings:         loadNormalUserBindings(user.Username),
-			UpdatedAt:        user.UpdatedAt,
-			Disabled:         user.Disabled,
-			StorageKey:       key,
+			publicNormalUser:     toPublicNormalUser(user),
+			Bindings:             loadNormalUserBindings(user.Username),
+			UpdatedAt:            user.UpdatedAt,
+			Disabled:             user.Disabled,
+			StorageKey:           key,
+			PluginAuthorizations: adminUserPluginAuthorizationsForUser(user.ID),
 		})
 		return nil
 	})

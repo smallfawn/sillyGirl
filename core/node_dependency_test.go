@@ -2,13 +2,30 @@ package core
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	proto3assets "github.com/smallfawn/sillyGirl/proto3"
 )
+
+func TestCreateNodeScriptRejectsMalformedJSON(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/admin/scripts", strings.NewReader(`{"name":`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	handleCreateNodeScript(ctx)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d; want=%d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	assertRESTEnvelope(t, recorder, false)
+}
 
 func TestDeclaredDependenciesSplitPackagesAndPluginModules(t *testing.T) {
 	nodeSource := `// [depe: ["axios", "./shared-tools.js", "./wrong.py", "../escape.js"]]`

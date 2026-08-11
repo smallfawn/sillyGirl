@@ -82,7 +82,7 @@ func getInstalledPluginDependencyPlan(ctx *gin.Context) {
 
 func setMarketPluginStatus(ctx *gin.Context) {
 	req := marketPluginStatusRequest{}
-	if err := ctx.BindJSON(&req); err != nil {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -178,7 +178,7 @@ func getMarketPluginScript(ctx *gin.Context) {
 
 func createMarketPluginScript(ctx *gin.Context) {
 	req := marketPluginScriptRequest{}
-	if err := ctx.BindJSON(&req); err != nil {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -206,7 +206,7 @@ func createMarketPluginScript(ctx *gin.Context) {
 
 func saveMarketPluginScript(ctx *gin.Context) {
 	req := marketPluginScriptRequest{}
-	if err := ctx.BindJSON(&req); err != nil {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -284,7 +284,7 @@ func deleteMarketPluginScript(ctx *gin.Context) {
 		return
 	}
 	AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginIdentityFromPath(path), UNKNOWN)
-	ApiNoContent(ctx)
+	ApiOK(ctx, nil)
 }
 
 func marketPluginByID(id string) *common.Function {

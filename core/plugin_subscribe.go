@@ -224,7 +224,7 @@ func initWebPluginList() {
 	})
 	GinApi(POST, "/api/admin/plugin-market/github-proxy", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
-		if err := ctx.BindJSON(&payload); err != nil {
+		if err := ctx.ShouldBindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
@@ -238,7 +238,7 @@ func initWebPluginList() {
 	})
 	GinApi(POST, "/api/admin/plugin-market/github-proxy-options", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
-		if err := ctx.BindJSON(&payload); err != nil {
+		if err := ctx.ShouldBindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
@@ -280,7 +280,7 @@ func initWebPluginList() {
 	})
 	GinApi(POST, "/api/admin/plugin-market/sources", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
-		if err := ctx.BindJSON(&payload); err != nil {
+		if err := ctx.ShouldBindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
@@ -321,7 +321,7 @@ func initWebPluginList() {
 		}
 		savePluginSourceAddresses(next)
 		setPluginMarketItems(listPluginSources())
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 	GinApi(GET, "/api/plugin-market/plugins", handlePluginMarketPlugins)
 }

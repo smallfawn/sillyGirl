@@ -52,7 +52,7 @@ func init() {
 		var req struct {
 			Value map[string]interface{} `json:"value"`
 		}
-		if err := ctx.BindJSON(&req); err != nil {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
@@ -83,7 +83,7 @@ func deletePluginSettings(ctx *gin.Context) {
 	// Deletion is intentionally idempotent. A plugin can expose only a user form
 	// or have no saved values, so the administrator config record may not exist.
 	deletePluginConfig(uuid, ctx.Query("delete_schema") == "true")
-	ApiNoContent(ctx)
+	ApiOK(ctx, nil)
 }
 
 func deletePluginConfig(uuid string, deleteSchema bool) {
