@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import Alert from "ant-design-vue/es/alert";
 import Button from "ant-design-vue/es/button";
-import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-vue-next";
+import { Edit3, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-vue-next";
 import Form from "ant-design-vue/es/form";
 import Input from "ant-design-vue/es/input";
 import Modal from "ant-design-vue/es/modal";
 import Popconfirm from "ant-design-vue/es/popconfirm";
 import Select from "ant-design-vue/es/select";
 import Space from "ant-design-vue/es/space";
+import Spin from "ant-design-vue/es/spin";
 import Switch from "ant-design-vue/es/switch";
 import Table from "ant-design-vue/es/table";
 import Tag from "ant-design-vue/es/tag";
@@ -16,11 +18,15 @@ import { useAdminViewContext } from "../adminViewContext";
 
 const {
   loadNormalUsers,
+  normalUserPluginAuthorizations,
   normalUsers,
+  openNormalUserPluginAuthorizations,
   openNormalUser,
   page,
   removeNormalUser,
   saveNormalUser,
+  saveNormalUserPluginAuthorization,
+  pluginAuthorizations,
   smallcat,
   smallcatOpenids,
   user,
@@ -95,6 +101,33 @@ const {
           }}</Typography.Text>
         </template>
       </Table.Column>
+      <Table.Column title="已授权插件" :width="360">
+        <template #default="{ record }">
+          <Space
+            v-if="normalUserPluginAuthorizations(record).length"
+            wrap
+            size="small"
+          >
+            <Tag
+              v-for="plugin in normalUserPluginAuthorizations(record).slice(
+                0,
+                4,
+              )"
+              :key="plugin.uuid"
+              :color="plugin.authorized ? 'blue' : 'default'"
+            >
+              {{ plugin.title || plugin.uuid }}
+            </Tag>
+            <Tag
+              v-if="normalUserPluginAuthorizations(record).length > 4"
+              color="default"
+            >
+              +{{ normalUserPluginAuthorizations(record).length - 4 }}
+            </Tag>
+          </Space>
+          <Typography.Text v-else class="muted">-</Typography.Text>
+        </template>
+      </Table.Column>
       <Table.Column title="绑定更新时间" :width="180">
         <template #default="{ record }">{{
           timestamp(record.bindings?.updated_at)
@@ -113,6 +146,14 @@ const {
       <Table.Column title="操作" fixed="right" :width="130">
         <template #default="{ record }">
           <Space size="small">
+            <Button
+              type="text"
+              title="管理插件授权"
+              :aria-label="`管理插件授权 ${record.username}`"
+              @click="openNormalUserPluginAuthorizations(record)"
+            >
+              <ShieldCheck :size="16" />
+            </Button>
             <Button
               type="text"
               title="编辑账号"
@@ -232,5 +273,82 @@ const {
         />
       </Form.Item>
     </Form>
+  </Modal>
+
+  <Modal
+    v-model:open="pluginAuthorizations.modalOpen"
+    :title="
+      pluginAuthorizations.user
+        ? `插件授权：${pluginAuthorizations.user.username}`
+        : '插件授权'
+    "
+    width="920px"
+    :footer="null"
+    @cancel="pluginAuthorizations.modalOpen = false"
+  >
+    <Spin :spinning="pluginAuthorizations.loading">
+      <Space direction="vertical" style="width: 100%" size="middle">
+        <Alert
+          type="info"
+          show-icon
+          message="切换开关即可为该用户添加或移除插件授权。"
+        />
+        <Table
+          row-key="uuid"
+          size="small"
+          :data-source="pluginAuthorizations.rows"
+          :pagination="{ pageSize: 10 }"
+        >
+          <Table.Column title="插件" :width="320">
+            <template #default="{ record }">
+              <Space direction="vertical" size="small">
+                <Typography.Text strong>{{
+                  record.title || record.uuid
+                }}</Typography.Text>
+                <Typography.Text class="muted mono">{{
+                  record.uuid
+                }}</Typography.Text>
+              </Space>
+            </template>
+          </Table.Column>
+          <Table.Column title="说明">
+            <template #default="{ record }">
+              <Typography.Paragraph class="muted" :ellipsis="{ rows: 2 }">
+                {{ record.desc || "该插件暂未填写介绍。" }}
+              </Typography.Paragraph>
+            </template>
+          </Table.Column>
+          <Table.Column title="状态" :width="180">
+            <template #default="{ record }">
+              <Space wrap size="small">
+                <Tag :color="record.installed ? 'green' : 'default'">{{
+                  record.installed ? "已安装" : "已失效"
+                }}</Tag>
+                <Tag :color="record.open ? 'blue' : 'default'">{{
+                  record.open ? "已开放" : "未开放"
+                }}</Tag>
+                <Tag v-if="record.uses_smallcat" color="cyan"
+                  >smallcat</Tag
+                >
+              </Space>
+            </template>
+          </Table.Column>
+          <Table.Column title="授权" :width="140">
+            <template #default="{ record }">
+              <Switch
+                :checked="!!record.authorized"
+                :loading="pluginAuthorizations.saving[record.uuid]"
+                checked-children="已授权"
+                un-checked-children="未授权"
+                @change="
+                  (checked: boolean) =>
+                    saveNormalUserPluginAuthorization(record, checked)
+                "
+              />
+            </template>
+          </Table.Column>
+        </Table>
+      </Space>
+    </Spin>
   </Modal>
 </template>

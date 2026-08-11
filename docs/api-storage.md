@@ -22,10 +22,10 @@ Base URL: `http://host:port/api`
 - 对现有资源的变更使用 `POST /resources/:id`；删除被建模为 deletion 子资源，使用 `POST /resources/:id/deletions`，不使用动作式 URL。
 - 分页、筛选和可选关联数据使用查询参数；不使用 `/list`、动词路径、扩展名路由或 `?id=` 定位单资源。
 - 被替换的旧路由不保留兼容别名。
-- 创建成功返回 `201 Created` 和新资源的 `Location`；异步任务返回 `202 Accepted`；成功删除且不返回表示时使用 `204 No Content`。
+- 创建成功返回 `201 Created` 和新资源的 `Location`；异步任务返回 `202 Accepted`；删除和注销成功返回 `200 OK`，`data` 为 `null`。
 - 不存在、冲突、语义校验失败和服务端异常分别返回 `404`、`409`、`422`、`500`，不再用 `200` 包装错误。
 
-除文件下载等原始内容接口外，响应使用统一 envelope：
+除文件下载、图片、静态页面及机器人协议端点等原始内容接口外，所有 REST JSON 响应都严格使用统一 envelope，顶层只包含 `status`、`message`、`data`：
 
 ```json
 {
@@ -35,16 +35,15 @@ Base URL: `http://host:port/api`
 }
 ```
 
-错误响应使用 `application/problem+json`：
+错误响应保留对应的 HTTP 状态码，`status` 固定为 `false`；字段级错误等附加信息统一放入 `data`：
 
 ```json
 {
-  "type": "about:blank",
-  "title": "Unprocessable Entity",
-  "status": 422,
-  "detail": "字段校验失败",
-  "instance": "/api/admin/tasks/task-1",
-  "errors": { "schedule": "Cron 表达式格式错误" }
+  "status": false,
+  "message": "字段校验失败",
+  "data": {
+    "errors": { "schedule": "Cron 表达式格式错误" }
+  }
 }
 ```
 
@@ -526,7 +525,7 @@ print(f"Changed: {resp.changed}")
 - 路由使用资源名、路径参数和 deletion/job 子资源；
 - 已删除旧接口保持 `404`；
 - `401/404/409/422/500` 使用对应 HTTP 状态；
-- 错误响应为 `application/problem+json`；
+- 所有 REST JSON 响应顶层严格包含 `status`、`message`、`data`，且 `status` 只能是布尔值；
 - `GET /api/admin/panels` 一次返回 `qinglong`、`daidai`、`smallcat` 三组集合。
 
 ```bash

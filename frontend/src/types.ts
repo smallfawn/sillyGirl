@@ -60,6 +60,22 @@ export type AdminUserRow = {
     smallcat_openids?: string[];
     updated_at?: number;
   };
+  plugin_authorizations?: AdminUserPluginAuthorization[];
+};
+
+export type AdminUserPluginAuthorization = {
+  uuid: string;
+  title: string;
+  desc?: string;
+  icon?: string;
+  version?: string;
+  author?: string;
+  class?: string;
+  open?: boolean;
+  installed?: boolean;
+  uses_smallcat?: boolean;
+  has_user_form?: boolean;
+  authorized?: boolean;
 };
 
 export type PluginInfo = {

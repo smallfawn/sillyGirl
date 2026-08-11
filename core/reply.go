@@ -108,7 +108,11 @@ func init() {
 		repliesLock.Lock()
 		defer repliesLock.Unlock()
 		var reply Reply
-		data, _ := io.ReadAll(ctx.Request.Body)
+		data, err := io.ReadAll(ctx.Request.Body)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
 		var v = map[string]interface{}{}
 		if err := json.Unmarshal(data, &reply); err != nil {
 			ApiFail(ctx, err.Error())
@@ -204,7 +208,7 @@ func init() {
 			ApiNotFound(ctx, "回复规则不存在")
 			return
 		}
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 }
 

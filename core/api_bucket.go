@@ -327,7 +327,7 @@ func init() {
 	})
 	GinApi(POST, "/api/admin/storage/buckets", RequireAuth, func(ctx *gin.Context) {
 		req := storageBucketRequest{}
-		if err := ctx.BindJSON(&req); err != nil {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}
@@ -373,6 +373,6 @@ func init() {
 			ApiInternalError(ctx, err.Error())
 			return
 		}
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 }

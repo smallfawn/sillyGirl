@@ -202,7 +202,7 @@ func init() {
 			ApiInternalError(ctx, "删除失败："+err.Error())
 			return
 		}
-		ApiNoContent(ctx)
+		ApiOK(ctx, nil)
 	})
 }
 

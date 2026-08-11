@@ -144,7 +144,7 @@ export function useAdminController() {
     return rid;
   }
 
-  function webChatRows(res: ApiEnvelope<WebChatMessage[]> | WebChatMessage[]) {
+  function webChatRows(res: ApiEnvelope<WebChatMessage[]>) {
     const rows = apiData(res);
     return Array.isArray(rows) ? rows : [];
   }
@@ -319,8 +319,8 @@ export function useAdminController() {
   const overviewVersion = computed(() => {
     const info = user.value?.version || {};
     return {
-      local: info.local || "1.1.5",
-      remote: info.remote || info.local || "1.1.5",
+      local: info.local || "1.1.6",
+      remote: info.remote || info.local || "1.1.6",
       source: info.source || "reserved",
       repository: info.repository || "https://github.com/smallfawn/sillyGirl",
     };
@@ -745,9 +745,13 @@ export function useAdminController() {
 
   const {
     normalUsers,
+    normalUserPluginAuthorizations,
     loadNormalUsers,
+    openNormalUserPluginAuthorizations,
     openNormalUser,
+    pluginAuthorizations,
     saveNormalUser,
+    saveNormalUserPluginAuthorization,
     removeNormalUser,
   } = useNormalUsersAdmin(smallcatOpenids);
 
@@ -3267,6 +3271,7 @@ export function useAdminController() {
     navigate,
     nodeDeps,
     normalUsers,
+    normalUserPluginAuthorizations,
     oneBotReceiveURL,
     openActiveContainerPanel,
     openActiveMessageTool,
@@ -3279,6 +3284,7 @@ export function useAdminController() {
     openMessage,
     openNewMarketPluginEditor,
     openNormalUser,
+    openNormalUserPluginAuthorizations,
     openPluginDetail,
     openPluginSourceManager,
     openQinglongPanel,
@@ -3315,6 +3321,7 @@ export function useAdminController() {
     pluginTriggerText,
     pluginUpgradable,
     plugins,
+    pluginAuthorizations,
     qinglong,
     qqGuildWebhookURL,
     realScripts,
@@ -3343,6 +3350,7 @@ export function useAdminController() {
     saveMaster,
     saveMessageRow,
     saveNormalUser,
+    saveNormalUserPluginAuthorization,
     savePluginConfig,
     saveQinglongPanel,
     saveReply,

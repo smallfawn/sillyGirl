@@ -95,7 +95,7 @@ func init() {
 		payload := struct {
 			VerifyCode string `json:"verify_code"`
 		}{}
-		if err := ctx.BindJSON(&payload); err != nil {
+		if err := ctx.ShouldBindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}

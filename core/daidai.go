@@ -45,7 +45,7 @@ type daidaiTokenResponse struct {
 
 func handleDaidaiPanelConnectionTest(ctx *gin.Context) {
 	panel := DaidaiPanel{}
-	if err := ctx.BindJSON(&panel); err != nil {
+	if err := ctx.ShouldBindJSON(&panel); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}
@@ -63,7 +63,7 @@ func handleDaidaiPanelConnectionTest(ctx *gin.Context) {
 
 func handleSaveDaidaiPanel(ctx *gin.Context) {
 	panel := DaidaiPanel{}
-	if err := ctx.BindJSON(&panel); err != nil {
+	if err := ctx.ShouldBindJSON(&panel); err != nil {
 		ApiFail(ctx, err.Error())
 		return
 	}

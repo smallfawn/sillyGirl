@@ -28,7 +28,7 @@ func init() {
 			UUID string `json:"uuid"`
 			Open bool   `json:"open"`
 		}{}
-		if err := ctx.BindJSON(&payload); err != nil {
+		if err := ctx.ShouldBindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
 			return
 		}

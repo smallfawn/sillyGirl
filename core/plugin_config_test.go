@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +17,14 @@ func TestDeletePluginSettingsIsIdempotent(t *testing.T) {
 
 	deletePluginSettings(ctx)
 
-	if ctx.Writer.Status() != http.StatusNoContent {
-		t.Fatalf("expected %d, got %d: %s", http.StatusNoContent, ctx.Writer.Status(), recorder.Body.String())
+	if ctx.Writer.Status() != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, ctx.Writer.Status(), recorder.Body.String())
+	}
+	envelope := map[string]interface{}{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(envelope) != 3 || envelope["status"] != true || envelope["message"] != "成功" || envelope["data"] != nil {
+		t.Fatalf("unexpected response envelope: %#v", envelope)
 	}
 }
