@@ -531,6 +531,7 @@ interface SillyGirlSchemaNode {
     min(value: number): SillyGirlSchemaNode;
     max(value: number): SillyGirlSchemaNode;
     widget(value: string): SillyGirlSchemaNode;
+    visibleWhen(field: string | Array<{ field: string; op?: string; value: any }>, op?: string, value?: any): SillyGirlSchemaNode;
     toJSON(): Record<string, any>;
 }
 declare class SchemaNode implements SillyGirlSchemaNode {
@@ -555,6 +556,7 @@ declare class SchemaNode implements SillyGirlSchemaNode {
     min(value: number): this;
     max(value: number): this;
     widget(value: string): this;
+    visibleWhen(field: string | Array<{ field: string; op?: string; value: any }>, op?: string, value?: any): this;
     toJSON(): Record<string, any>;
 }
 declare const formHelpers: {
