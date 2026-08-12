@@ -45,7 +45,6 @@ test*
 node_modules
 *.tsbuildinfo
 plugins/*
-!plugins/chinaMobileToken.js
 bin
 language
 .VSCodeCounter
