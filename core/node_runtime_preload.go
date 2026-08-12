@@ -68,6 +68,28 @@ const nodeRuntimePreloadScript = `
     SchemaNode.prototype.min = function (value) { this.schema.minimum = value; return this; };
     SchemaNode.prototype.max = function (value) { this.schema.maximum = value; return this; };
     SchemaNode.prototype.widget = function (value) { this.schema["ui:widget"] = value; return this; };
+    function normalizeVisibleOp(op) {
+      var m = {
+        "==": "==", "===": "==",
+        "!=": "!=", "!==": "!=",
+        ">": ">", ">=": ">=", "<": "<", "<=": "<=",
+      };
+      return m[String(op == null ? "==" : op)] || "==";
+    }
+    SchemaNode.prototype.visibleWhen = function (field, op, value) {
+      // 条件可见：声明“当表单内 field 字段的值满足 op 关系 value 时，本字段才显示”。
+      // op 仅支持运算符号：==/===（等于，默认）、!=/!==（不等于）、>/ >=/ </ <=。
+      // field 传数组可声明多条 AND 条件。规则（含运算符号）存入 schema.ui:visibleWhen，
+      // 由前端统一解释，不再依赖前端写死的 account_mode / sync_panel 等特例。
+      let rule;
+      if (Array.isArray(field)) {
+        rule = field.map(function (c) { return { field: c.field, op: normalizeVisibleOp(c.op), value: c.value }; });
+      } else {
+        rule = { field: field, op: normalizeVisibleOp(op), value: value };
+      }
+      this.schema["ui:visibleWhen"] = rule;
+      return this;
+    };
     SchemaNode.prototype.toJSON = function () { return this.schema; };
     function applyOptions(node, options) {
       const values = [], names = [];
