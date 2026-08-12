@@ -117,6 +117,9 @@ var (
 	pythonPackageArgPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~*+]*$`)
 	nodePackageArgPattern    = regexp.MustCompile(`^[A-Za-z0-9@._~/-]+$`)
 	unsafePackageNamePattern = regexp.MustCompile(`[^a-z0-9._-]+`)
+	// 插件文件名允许大写与中文等 Unicode 字母（npm 的 package.json name 才强制小写，见 safePackageName）。
+	// 仅清洗非法文件系统字符，保留用户原始大小写，避免新增插件名被强制转小写。
+	pluginDirNamePattern = regexp.MustCompile(`[^\p{L}\p{N}._-]+`)
 )
 
 var pythonPipxRuntimeDependencies = []string{
@@ -864,8 +867,13 @@ func pluginClassFromExt(ext string) string {
 	}
 }
 
+// safePluginDirName 仅清洗文件名中的非法字符，保留用户原始大小写。
+// 注意：不要在此处调用 safePackageName（它会强制转小写），否则新增插件文件名会被小写化。
+// npm 的 package.json name 仍由 safePackageName 处理（npm 强制小写）。
 func safePluginDirName(name string) string {
-	name = safePackageName(name)
+	name = strings.TrimSpace(name)
+	name = pluginDirNamePattern.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-._")
 	if name == "" {
 		name = "script"
 	}
