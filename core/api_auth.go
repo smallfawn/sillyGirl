@@ -22,10 +22,39 @@ var authBucket = MakeBucket("auths")
 var auths = []*Auth{}
 var authsLock sync.RWMutex
 var password = ""
+var name = ""
 var setupLock sync.Mutex
 var loginAttemptLock sync.Mutex
 var loginAttempts = map[string]*loginAttemptState{}
 var loginAttemptLastPrune time.Time
+
+// credLock 保护并发读写的管理员密码/账号名。password/name 为包级变量，
+// 在 HTTP 处理协程与 storage.Watch 回调间被并发访问，必须加锁避免数据竞争。
+var credLock sync.RWMutex
+
+func getAdminPassword() string {
+	credLock.RLock()
+	defer credLock.RUnlock()
+	return password
+}
+
+func setAdminPassword(p string) {
+	credLock.Lock()
+	defer credLock.Unlock()
+	password = p
+}
+
+func getAdminName() string {
+	credLock.RLock()
+	defer credLock.RUnlock()
+	return name
+}
+
+func setAdminName(n string) {
+	credLock.Lock()
+	defer credLock.Unlock()
+	name = n
+}
 
 const adminJWTExpireSeconds = 3 * 24 * 60 * 60
 const adminPasswordHashCost = bcrypt.DefaultCost
@@ -64,8 +93,8 @@ func init() {
 		}
 		return nil
 	})
-	password = sillyGirl.GetString("password")
-	var name = sillyGirl.GetString("name", "傻妞")
+	setAdminPassword(sillyGirl.GetString("password"))
+	name = sillyGirl.GetString("name", "傻妞")
 	// if password == "" {
 	// password = utils.GenUUID()
 	// console.Info("可视化面板临时账号密码：%s %s", name, password)
@@ -73,13 +102,13 @@ func init() {
 	storage.Watch(sillyGirl, "password", func(old, new, key string) *storage.Final {
 		new = strings.TrimSpace(new)
 		if new == "" {
-			password = ""
+			setAdminPassword("")
 			return &storage.Final{
 				Now: new,
 			}
 		}
 		if isAdminPasswordHash(new) {
-			password = new
+			setAdminPassword(new)
 			return &storage.Final{
 				Now: new,
 			}
@@ -90,19 +119,19 @@ func init() {
 				Error: err,
 			}
 		}
-		password = hashed
+		setAdminPassword(hashed)
 		return &storage.Final{
 			Now: password,
 		}
 	})
 	storage.Watch(sillyGirl, "name", func(old, new, key string) *storage.Final {
-		name = new
+		setAdminName(new)
 		return nil
 	})
 	///可视化部分
 	GinApi(GET, "/api/admin/setup", func(ctx *gin.Context) {
 		ApiOK(ctx, map[string]interface{}{
-			"initialized": strings.TrimSpace(password) != "",
+			"initialized": strings.TrimSpace(getAdminPassword()) != "",
 		})
 	})
 	GinApi(POST, "/api/admin/setup", func(ctx *gin.Context) {
@@ -131,8 +160,8 @@ func init() {
 		}
 		sillyGirl.Set("name", payload.Username)
 		sillyGirl.Set("password", payload.Password)
-		name = payload.Username
-		token, err := createAdminJWTSession(ctx, name)
+		setAdminName(payload.Username)
+		token, err := createAdminJWTSession(ctx, getAdminName())
 		if err != nil {
 			ApiInternalError(ctx, err.Error())
 			return
@@ -221,7 +250,7 @@ func handleAdminLogin(ctx *gin.Context) {
 		return
 	}
 	auth.Username = strings.TrimSpace(auth.Username)
-	if strings.TrimSpace(password) == "" {
+	if strings.TrimSpace(getAdminPassword()) == "" {
 		ApiConflict(ctx, "后台尚未初始化")
 		return
 	}
@@ -292,6 +321,7 @@ func overviewAdapterStatuses() []map[string]interface{} {
 	}{
 		{Platform: "clawbot", Label: "微信 ClawBot"},
 		{Platform: "dingtalk", Label: "钉钉机器人"},
+		{Platform: "flowbot", Label: "FlowBot 微信"},
 		{Platform: "pagermaid", Label: "Pagermaid"},
 		{Platform: "qq", Label: "QQ"},
 		{Platform: "qqguild", Label: "QQ 官方频道机器人"},
@@ -375,7 +405,7 @@ func DestroyAuth(c *gin.Context) {
 }
 
 func RequireAuth(c *gin.Context) {
-	if strings.TrimSpace(password) == "" {
+	if strings.TrimSpace(getAdminPassword()) == "" {
 		ApiError(c, http.StatusUnauthorized, "后台未初始化，请先设置账号密码")
 		c.Abort()
 		return
@@ -592,7 +622,7 @@ func isAdminPasswordHash(value string) bool {
 }
 
 func verifyAdminPassword(raw string) bool {
-	stored := strings.TrimSpace(password)
+	stored := strings.TrimSpace(getAdminPassword())
 	if stored == "" {
 		return false
 	}
@@ -606,7 +636,7 @@ func verifyAdminPassword(raw string) bool {
 	if raw == stored || legacyMatch {
 		if hashed, err := hashAdminPassword(raw); err == nil {
 			sillyGirl.Set("password", hashed)
-			password = hashed
+			setAdminPassword(hashed)
 		}
 		return true
 	}
