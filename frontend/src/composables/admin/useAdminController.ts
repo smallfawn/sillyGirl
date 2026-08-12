@@ -282,6 +282,7 @@ export function useAdminController() {
       { platform: "qqguild", label: "QQ 官方频道机器人" },
       { platform: "web", label: "Web Bot" },
       { platform: "telegram", label: "Telegram Bot" },
+      { platform: "flowbot", label: "FlowBot 微信" },
     ];
     const rows = new Map(
       (user.value?.adapters || []).map((item) => [item.platform, item]),
@@ -2264,6 +2265,8 @@ export function useAdminController() {
     pagermaid_enable: boolean;
     pagermaid_token: string;
     pagermaid_debug: boolean;
+    flowbot_enable: boolean; flowbot_token: string; flowbot_host: string;
+    flowbot_port: string; flowbot_tls: boolean; flowbot_debug: boolean;
     web_chat_public: boolean;
   };
 
@@ -2274,7 +2277,7 @@ export function useAdminController() {
     | "dingtalk"
     | "qqguild"
     | "web"
-    | "pagermaid";
+    | "pagermaid" | "flowbot";
 
   type ClawbotLoginStart = {
     session: string;
@@ -2324,6 +2327,8 @@ export function useAdminController() {
       pagermaid_enable: true,
       pagermaid_token: "",
       pagermaid_debug: false,
+      flowbot_enable: true, flowbot_token: "", flowbot_host: "127.0.0.1",
+      flowbot_port: "7400", flowbot_tls: false, flowbot_debug: false,
       web_chat_public: false,
     } as BotSettingsForm,
   });
@@ -2588,6 +2593,9 @@ export function useAdminController() {
         pagermaid_enable: boolSetting(data["pagermaid.enable"], true),
         pagermaid_token: data["pagermaid.token"] || "",
         pagermaid_debug: boolSetting(data["pagermaid.debug"]),
+        flowbot_enable: boolSetting(data["flowbot.enable"], true), flowbot_token: data["flowbot.token"] || "",
+        flowbot_host: data["flowbot.host"] || "127.0.0.1", flowbot_port: data["flowbot.port"] != null ? String(data["flowbot.port"]) : "7400",
+        flowbot_tls: boolSetting(data["flowbot.tls"]), flowbot_debug: boolSetting(data["flowbot.debug"]),
         web_chat_public: boolSetting(data["sillyGirl.web_chat_public"]),
       });
     } finally {
@@ -2645,6 +2653,9 @@ export function useAdminController() {
         "pagermaid.enable": !!v.pagermaid_enable,
         "pagermaid.token": v.pagermaid_token || "",
         "pagermaid.debug": !!v.pagermaid_debug,
+        "flowbot.enable": !!v.flowbot_enable, "flowbot.token": v.flowbot_token || "",
+        "flowbot.host": v.flowbot_host || "127.0.0.1", "flowbot.port": Number(v.flowbot_port) || 7400,
+        "flowbot.tls": !!v.flowbot_tls, "flowbot.debug": !!v.flowbot_debug,
         "sillyGirl.web_chat_public": !!v.web_chat_public,
       });
       message.success("BOT 配置已保存");
@@ -2667,6 +2678,7 @@ export function useAdminController() {
     if (platform === "dingtalk") return "dingtalk_enable";
     if (platform === "qqguild") return "qqguild_enable";
     if (platform === "pagermaid") return "pagermaid_enable";
+    if (platform === "flowbot") return "flowbot_enable";
     return "";
   }
 

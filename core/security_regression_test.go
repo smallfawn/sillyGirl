@@ -15,17 +15,17 @@ import (
 
 func TestAesDecryptRejectsMalformedCiphertext(t *testing.T) {
 	for _, ciphertext := range [][]byte{nil, {1}, make([]byte, 16)} {
-		if _, err := AesDecrypt(ciphertext, PwdKey); err == nil {
+		if _, err := AesDecrypt(ciphertext, legacyAesKey); err == nil {
 			t.Fatalf("malformed ciphertext of length %d was accepted", len(ciphertext))
 		}
 	}
 
 	plaintext := []byte("round-trip")
-	ciphertext, err := AesEncrypt(plaintext, PwdKey)
+	ciphertext, err := AesEncrypt(plaintext, legacyAesKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := AesDecrypt(ciphertext, PwdKey)
+	decoded, err := AesDecrypt(ciphertext, legacyAesKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestVerifyAdminPasswordMigratesLegacyCiphertext(t *testing.T) {
 	})
 
 	raw := "legacy-password"
-	ciphertext, err := AesEncrypt([]byte(raw), PwdKey)
+	ciphertext, err := AesEncrypt([]byte(raw), legacyAesKey)
 	if err != nil {
 		t.Fatal(err)
 	}

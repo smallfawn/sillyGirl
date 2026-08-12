@@ -1,4 +1,4 @@
-// 插件配置字段的条件可见性（V1.1.8 通用 visibleWhen 机制）
+// 插件配置字段的条件可见性（V1.1.9 通用 visibleWhen 机制）
 // - evalVisibleWhen：解释 schema["ui:visibleWhen"] 声明的规则，不再依赖前端硬编码特例。
 // - pluginConfigFieldVisible：插件配置弹窗字段是否可见，优先按 schema 规则，
 //   旧 account_mode / sync_panel 硬编码分支仅作历史兼容（未来可移除）。

@@ -464,6 +464,67 @@ const {
         </Button>
       </Form>
 
+      <Form
+        v-else-if="botSettingsModal.platform === 'flowbot'"
+        layout="vertical"
+        class="bot-settings-modal-form"
+      >
+        <Form.Item label="启用 FlowBot" html-for="bot-flowbot-enable">
+          <Switch
+            id="bot-flowbot-enable"
+            v-model:checked="botSettings.form.flowbot_enable"
+          />
+        </Form.Item>
+        <Form.Item
+          label="API Key"
+          html-for="bot-flowbot-token"
+          extra="FlowBot 插件 API 的鉴权密钥（api_key）。保存后适配器会自动重启并重新连接。"
+        >
+          <Input.Password
+            id="bot-flowbot-token"
+            v-model:value="botSettings.form.flowbot_token"
+            name="flowbot-token"
+            placeholder="请输入 FlowBot API Key"
+          />
+        </Form.Item>
+        <Form.Item
+          label="主机地址"
+          html-for="bot-flowbot-host"
+          extra="FlowBot 插件进程监听的地址，默认 127.0.0.1（本机）。"
+        >
+          <Input
+            id="bot-flowbot-host"
+            v-model:value="botSettings.form.flowbot_host"
+            name="flowbot-host"
+            placeholder="127.0.0.1"
+          />
+        </Form.Item>
+        <Form.Item
+          label="端口"
+          html-for="bot-flowbot-port"
+          extra="FlowBot 插件监听的端口，默认 7400。"
+        >
+          <Input
+            id="bot-flowbot-port"
+            v-model:value="botSettings.form.flowbot_port"
+            name="flowbot-port"
+            placeholder="7400"
+          />
+        </Form.Item>
+        <Form.Item label="启用 TLS" html-for="bot-flowbot-tls">
+          <Switch
+            id="bot-flowbot-tls"
+            v-model:checked="botSettings.form.flowbot_tls"
+          />
+        </Form.Item>
+        <Form.Item label="FlowBot 调试日志" html-for="bot-flowbot-debug">
+          <Switch
+            id="bot-flowbot-debug"
+            v-model:checked="botSettings.form.flowbot_debug"
+          />
+        </Form.Item>
+      </Form>
+
       <Form v-else layout="vertical" class="bot-settings-modal-form">
         <Form.Item label="启用 Pagermaid" html-for="bot-pagermaid-enable">
           <Switch
