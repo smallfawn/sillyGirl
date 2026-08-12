@@ -53,6 +53,7 @@ import { useRepliesAdmin } from "./useRepliesAdmin";
 import { usePanelsAdmin, type AdminPanelsResponse } from "./usePanelsAdmin";
 import { useStorageAdmin } from "./useStorageAdmin";
 import { useTasksAdmin } from "./useTasksAdmin";
+import { pluginConfigFieldVisible as resolvePluginConfigFieldVisible } from "./visibleWhen";
 
 export function useAdminController() {
   type WebChatMessage = {
@@ -2169,67 +2170,11 @@ export function useAdminController() {
     const kind = pluginPanelKind(field);
     return kind ? `暂无已配置的${labels[kind]}容器，请先到容器管理中添加` : "";
   }
-  const VISIBLE_WHEN_OP_MAP: Record<string, string> = {
-    "==": "==", "===": "==",
-    "!=": "!=", "!==": "!=",
-    ">": ">", ">=": ">=", "<": "<", "<=": "<=",
-  };
-  function normalizeVisibleOp(op: any): string {
-    return VISIBLE_WHEN_OP_MAP[String(op == null ? "==" : op)] || "==";
-  }
-  function compareValues(a: any, b: any): number {
-    const na = Number(a);
-    const nb = Number(b);
-    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
-    return String(a ?? "").localeCompare(String(b ?? ""));
-  }
-  function evalVisibleWhen(
-    rule: any,
-    form: Record<string, any> | undefined,
-  ): boolean {
-    if (!rule) return true;
-    const list = Array.isArray(rule) ? rule : [rule];
-    if (!list.length) return true;
-    return (list as Array<any>).every((c: any) => {
-      const op = normalizeVisibleOp(c.op);
-      const actual = form ? form[c.field] : undefined;
-      const target = c.value;
-      switch (op) {
-        case "!=": return String(actual ?? "") !== String(target ?? "");
-        case ">": return compareValues(actual, target) > 0;
-        case ">=": return compareValues(actual, target) >= 0;
-        case "<": return compareValues(actual, target) < 0;
-        case "<=": return compareValues(actual, target) <= 0;
-        case "==":
-        default: return String(actual ?? "") === String(target ?? "");
-      }
-    });
-  }
   function pluginConfigFieldVisible(field: { key: string; prop: any }) {
-    const prop = (field && field.prop) || {};
-    // 通用：schema 声明的条件可见规则（ui:visibleWhen），由插件自行声明，不再依赖前端硬编码特例。
-    // 规则格式：{ field, op: "=="|"!="|">"|">="|"<"|"<=", value } 或这类对象的数组（多条件 AND）。
-    if (prop["ui:visibleWhen"] !== undefined) {
-      return evalVisibleWhen(prop["ui:visibleWhen"], pluginConfigs.form);
-    }
-    // 以下为旧版硬编码兼容分支，保留以兼容历史插件（未来可移除）。
-    const properties = pluginConfigs.selected?.schema?.properties || {};
-    if (Object.prototype.hasOwnProperty.call(properties, "sync_panel")) {
-      const syncPanel = String(pluginConfigs.form.sync_panel || "");
-      if (field.key === "qinglong_id") return syncPanel === "qinglong";
-      if (field.key === "daidai_id") return syncPanel === "daidai";
-    }
-    if (!Object.prototype.hasOwnProperty.call(properties, "account_mode"))
-      return true;
-    const title = String(field.prop?.title || "");
-    const description = String(field.prop?.description || "");
-    const isManualOnly =
-      field.key === "openid" ||
-      field.key === "manual_openids" ||
-      field.key === "accounts_json" ||
-      /手动\s*openid/i.test(title) ||
-      /仅手动填写模式生效/.test(description);
-    return !isManualOnly || pluginConfigs.form.account_mode === "manual";
+    return resolvePluginConfigFieldVisible(field, {
+      form: pluginConfigs.form,
+      schemaProperties: pluginConfigs.selected?.schema?.properties,
+    });
   }
   async function savePluginConfig() {
     if (!pluginConfigs.selected) return;
