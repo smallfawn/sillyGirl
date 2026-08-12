@@ -29,9 +29,8 @@ const {
   toggleTaskEnabled,
 } = useAdminViewContext();
 
-// 定时任务“触发口令”下方的命令型插件口令速查。
-// 优先匹配当前 command 对应的插件（脚本名 → 插件 id/title），并列出其余口令供参考，
-// 免去用户去插件市场逐个翻看的麻烦。
+// 定时任务“触发口令”下方的参考口令：绑定“触发命令”选择。
+// 选择触发命令后，自动按该命令对应插件的 [rule] 显示参考口令；未匹配到插件时回退列出全部带 rule 插件作参考。
 const pluginRuleOptions = computed(() => {
   const list = (plugins.list || []) as Array<any>;
   return list
@@ -40,8 +39,10 @@ const pluginRuleOptions = computed(() => {
     .filter((x) => x.ruleText);
 });
 
+const selectedCommand = computed(() => String(tasks.form.command || "").trim());
+
 const currentPluginRule = computed(() => {
-  const cmd = String(tasks.form.command || "");
+  const cmd = selectedCommand.value;
   const base = cmd
     .replace(/^(node|python)\s+/i, "")
     .replace(/\.(js|py)$/i, "")
@@ -57,6 +58,12 @@ const currentPluginRule = computed(() => {
     ) || null
   );
 });
+
+// 仅在选择了触发命令后才展示参考口令；优先展示当前命令插件的 rule，未匹配时回退到全部插件列表。
+const showRuleHint = computed(() => !!selectedCommand.value);
+const ruleHintItems = computed(() =>
+  currentPluginRule.value ? [currentPluginRule.value] : pluginRuleOptions.value,
+);
 
 function ensurePluginRules() {
   if (!((plugins.list || []) as Array<any>).length) {
@@ -181,8 +188,14 @@ function fillTrigger(ruleText: string) {
           allow-clear
           placeholder="例如：查询 account-a"
         />
-        <div class="trigger-rule-hint">
-          <div class="trigger-rule-hint__title">参考口令（点击填入）</div>
+        <div class="trigger-rule-hint" v-if="showRuleHint">
+          <div class="trigger-rule-hint__title">
+            {{
+              currentPluginRule
+                ? "参考口令（来自当前触发命令插件，点击填入）"
+                : "参考口令（点击填入）"
+            }}
+          </div>
           <div
             v-if="currentPluginRule"
             class="trigger-rule-hint__current"
@@ -193,11 +206,9 @@ function fillTrigger(ruleText: string) {
             <span class="mono">{{ currentPluginRule.title }}</span>
             <span class="mono trigger-rule-hint__rule">{{ currentPluginRule.ruleText }}</span>
           </div>
-          <template v-if="pluginRuleOptions.length">
+          <template v-else>
             <div
-              v-for="opt in pluginRuleOptions.filter(
-                (o) => !currentPluginRule || o.id !== currentPluginRule.id,
-              )"
+              v-for="opt in ruleHintItems"
               :key="opt.id"
               class="trigger-rule-hint__item"
               @click="fillTrigger(opt.ruleText)"
@@ -206,10 +217,13 @@ function fillTrigger(ruleText: string) {
               <span class="mono">{{ opt.title }}</span>
               <span class="mono trigger-rule-hint__rule">{{ opt.ruleText }}</span>
             </div>
+            <div v-if="pluginRuleOptions.length" class="trigger-rule-hint__note">
+              已选命令未匹配到带 rule 的插件，以上为全部可用插件口令
+            </div>
+            <div v-else class="trigger-rule-hint__empty">
+              暂无可用插件口令，请先在插件市场安装带 [rule] 的插件
+            </div>
           </template>
-          <div v-else class="trigger-rule-hint__empty">
-            暂无可用插件口令，请先在插件市场安装带 [rule] 的插件
-          </div>
         </div>
       </Form.Item>
       <Form.Item label="接收平台" html-for="task-platform"
