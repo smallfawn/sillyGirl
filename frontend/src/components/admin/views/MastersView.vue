@@ -67,7 +67,10 @@ const { loadMasters, masters, page, removeMaster, saveMaster } =
           id="master-platform"
           v-model:value="masters.form.platform"
           :options="masters.platforms" /></Form.Item
-      ><Form.Item label="账号" html-for="master-account"
+      ><Form.Item
+        label="账号"
+        html-for="master-account"
+        help="不知道账号？下载官方插件后，向机器人发送「我是谁」即可查询本账号。"
         ><Input
           id="master-account"
           name="master-account"

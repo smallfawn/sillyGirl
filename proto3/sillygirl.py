@@ -338,8 +338,35 @@ class SchemaNode:
         self.schema["ui:widget"] = value
         return self
 
+    def visibleWhen(self, field, op="==", value=None):
+        # 条件可见：声明“当表单内 field 字段的值满足 op 关系 value 时，本字段才显示”。
+        # op 仅支持运算符号：==/===（等于，默认）、!=/!==（不等于）、>/ >=/ </ <=。
+        # field 传列表可声明多条 AND 条件。规则（含运算符号）存入 schema.ui:visibleWhen，
+        # 由前端统一解释，不再依赖前端写死的 account_mode / sync_panel 等特例。
+        if isinstance(field, list):
+            rule = [
+                {"field": c["field"], "op": _normalize_visible_op(c.get("op", "==")), "value": c.get("value")}
+                for c in field
+            ]
+        else:
+            rule = {"field": field, "op": _normalize_visible_op(op), "value": value}
+        self.schema["ui:visibleWhen"] = rule
+        return self
+
     def toJSON(self):
         return self.schema
+
+
+_VISIBLE_WHEN_OP_MAP = {
+    "==": "==", "===": "==",
+    "!=": "!=", "!==": "!=",
+    ">": ">", ">=": ">=", "<": "<", "<=": "<=",
+}
+
+
+def _normalize_visible_op(op):
+    return _VISIBLE_WHEN_OP_MAP.get(str(op if op is not None else "=="), "==")
+
 
 def _apply_schema_options(node, options):
     if isinstance(options, list):
