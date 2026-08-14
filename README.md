@@ -2,7 +2,9 @@
 
 [![Version](https://img.shields.io/badge/version-v1.1.6-1677ff)](VERSION)
 [![Go](https://img.shields.io/badge/Go-1.18+-00ADD8?logo=go)](go.mod)
-
+## 大环境不好求职
+本人大专毕业！学习逆向5年，移动应用；PC应用；浏览器网页逆向相关！JSVMP；混淆等；可用AI工具提高开发效率！
+目标薪资10K
 > SillyGirl 文档导航。功能说明、配置方法和示例统一维护在 `docs/` 的四个板块中。
 
 ## 文档导航
